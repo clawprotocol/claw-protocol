@@ -1459,9 +1459,42 @@ test.describe("Core paid journey acceptance", () => {
     expect(afterPartial).toMatch(/\$48,000/);
     expect(afterPartial).toMatch(/monthly/i);
 
+    let releaseSnapshotPost = () => {};
+    const snapshotPostHeld = new Promise<void>((resolve) => {
+      releaseSnapshotPost = resolve;
+    });
+    let heldCompleteSnapshotPost = false;
+    await page.route("**/canonical-review-snapshot", async (route) => {
+      if (route.request().method() === "POST" && !heldCompleteSnapshotPost) {
+        heldCompleteSnapshotPost = true;
+        await snapshotPostHeld;
+      }
+      await route.continue();
+    });
     await page.getByTestId("payment-clarification-answer").fill("Invoice once on October 1, 2026. Payment due net 60.");
+    const snapshotPost = page.waitForRequest(
+      (req) => req.url().includes("/canonical-review-snapshot") && req.method() === "POST",
+      { timeout: 90_000 },
+    );
+    const snapshotPostDone = page.waitForResponse(
+      (res) =>
+        res.url().includes("/canonical-review-snapshot") &&
+        res.request().method() === "POST" &&
+        res.ok(),
+      { timeout: 90_000 },
+    );
     await page.getByTestId("payment-clarification-apply").click();
-    await expect(panel).toHaveCount(0, { timeout: 90_000 });
+    await snapshotPost;
+    await page.getByRole("button", { name: "LawDog home" }).click();
+    await expect(page).toHaveURL(/\/app\/?$/);
+    await expect(page.getByTestId("simple-pro-final-review-document")).toHaveCount(0);
+    await expect(page.getByTestId("paid-pro-visible-document-shell")).toHaveCount(0);
+    await expect(page.getByTestId("payment-clarification-panel")).toHaveCount(0);
+    expect(await page.locator("body").innerText()).not.toMatch(/Payment is due net 60/i);
+    releaseSnapshotPost();
+    await snapshotPostDone;
+    await page.unroute("**/canonical-review-snapshot");
+    await page.goto(`/app/create?agreementId=${drafted.agreementId}`, { waitUntil: "domcontentloaded" });
     let afterComplete = "";
     await expect
       .poll(async () => {
@@ -1470,6 +1503,11 @@ test.describe("Core paid journey acceptance", () => {
         return /October 1, 2026/.test(fees) && /net\s*60|net sixty/i.test(fees) && !/monthly/i.test(fees);
       }, { timeout: 90_000 })
       .toBeTruthy();
+    await expect(page).toHaveURL(new RegExp(`/app/create\\?agreementId=${drafted.agreementId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    await expect(
+      page.getByTestId("payment-clarification-panel"),
+      "editable reopen after delayed complete save must restore finished clarification from paper",
+    ).toHaveCount(0, { timeout: 20_000 });
     const fees = afterComplete.split(/4\.\s+/i)[0] || afterComplete;
     expect(fees).toMatch(/October 1, 2026/);
     expect(fees).toMatch(/net\s*60|net sixty/i);

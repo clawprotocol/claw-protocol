@@ -19,6 +19,7 @@ import { PaidProReviewNextStepCallout } from "./PaidProReviewNextStepCallout";
 import { PaidProReviewStatusPanel } from "./PaidProReviewStatusPanel";
 import { PaidProSignerSavedConfirmationBanner } from "./PaidProSignerSavedConfirmationBanner";
 import { PaymentClarificationAdvisory } from "./PaymentClarificationAdvisory";
+import { getPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import {
   PAID_PRO_FINAL_VERSION_HEADLINE,
   resolvePaidProFinalVersionCopy,
@@ -772,6 +773,7 @@ export function SimpleProFinalReviewScreen({
         <>
           <PaymentClarificationAdvisory
             agreementId={agreementId}
+            revisionId={getPaidProSourceOfTruth()?.hash}
             intakeText={intakeText}
             body={canonicalPlainForRender || paidReviewPlain}
           />
@@ -786,6 +788,7 @@ export function SimpleProFinalReviewScreen({
           {postDocumentGuidance}
           <PaymentClarificationAdvisory
             agreementId={agreementId}
+            revisionId={getPaidProSourceOfTruth()?.hash}
             intakeText={intakeText}
             body={canonicalPlainForRender || paidReviewPlain}
           />

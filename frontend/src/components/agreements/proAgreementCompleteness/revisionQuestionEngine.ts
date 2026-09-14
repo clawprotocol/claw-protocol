@@ -33,7 +33,7 @@ export const UNCONFIRMED_PAYMENT_DUE_QUESTION = "When is payment due?";
 
 const PAYMENT_SECTION_HEADING_RE =
   /^(\d+)\.\s+(?:Fees?(?:\s+and\s+Payment)?|Payment|Compensation|Invoicing)\b\.?/im;
-const NEXT_TOP_LEVEL_SECTION_RE = /^\d+\.(?!\d)\s+\S/m;
+const NEXT_TOP_LEVEL_SECTION_RE = /^(?:\d{1,2})\.(?!\d)\s+\S/m;
 
 /** Fees/Payment clause only — Term or recital dates are not payment confirmation. */
 export function paymentSectionText(doc: string): string {

@@ -21,10 +21,12 @@ import {
   persistPaymentClarification,
   queuePaymentClarificationPending,
   readPaymentClarification,
+  readPaymentClarificationIntake,
   registerPaymentClarificationApply,
   resolvePaymentClarificationScope,
   samePaymentApplyOwner,
 } from "./paymentClarificationSession";
+import { beginPaidProRevisionOperation } from "./paidProRevisionOperation";
 
 const BODY = [
   "3. Fees and Payment",
@@ -161,6 +163,7 @@ describe("payment clarification exact identity", () => {
       organizationId: OWNER_A.organizationId,
       draftSessionId: "draft-a",
       agreementId: "agr-a",
+      revisionId: OWNER_A.revisionId,
     });
 
     expect(readPaymentClarification(OWNER_A)?.pendingAnswer).toBe("Invoice monthly");
@@ -267,7 +270,8 @@ describe("pending versus confirmed payment answers", () => {
     ).toContain(UNCONFIRMED_PAYMENT_TIMING_QUESTION);
 
     markPaymentClarificationApplied(OWNER_A, "Invoice monthly", "rev-a2", "req-monthly");
-    const applied = readPaymentClarification(OWNER_A);
+    expect(readPaymentClarification(OWNER_A)).toBeNull();
+    const applied = readPaymentClarification({ ...OWNER_A, revisionId: "rev-a2" });
     expect(applied?.applyStatus).toBe("applied");
     expect(applied?.appliedAnswers).toBe("Invoice monthly");
     expect(applied?.pendingAnswer).toBe("");
@@ -322,16 +326,63 @@ describe("pending versus confirmed payment answers", () => {
   });
 });
 
+describe("revision-aware records and handlers", () => {
+  it("reading agreement A revision V2 does not return V1’s record or handler", async () => {
+    persistPaymentClarification({
+      ...OWNER_A,
+      intake: CORE_PAID_JOURNEY_FILLED_INTAKE,
+      appliedAnswers: "Invoice monthly",
+      applyStatus: "applied",
+    });
+    const v2 = { ...OWNER_A, revisionId: "rev-a2" };
+    expect(readPaymentClarification(v2)).toBeNull();
+    expect(readPaymentClarification(OWNER_A)?.appliedAnswers).toBe("Invoice monthly");
+
+    const handled: string[] = [];
+    registerPaymentClarificationApply(OWNER_A, async (answer) => {
+      handled.push(`v1:${answer}`);
+    });
+    await expect(applyPaymentClarificationAnswer("Invoice weekly", v2)).rejects.toThrow(
+      /payment_clarification_apply_unavailable/,
+    );
+    expect(handled).toEqual([]);
+    expect(readPaymentClarification(v2)).toBeNull();
+  });
+
+  it("does not silently carry confirmed status onto a newer revision", () => {
+    persistPaymentClarification({
+      ...OWNER_A,
+      intake: CORE_PAID_JOURNEY_FILLED_INTAKE,
+      appliedAnswers: "Invoice once on October 1, 2026. Payment due net 60.",
+      applyStatus: "applied",
+    });
+    const v2 = { ...OWNER_A, revisionId: "rev-a2" };
+    expect(
+      paymentClarificationQuestions({
+        intake: CORE_PAID_JOURNEY_FILLED_INTAKE,
+        appliedAnswers: readPaymentClarification(v2)?.appliedAnswers,
+        authorizedBody: BODY,
+        body: BODY,
+      }),
+    ).toContain(UNCONFIRMED_PAYMENT_TIMING_QUESTION);
+    expect(readPaymentClarificationIntake(v2)).toBe(CORE_PAID_JOURNEY_FILLED_INTAKE);
+    expect(readPaymentClarificationIntake(v2)).not.toMatch(/Invoice once on October 1/);
+  });
+});
+
 describe("stale payment-apply responses", () => {
   it("does not apply agreement A’s delayed result to B, another org, or a newer revision", () => {
     const captured = capturePaymentApplyTarget({
       ...OWNER_A,
       requestId: "req-a",
     });
+    beginPaidProRevisionOperation(captured);
     expect(
       paymentApplyTargetMatches(captured, {
-        ...OWNER_A,
-        requestId: "req-a",
+        userId: OWNER_A.userId,
+        organizationId: OWNER_A.organizationId,
+        agreementId: OWNER_A.agreementId,
+        revisionId: OWNER_A.revisionId,
       }),
     ).toBe(true);
     expect(paymentApplyTargetMatches(captured, { ...OWNER_B, requestId: "req-a" })).toBe(false);
@@ -341,6 +392,15 @@ describe("stale payment-apply responses", () => {
         ...OWNER_A,
         revisionId: "rev-a2",
         requestId: "req-a",
+      }),
+    ).toBe(false);
+    beginPaidProRevisionOperation({ ...OWNER_A, requestId: "req-a2" });
+    expect(
+      paymentApplyTargetMatches(captured, {
+        userId: OWNER_A.userId,
+        organizationId: OWNER_A.organizationId,
+        agreementId: OWNER_A.agreementId,
+        revisionId: OWNER_A.revisionId,
       }),
     ).toBe(false);
     expect(samePaymentApplyOwner(captured, OWNER_B)).toBe(false);
@@ -429,6 +489,25 @@ describe("fresh-context authorized reopen", () => {
         body: BODY,
       }),
     ).toContain(UNCONFIRMED_PAYMENT_TIMING_QUESTION);
+  });
+
+  it("does not treat a wrapped invoice year as a new section heading", () => {
+    const wrapped = [
+      "3. Fees and Payment",
+      "Client will pay Consultant a fixed fee of $48,000. Consultant will invoice the fixed fee once on October 1,",
+      "",
+      "2026. Payment is due net 60.",
+      "4. Term",
+      "Twelve months starting October 1, 2026.",
+    ].join("\n");
+    expect(
+      paymentClarificationQuestions({
+        intake: CORE_PAID_JOURNEY_FILLED_INTAKE,
+        appliedAnswers: "",
+        authorizedBody: wrapped,
+        body: wrapped,
+      }),
+    ).toEqual([]);
   });
 
   it("does not treat Term dates as payment-section confirmation", () => {

@@ -67,6 +67,9 @@ CONTENT_FP="$(
       backend/agreements/premium_full_draft_quality_gate.py \
       frontend/src/components/agreements/proAgreementCompleteness/revisionQuestionEngine.ts \
       frontend/src/components/agreements/paymentClarificationSession.ts \
+      frontend/src/components/agreements/paidProRevisionOperation.ts \
+      frontend/src/components/agreements/paidProUserApprovedRevisionCommit.ts \
+      frontend/src/agreement/canonicalReviewSnapshotApi.ts \
       frontend/src/components/agreements/PaymentClarificationAdvisory.tsx \
       frontend/src/components/agreements/paidProVisibleDocumentShell.tsx \
       frontend/src/components/agreements/SimpleProFinalReviewScreen.tsx \

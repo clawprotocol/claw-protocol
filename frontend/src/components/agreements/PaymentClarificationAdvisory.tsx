@@ -6,9 +6,11 @@ import {
   resolvePaymentClarificationScope,
   subscribePaymentClarification,
 } from "./paymentClarificationSession";
+import { getPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 
 export function PaymentClarificationAdvisory(args: {
   agreementId?: string | null;
+  revisionId?: string | null;
   intakeText?: string | null;
   body: string;
   accepted?: boolean;
@@ -19,10 +21,15 @@ export function PaymentClarificationAdvisory(args: {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => subscribePaymentClarification(() => setTick((n) => n + 1)), []);
 
-  const scope = resolvePaymentClarificationScope({ agreementId: args.agreementId });
+  const revisionId = (args.revisionId || getPaidProSourceOfTruth()?.hash || "").trim();
+  const scope = resolvePaymentClarificationScope({
+    agreementId: args.agreementId,
+    revisionId: revisionId || undefined,
+  });
   const stored = readPaymentClarification(scope);
   const intake = (stored?.intake || args.intakeText || "").trim();
-  const appliedAnswers = (stored?.appliedAnswers || "").trim();
+  const appliedAnswers =
+    stored?.revisionId && stored.revisionId === revisionId ? (stored.appliedAnswers || "").trim() : "";
   const pendingAnswer = (stored?.pendingAnswer || "").trim();
   const applyStatus = stored?.applyStatus || "idle";
   const questions = useMemo(

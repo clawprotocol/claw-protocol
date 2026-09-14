@@ -392,6 +392,7 @@ export function PaidProVisibleDocumentShell({
     <div className="w-full max-w-full min-w-0">
       <PaymentClarificationAdvisory
         agreementId={displayContext?.agreementId}
+        revisionId={authorityHash || undefined}
         intakeText={displayContext?.intakeText}
         body={renderPlain || authoritativePlain}
       />

@@ -176,7 +176,7 @@ import {
 } from "../../launch/simpleProduct/guidedWorkflowCopy";
 import { logStarterUpgradeTransition } from "../../launch/simpleProduct/starterUpgradeTransition";
 import { readSignedInAuthenticatedWorkspaceSession } from "../../launch/completedAgreementViewContext";
-import { getOrgId } from "../../launch/orgContext";
+import { getOrgId, subscribeToOrgContextChanges } from "../../launch/orgContext";
 import { logHomeCreateSubmit } from "../../launch/homeCreateSubmit";
 import {
   getStarterProRefineCtaExperiment,
@@ -695,11 +695,18 @@ import {
   persistPaymentClarification,
   queuePaymentClarificationPending,
   readPaymentClarification,
+  readPaymentClarificationIntake,
   registerPaymentClarificationApply,
   resolvePaymentClarificationScope,
   samePaymentApplyOwner,
   type PaymentApplyTarget,
 } from "./paymentClarificationSession";
+import {
+  beginPaidProRevisionOperation,
+  endPaidProRevisionOperation,
+  setPaidProLiveRevisionView,
+} from "./paidProRevisionOperation";
+import { commitPaidProUserApprovedRevisionCorpus } from "./paidProUserApprovedRevisionCommit";
 import {
   hasCanonicalReviewCorpusForRender,
   PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN,
@@ -3997,6 +4004,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       readCreateReviewAgreementResumeId() ||
       ""
     ).trim();
+    const revisionId =
+      getPaidProSourceOfTruth()?.hash?.trim() ||
+      hashPaidProCorpus(getPaidProSourceOfTruthText() || "");
     if (user.isAuthenticated && organizationId) {
       if (agreementId) {
         bindPaymentClarificationDraftToAgreement({
@@ -4004,20 +4014,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           organizationId,
           draftSessionId: paymentDraftSessionIdRef.current,
           agreementId,
+          revisionId,
         });
       }
       const stored = readPaymentClarification(
         resolvePaymentClarificationScope({
           agreementId: agreementId || undefined,
           draftSessionId: paymentDraftSessionIdRef.current,
+          revisionId: revisionId || undefined,
         }),
       );
-      if (stored?.appliedAnswers) premiumLastGapAnswersRef.current = stored.appliedAnswers;
+      if (stored?.appliedAnswers && stored.revisionId === revisionId) {
+        premiumLastGapAnswersRef.current = stored.appliedAnswers;
+      }
     }
     const scope = resolvePaymentClarificationScope({
       agreementId: agreementId || undefined,
       draftSessionId: paymentDraftSessionIdRef.current,
-      revisionId: getPaidProSourceOfTruth()?.hash || null,
+      revisionId: revisionId || undefined,
     });
     registerPaymentClarificationApply(scope, async (answer) => {
       const liveUser = resolveCurrentUser();
@@ -4026,7 +4040,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (!liveUser.isAuthenticated || !liveOrg || !liveAgreementId) {
         throw new Error("payment_clarification_apply_unavailable");
       }
-      const revisionId =
+      const liveRevision =
         getPaidProSourceOfTruth()?.hash?.trim() ||
         hashPaidProCorpus(getPaidProSourceOfTruthText() || "");
       const requestId = createPaymentApplyRequestId();
@@ -4034,22 +4048,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         userId: liveUser.id,
         organizationId: liveOrg,
         agreementId: liveAgreementId,
-        revisionId,
+        revisionId: liveRevision,
       };
       const captured = capturePaymentApplyTarget({ ...applyScope, requestId });
+      beginPaidProRevisionOperation(captured);
       const intake = (premiumGapBaseIntakeRef.current || intakeCombinedRef.current || "").trim();
       const priorApplied = readPaymentClarification(applyScope)?.appliedAnswers || "";
       const next = [priorApplied, answer.trim()].filter(Boolean).join("\n");
       queuePaymentClarificationPending(applyScope, answer, intake);
       markPaymentClarificationApplying(applyScope, requestId);
-      const currentTarget = (): PaymentApplyTarget => ({
+      const currentTarget = () => ({
         userId: resolveCurrentUser().id,
         organizationId: (getOrgId() || "").trim(),
         agreementId: (reviewAgreementIdRef.current || "").trim(),
         revisionId:
           getPaidProSourceOfTruth()?.hash?.trim() ||
           hashPaidProCorpus(getPaidProSourceOfTruthText() || ""),
-        requestId,
       });
       try {
         const revise = runPaymentClarificationRevisionRef.current;
@@ -4065,10 +4079,43 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           requestId,
         );
         throw err;
+      } finally {
+        endPaidProRevisionOperation(requestId);
       }
     });
     return () => registerPaymentClarificationApply(scope, null);
-  }, [reviewAgreementId]);
+  }, [reviewAgreementId, reviewDocRefreshTick]);
+  useEffect(() => {
+    const syncLiveView = () => {
+      const user = resolveCurrentUser();
+      const organizationId = (getOrgId() || "").trim();
+      const agreementId = (
+        reviewAgreementId ||
+        reviewAgreementIdRef.current ||
+        readCreateReviewAgreementResumeId() ||
+        ""
+      ).trim();
+      const revisionId =
+        getPaidProSourceOfTruth()?.hash?.trim() ||
+        hashPaidProCorpus(getPaidProSourceOfTruthText() || "");
+      if (user.isAuthenticated && organizationId && agreementId && revisionId) {
+        setPaidProLiveRevisionView({
+          userId: user.id,
+          organizationId,
+          agreementId,
+          revisionId,
+        });
+        return;
+      }
+      setPaidProLiveRevisionView(null);
+    };
+    syncLiveView();
+    const unsubscribe = subscribeToOrgContextChanges(() => syncLiveView());
+    return () => {
+      unsubscribe();
+      setPaidProLiveRevisionView(null);
+    };
+  }, [reviewAgreementId, reviewDocRefreshTick]);
   const premiumPostGenerateTenetAskedRef = useRef(false);
   const premiumPostGenerateGapsActiveRef = useRef(false);
   const premiumGapBaseIntakeRef = useRef<string>("");
@@ -11078,9 +11125,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             readCreateReviewAgreementResumeId() ||
             ""
           ).trim();
+          const paymentRevisionId =
+            getPaidProSourceOfTruth()?.hash?.trim() ||
+            hashPaidProCorpus(getPaidProSourceOfTruthText() || mergedIntake);
           const paymentScope = resolvePaymentClarificationScope({
             agreementId: paymentAgreementId || undefined,
             draftSessionId: paymentDraftSessionIdRef.current,
+            revisionId: paymentRevisionId || undefined,
           });
           if (paymentScope && mergedIntake.trim()) {
             if (paymentAgreementId) {
@@ -11094,6 +11145,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               ...paymentScope,
               agreementId: paymentAgreementId || paymentScope.agreementId,
               draftSessionId: paymentDraftSessionIdRef.current,
+              revisionId: paymentRevisionId || paymentScope.revisionId,
               intake: mergedIntake,
             });
           }
@@ -12413,9 +12465,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             readCreateReviewAgreementResumeId() ||
             ""
           ).trim();
+          const paymentRevisionId =
+            getPaidProSourceOfTruth()?.hash?.trim() ||
+            hashPaidProCorpus(getPaidProSourceOfTruthText() || mergedIntake);
           const paymentScope = resolvePaymentClarificationScope({
             agreementId: paymentAgreementId || undefined,
             draftSessionId: paymentDraftSessionIdRef.current,
+            revisionId: paymentRevisionId || undefined,
           });
           if (paymentScope) {
             if (paymentAgreementId) {
@@ -12429,6 +12485,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               ...paymentScope,
               agreementId: paymentAgreementId || paymentScope.agreementId,
               draftSessionId: paymentDraftSessionIdRef.current,
+              revisionId: paymentRevisionId || paymentScope.revisionId,
               intake: mergedIntake,
             });
           }
@@ -17889,92 +17946,105 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const commitPaidProUserApprovedRevision = React.useCallback(
-    async (text: string, reason: string): Promise<string> => {
+    async (text: string, reason: string, operation?: PaymentApplyTarget): Promise<string> => {
       const raw = text.trim();
       if (!raw) return "";
+      const liveUser = resolveCurrentUser();
+      const liveOrg = (getOrgId() || "").trim();
       const agreementIdForRevision = (
+        operation?.agreementId ||
         reviewAgreementIdRef.current ||
         readCreateReviewAgreementResumeId() ||
         ""
       ).trim();
-      if (!agreementIdForRevision) {
+      if (!agreementIdForRevision || !liveUser.isAuthenticated || !liveOrg) {
         setProFullDraftCustomGateMessage(
           "Server review snapshot requires an agreement id before saving revisions. Reload or contact support@lawdog.me.",
         );
         return "";
       }
+      const liveRevision =
+        operation?.revisionId ||
+        getPaidProSourceOfTruth()?.hash?.trim() ||
+        hashPaidProCorpus(getPaidProSourceOfTruthText() || "");
+      const commitOperation = beginPaidProRevisionOperation(
+        operation || {
+          userId: liveUser.id,
+          organizationId: liveOrg,
+          agreementId: agreementIdForRevision,
+          revisionId: liveRevision,
+          requestId: createPaymentApplyRequestId(),
+        },
+      );
       const docTextBefore = agreementDocumentText;
       const acceptedBefore = acceptedReviewCorpusRef.current ?? "";
       const finalizedBefore = finalizedSigningCorpusRef.current ?? "";
       clearAcceptedReviewSnapshotRef();
-      const prepared = await prepareCommercialReviewSnapshotAuthority({
-        agreementId: agreementIdForRevision,
-        corpusPlain: raw,
-        generationSessionId: getOrInitSessionAgreementGenerationId(),
-      });
-      if (!prepared.ok) {
-        setProFullDraftCustomGateMessage(
-          "Could not lock this revision on the server. Retry or contact support@lawdog.me.",
-        );
-        if (import.meta.env.DEV) {
-          // eslint-disable-next-line no-console
-          console.warn("[canonical-review-snapshot] revision prepare failed", prepared.code);
+      try {
+        const committed = await commitPaidProUserApprovedRevisionCorpus({
+          text: raw,
+          reason,
+          operation: commitOperation,
+          generationSessionId: getOrInitSessionAgreementGenerationId(),
+          draft: draft ?? null,
+          intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+          applyDisplayMutations: (stable) => {
+            hydratedPremiumBodyRef.current = stable;
+            lastPremiumWinningCorpusRef.current = stable;
+            premiumPipelineOutputBodyRef.current = stable;
+            acceptedReviewCorpusRef.current = stable;
+            authoritativeAgreementSnapshotRef.current = stable;
+            finalizedSigningCorpusRef.current = stable;
+            updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, stable, reason, {
+              paidProFlow: true,
+              source: reason,
+            });
+            agreementDocumentDirtyRef.current = true;
+            setAgreementDocumentText(stable);
+            tracePaidProCorpusMutation({
+              store: "acceptedReviewCorpusRef",
+              caller: "commitPaidProUserApprovedRevision",
+              stage: reason,
+              oldText: acceptedBefore,
+              newText: stable,
+              sourceAfter: "accepted_review",
+            });
+            tracePaidProCorpusMutation({
+              store: "finalizedSigningCorpusRef",
+              caller: "commitPaidProUserApprovedRevision",
+              stage: reason,
+              oldText: finalizedBefore,
+              newText: stable,
+              sourceAfter: "finalized_signing",
+            });
+            tracePaidProCorpusMutation({
+              store: "agreementDocumentText",
+              caller: "commitPaidProUserApprovedRevision",
+              stage: reason,
+              oldText: docTextBefore,
+              newText: stable,
+              sourceAfter: "accepted_review",
+            });
+            scheduleAgreementDocSync(stable);
+            setGuidedAuthVersionNonce((n) => n + 1);
+            bumpPremiumSurfaceGateTick();
+            setReviewDocRefreshTick((n) => n + 1);
+          },
+        });
+        if (!committed.ok) {
+          setProFullDraftCustomGateMessage(
+            "Could not lock this revision on the server. Retry or contact support@lawdog.me.",
+          );
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn("[canonical-review-snapshot] revision prepare failed", committed.code);
+          }
+          return "";
         }
-        return "";
+        return committed.corpus;
+      } finally {
+        endPaidProRevisionOperation(commitOperation.requestId);
       }
-      const stable = prepared.snapshot.corpus_plain;
-      replacePaidProPipelineAcceptedCorpusAfterApprovedRevision(stable, {
-        agreementId: agreementIdForRevision,
-        organizationId: getOrgId(),
-      });
-      const record = establishPaidProSourceOfTruth({
-        text: stable,
-        draft: draft ?? null,
-        intakeText: currentPremiumMergedIntakeKey || intakeCombined,
-        // Explicit user-approved revision may legitimately shorten the body (edits/deletions).
-        allowShorterOverwrite: true,
-      });
-      hydratedPremiumBodyRef.current = stable;
-      lastPremiumWinningCorpusRef.current = stable;
-      premiumPipelineOutputBodyRef.current = stable;
-      acceptedReviewCorpusRef.current = stable;
-      authoritativeAgreementSnapshotRef.current = stable;
-      finalizedSigningCorpusRef.current = stable;
-      updateLastKnownGoodAuthoritativeDraftRef(lastKnownGoodAuthoritativeDraftRef, stable, reason, {
-        paidProFlow: true,
-        source: reason,
-      });
-      agreementDocumentDirtyRef.current = true;
-      setAgreementDocumentText(stable);
-      tracePaidProCorpusMutation({
-        store: "acceptedReviewCorpusRef",
-        caller: "commitPaidProUserApprovedRevision",
-        stage: reason,
-        oldText: acceptedBefore,
-        newText: stable,
-        sourceAfter: "accepted_review",
-      });
-      tracePaidProCorpusMutation({
-        store: "finalizedSigningCorpusRef",
-        caller: "commitPaidProUserApprovedRevision",
-        stage: reason,
-        oldText: finalizedBefore,
-        newText: stable,
-        sourceAfter: "finalized_signing",
-      });
-      tracePaidProCorpusMutation({
-        store: "agreementDocumentText",
-        caller: "commitPaidProUserApprovedRevision",
-        stage: reason,
-        oldText: docTextBefore,
-        newText: stable,
-        sourceAfter: record.source,
-      });
-      scheduleAgreementDocSync(stable);
-      setGuidedAuthVersionNonce((n) => n + 1);
-      bumpPremiumSurfaceGateTick();
-      setReviewDocRefreshTick((n) => n + 1);
-      return stable;
     },
     [
       draft,
@@ -17992,20 +18062,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       userGapAnswers: string,
       captured: PaymentApplyTarget,
     ) => {
-      const intakeText = (premiumGapBaseIntakeRef.current || intakeCombinedRef.current || "").trim();
-      const structured =
+      const storedIntake = readPaymentClarificationIntake({
+        userId: captured.userId,
+        organizationId: captured.organizationId,
+        agreementId: captured.agreementId,
+        revisionId: captured.revisionId,
+      });
+      const intakeText = (
+        premiumGapBaseIntakeRef.current ||
+        intakeCombinedRef.current ||
+        storedIntake ||
+        ""
+      ).trim();
+      if (intakeText && !premiumGapBaseIntakeRef.current.trim()) {
+        premiumGapBaseIntakeRef.current = intakeText;
+      }
+      let structured =
         draftSnapshotRef.current || readPremiumCompletionSnapshot()?.premiumDraft || null;
+      if (!structured && intakeText) {
+        structured = await parseDraft(intakeText, { aiModelClass: "premium", checkoutCompletion: true });
+      }
       if (!intakeText || !structured) {
         throw new Error("payment_clarification_apply_unavailable");
       }
-      const currentTarget = (): PaymentApplyTarget => ({
+      const currentTarget = () => ({
         userId: resolveCurrentUser().id,
         organizationId: (getOrgId() || "").trim(),
         agreementId: (reviewAgreementIdRef.current || "").trim(),
         revisionId:
           getPaidProSourceOfTruth()?.hash?.trim() ||
           hashPaidProCorpus(getPaidProSourceOfTruthText() || ""),
-        requestId: captured.requestId,
       });
       const sessionGenForPass = getOrInitSessionAgreementGenerationId();
       const result = await ensurePremiumCompletion({
@@ -18039,24 +18125,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (!result || result.staleIntakeOrGeneration || !body) {
         throw new Error("payment_clarification_apply_unavailable");
       }
-      if (!paymentApplyTargetMatches(captured, currentTarget())) {
-        throw new Error("payment_clarification_stale_request");
-      }
-      const painted = await commitPaidProUserApprovedRevision(body, "payment_clarification_answer");
+      const painted = await commitPaidProUserApprovedRevision(
+        body,
+        "payment_clarification_answer",
+        captured,
+      );
       if (!painted.trim()) {
         throw new Error("payment_clarification_apply_unavailable");
       }
-      if (
-        !samePaymentApplyOwner(captured, {
-          userId: resolveCurrentUser().id,
-          organizationId: getOrgId(),
-          agreementId: reviewAgreementIdRef.current || undefined,
-        })
-      ) {
-        throw new Error("payment_clarification_stale_request");
-      }
-      const newRevision =
-        getPaidProSourceOfTruth()?.hash?.trim() || hashPaidProCorpus(painted);
+      const newRevision = hashPaidProCorpus(painted);
       markPaymentClarificationApplied(
         {
           userId: captured.userId,
@@ -18068,7 +18145,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         newRevision,
         captured.requestId,
       );
-      premiumLastGapAnswersRef.current = userGapAnswers;
+      if (
+        samePaymentApplyOwner(captured, {
+          userId: resolveCurrentUser().id,
+          organizationId: getOrgId(),
+          agreementId: reviewAgreementIdRef.current || undefined,
+        })
+      ) {
+        premiumLastGapAnswersRef.current = userGapAnswers;
+      }
     };
   }, [commitPaidProUserApprovedRevision, simpleProductFlow, intakePartyRoleLabels]);
 

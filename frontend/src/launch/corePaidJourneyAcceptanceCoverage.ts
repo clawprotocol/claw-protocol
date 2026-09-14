@@ -141,6 +141,31 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
   if (!spec.includes("status: \"success\"") || !spec.includes("required fields absent")) {
     throw new Error("core paid journey live spec no longer returns explicit signer-setup results");
   }
+  if (
+    !spec.includes("canonical-review-snapshot") ||
+    !spec.includes("LawDog home") ||
+    !spec.includes("/app/create?agreementId=") ||
+    !spec.includes("editable reopen after delayed complete save")
+  ) {
+    throw new Error("core paid journey live spec no longer delays the production snapshot save or reopens editable paper");
+  }
+
+  const revisionOp = src("../components/agreements/paidProRevisionOperation.ts");
+  if (
+    !revisionOp.includes("paidProRevisionOperationAllowsPersist") ||
+    !revisionOp.includes("paidProRevisionOperationAllowsDisplay") ||
+    !revisionOp.includes("readActivePaidProRevisionOperation")
+  ) {
+    throw new Error("paid revision operations no longer distinguish persist from display identity");
+  }
+  const revisionCommit = src("../components/agreements/paidProUserApprovedRevisionCommit.ts");
+  if (
+    !revisionCommit.includes("prepareCommercialReviewSnapshotAuthority") ||
+    !revisionCommit.includes("paidProRevisionOperationAllowsPersist") ||
+    !revisionCommit.includes("paidProRevisionOperationAllowsDisplay")
+  ) {
+    throw new Error("paid revision commit no longer checks the active operation before shared mutations");
+  }
 
   const meta = src("../agreement/recipientReviewAuthorityMeta.ts");
   if (!meta.includes("status !== \"pending\"") || meta.includes("if (!lockedVersionId ||")) {

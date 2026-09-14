@@ -468,10 +468,36 @@ export async function acceptCanonicalReviewSnapshot(args: {
  * Phase 1 — before review UI: persist pending, then GET authoritative bytes for display.
  * Does NOT accept. Fire-and-forget commercial accept is intentionally unsupported.
  */
+let pendingPrepareHold: Promise<void> | null = null;
+let releasePendingPrepareHold: (() => void) | null = null;
+
+export function holdNextCommercialReviewSnapshotPrepare(): { release: () => void } {
+  releaseCommercialReviewSnapshotPrepareHoldForTests();
+  pendingPrepareHold = new Promise<void>((resolve) => {
+    releasePendingPrepareHold = resolve;
+  });
+  return {
+    release: () => {
+      releasePendingPrepareHold?.();
+      releasePendingPrepareHold = null;
+    },
+  };
+}
+
+export function releaseCommercialReviewSnapshotPrepareHoldForTests(): void {
+  releasePendingPrepareHold?.();
+  releasePendingPrepareHold = null;
+  pendingPrepareHold = null;
+}
+
 export async function prepareCommercialReviewSnapshotAuthority(args: {
   agreementId: string;
   corpusPlain: string;
   generationSessionId?: string | null;
+  requestId?: string | null;
+  userId?: string | null;
+  organizationId?: string | null;
+  revisionId?: string | null;
 }): Promise<
   | {
       ok: true;
@@ -485,6 +511,26 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
   const id = args.agreementId.trim();
   const corpus = (args.corpusPlain || "").trim();
   if (!id || corpus.length < 500) return { ok: false, code: "invalid_snapshot_args" };
+
+  const hold = pendingPrepareHold;
+  pendingPrepareHold = null;
+  if (hold) await hold;
+  if (args.requestId) {
+    const { paidProRevisionOperationAllowsPersist } = await import(
+      "../components/agreements/paidProRevisionOperation"
+    );
+    if (
+      !paidProRevisionOperationAllowsPersist({
+        userId: args.userId || "",
+        organizationId: args.organizationId || "",
+        agreementId: id,
+        revisionId: args.revisionId || "",
+        requestId: args.requestId,
+      })
+    ) {
+      return { ok: false, code: "stale_revision_operation" };
+    }
+  }
 
   const persisted = await persistCanonicalReviewSnapshot({
     agreementId: id,
@@ -525,6 +571,28 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
     corpusLength: snap.corpus_length,
     status: String(fetched.status || snap.status || "pending"),
   };
+  if (args.requestId) {
+    const { paidProRevisionOperationAllowsDisplay } = await import(
+      "../components/agreements/paidProRevisionOperation"
+    );
+    if (
+      !paidProRevisionOperationAllowsDisplay({
+        userId: args.userId || "",
+        organizationId: args.organizationId || "",
+        agreementId: id,
+        revisionId: args.revisionId || "",
+        requestId: args.requestId,
+      })
+    ) {
+      return {
+        ok: true,
+        snapshot: snap,
+        status: display.status,
+        registryVersion: fetched.registryVersion ?? persisted.registryVersion ?? null,
+        display,
+      };
+    }
+  }
   storeVerifiedCommercialDisplayCorpus({
     ...display,
     corpusPlain: getCorpus,

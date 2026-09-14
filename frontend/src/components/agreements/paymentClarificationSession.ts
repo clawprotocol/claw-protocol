@@ -1,6 +1,10 @@
 import { resolveCurrentUser } from "../../account/currentUser";
 import { getOrgId, subscribeToOrgContextChanges } from "../../launch/orgContext";
 import {
+  clearPaidProRevisionOperationsForTests,
+  readActivePaidProRevisionOperation,
+} from "./paidProRevisionOperation";
+import {
   UNCONFIRMED_INVOICE_CADENCE_QUESTION,
   UNCONFIRMED_PAYMENT_DUE_QUESTION,
   UNCONFIRMED_PAYMENT_TIMING_QUESTION,
@@ -120,7 +124,12 @@ function matchesScope(row: PaymentClarificationRecord, scope: PaymentClarificati
   if (row.userId !== normalizeId(scope.userId)) return false;
   if (row.organizationId !== normalizeId(scope.organizationId)) return false;
   const agreementId = normalizeId(scope.agreementId);
-  if (agreementId) return row.agreementId === agreementId;
+  if (agreementId) {
+    if (row.agreementId !== agreementId) return false;
+    const revisionId = normalizeId(scope.revisionId);
+    if (!revisionId) return false;
+    return (row.revisionId || "") === revisionId;
+  }
   const draftSessionId = normalizeId(scope.draftSessionId);
   return Boolean(draftSessionId) && !row.agreementId && row.draftSessionId === draftSessionId;
 }
@@ -131,7 +140,9 @@ function handlerKey(scope?: PaymentClarificationScope | null): string | null {
   const organizationId = normalizeId(scope.organizationId);
   const agreementId = normalizeId(scope.agreementId);
   const draftSessionId = normalizeId(scope.draftSessionId);
-  return `${userId}\u0000${organizationId}\u0000${agreementId || `draft:${draftSessionId}`}`;
+  const revisionId = normalizeId(scope.revisionId);
+  if (agreementId && !revisionId) return null;
+  return `${userId}\u0000${organizationId}\u0000${agreementId ? `${agreementId}\u0000${revisionId}` : `draft:${draftSessionId}`}`;
 }
 
 function newOpaqueId(prefix: string): string {
@@ -161,6 +172,7 @@ export function subscribePaymentClarification(listener: () => void): () => void 
 export function clearPaymentClarificationClientCache(): void {
   memoryRows = [];
   applyHandlers.clear();
+  clearPaidProRevisionOperationsForTests();
   if (typeof sessionStorage !== "undefined") {
     try {
       sessionStorage.removeItem(STORAGE_KEY);
@@ -204,6 +216,26 @@ export function readPaymentClarification(
   return readAll().find((row) => matchesScope(row, scope)) ?? null;
 }
 
+/** Intake only. Does not return applied answers from another revision. */
+export function readPaymentClarificationIntake(scope?: PaymentClarificationScope | null): string {
+  if (!scope || !hasExactScope(scope)) return "";
+  const exact = readPaymentClarification(scope)?.intake?.trim();
+  if (exact) return exact;
+  const userId = normalizeId(scope.userId);
+  const organizationId = normalizeId(scope.organizationId);
+  const agreementId = normalizeId(scope.agreementId);
+  if (!agreementId) return "";
+  return (
+    readAll().find(
+      (row) =>
+        row.userId === userId &&
+        row.organizationId === organizationId &&
+        row.agreementId === agreementId &&
+        row.intake.trim(),
+    )?.intake || ""
+  ).trim();
+}
+
 export function persistPaymentClarification(
   record: PaymentClarificationScope & {
     intake?: string;
@@ -215,6 +247,7 @@ export function persistPaymentClarification(
   },
 ): void {
   if (!hasExactScope(record)) return;
+  if (normalizeId(record.agreementId) && !normalizeId(record.revisionId)) return;
   const prior = readPaymentClarification(record);
   const next = readAll().filter((row) => !matchesScope(row, record));
   next.push({
@@ -266,13 +299,21 @@ export function bindPaymentClarificationDraftToAgreement(args: {
   organizationId: string;
   draftSessionId: string;
   agreementId: string;
+  revisionId?: string | null;
 }): PaymentClarificationRecord | null {
   const userId = normalizeId(args.userId);
   const organizationId = normalizeId(args.organizationId);
   const draftSessionId = normalizeId(args.draftSessionId);
   const agreementId = normalizeId(args.agreementId);
+  const revisionId = normalizeId(args.revisionId);
   if (!userId || !organizationId || !draftSessionId || !agreementId) return null;
-  const existing = readPaymentClarification({ userId, organizationId, agreementId });
+  const existing = readAll().find(
+    (row) =>
+      row.userId === userId &&
+      row.organizationId === organizationId &&
+      row.agreementId === agreementId &&
+      (!revisionId || (row.revisionId || "") === revisionId),
+  );
   if (existing) return existing;
   const draft = readPaymentClarification({ userId, organizationId, draftSessionId });
   if (!draft) return null;
@@ -289,10 +330,11 @@ export function bindPaymentClarificationDraftToAgreement(args: {
     ...draft,
     agreementId,
     draftSessionId,
+    revisionId: revisionId || draft.revisionId,
   });
   writeAll(next);
   notify();
-  return readPaymentClarification({ userId, organizationId, agreementId });
+  return next[next.length - 1] ?? null;
 }
 
 export function queuePaymentClarificationPending(
@@ -330,12 +372,20 @@ export function markPaymentClarificationApplied(
   if (!prior) return;
   const expected = normalizeId(requestId);
   if (expected && prior.requestId && prior.requestId !== expected) return;
+  const nextRevision = normalizeId(revisionId);
+  if (!nextRevision) return;
+  const remaining = readAll().filter((row) => !matchesScope(row, scope));
+  writeAll(remaining);
   persistPaymentClarification({
-    ...scope,
+    userId: prior.userId,
+    organizationId: prior.organizationId,
+    agreementId: prior.agreementId,
+    draftSessionId: prior.draftSessionId,
+    intake: prior.intake,
     appliedAnswers: appliedAnswers.trim(),
     pendingAnswer: "",
     applyStatus: "applied",
-    revisionId,
+    revisionId: nextRevision,
     requestId: expected || prior.requestId,
     applyError: "",
   });
@@ -398,7 +448,7 @@ export function capturePaymentApplyTarget(target: PaymentApplyTarget): PaymentAp
 
 export function paymentApplyTargetMatches(
   captured: PaymentApplyTarget,
-  current: PaymentApplyTarget,
+  live: Pick<PaymentApplyTarget, "userId" | "organizationId" | "agreementId" | "revisionId">,
 ): boolean {
   if (
     !captured.userId ||
@@ -409,12 +459,13 @@ export function paymentApplyTargetMatches(
   ) {
     return false;
   }
+  const active = readActivePaidProRevisionOperation(captured.agreementId);
+  if (!active || active.requestId !== captured.requestId) return false;
   return (
-    captured.userId === normalizeId(current.userId) &&
-    captured.organizationId === normalizeId(current.organizationId) &&
-    captured.agreementId === normalizeId(current.agreementId) &&
-    captured.revisionId === normalizeId(current.revisionId) &&
-    captured.requestId === normalizeId(current.requestId)
+    captured.userId === normalizeId(live.userId) &&
+    captured.organizationId === normalizeId(live.organizationId) &&
+    captured.agreementId === normalizeId(live.agreementId) &&
+    captured.revisionId === normalizeId(live.revisionId)
   );
 }
 
