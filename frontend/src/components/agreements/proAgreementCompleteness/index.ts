@@ -20,4 +20,16 @@ export {
   paymentSectionText,
   materialItemsToClarificationStrings,
 } from "./revisionQuestionEngine";
+export {
+  UNCONFIRMED_EFFECTIVE_DATE_QUESTION,
+  extractDateMeanings,
+  isDateMeaningQuestion,
+  unconfirmedEffectiveDateQuestion,
+} from "../paidProDateMeaning";
+export {
+  UNCONFIRMED_COMPLETION_CRITERIA_QUESTION,
+  isCompletionCriteriaQuestion,
+  isHostedSaasDeal,
+  unconfirmedCompletionCriteriaQuestion,
+} from "../paidProCompletionCriteria";
 export { isCatastrophicStructuralFailure } from "./proStructuralDetection";

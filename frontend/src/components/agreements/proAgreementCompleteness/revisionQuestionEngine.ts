@@ -7,6 +7,8 @@ import {
 } from "../guidedDealCompletion/semanticContractCompleteness";
 import { isConsultingDevIntake } from "../guidedDealCompletion/consultingGuidedIntake";
 import { isServicesMigrationIntake } from "../guidedDealCompletion/servicesMigrationGuidedIntake";
+import { dateMeaningMaterialItem, isDateMeaningQuestion } from "../paidProDateMeaning";
+import { completionCriteriaMaterialItem, isCompletionCriteriaQuestion } from "../paidProCompletionCriteria";
 import type { CommercialFamilyHint, MaterialMissingItem } from "./types";
 
 const VAGUE_COMMERCIAL_RE =
@@ -409,7 +411,7 @@ function familyQuestions(
     family === "independent_contractor_agreement" ||
     /\bmilestone|deliverable|statement of work\b/i.test(intakeLow)
   ) {
-    if (!/\bmilestone[\s\S]{0,120}\b(?:date|due|amount|\$)/i.test(low) && /\bmilestone|deliverable\b/i.test(intakeLow)) {
+    if (!/\bmilestone[\s\S]{0,120}\b(?:date|due|amount|\$)/i.test(low) && /\bmilestone\b/i.test(intakeLow)) {
       pushItem(
         items,
         seen,
@@ -757,6 +759,22 @@ export function buildMaterialMissingItems(args: {
   const family = detectCommercialFamilyHint(intake, body);
   const items = familyQuestions(family, body, args.intakeRaw || "", args.userGapAnswers || "");
   const seen = new Set(items.map((i) => i.id));
+  const dateItem = dateMeaningMaterialItem({
+    intakeRaw: args.intakeRaw,
+    userGapAnswers: args.userGapAnswers,
+    body,
+  });
+  if (dateItem) {
+    pushItem(items, seen, dateItem, family);
+  }
+  const completionItem = completionCriteriaMaterialItem({
+    intakeRaw: args.intakeRaw,
+    userGapAnswers: args.userGapAnswers,
+    body,
+  });
+  if (completionItem) {
+    pushItem(items, seen, completionItem, family);
+  }
 
   for (const bodyItem of scanBodyMaterialPlaceholders(body, family)) {
     pushItem(items, seen, bodyItem, family);
@@ -799,6 +817,15 @@ export function buildMaterialMissingItems(args: {
   for (const m of args.serverMissing || []) {
     const t = String(m || "").trim();
     if (t.length < 4) continue;
+    if (
+      t === UNCONFIRMED_PAYMENT_TIMING_QUESTION ||
+      t === UNCONFIRMED_INVOICE_CADENCE_QUESTION ||
+      t === UNCONFIRMED_PAYMENT_DUE_QUESTION ||
+      isDateMeaningQuestion(t) ||
+      isCompletionCriteriaQuestion(t)
+    ) {
+      continue;
+    }
     const id = `server_${t.slice(0, 40).replace(/\W+/g, "_")}`;
     pushItem(
       items,

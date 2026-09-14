@@ -59,10 +59,23 @@ export function paidProTitleScopeDecision(intakeText?: string | null): Agreement
   return resolveAgreementTitleFromIntakeScope(intakeText);
 }
 
+const MONTH =
+  "(?:January|February|March|April|May|June|July|August|September|October|November|December)";
+const LABELED_EFFECTIVE_DATE_RE = new RegExp(
+  `(?:as of|effective as of)\\s+(${MONTH}\\s+\\d{1,2},\\s+\\d{4})\\s+\\(\\s*the\\s+["']Effective Date["']\\s*\\)`,
+  "i",
+);
+
+function labeledEffectiveDateFromOpening(text: string): string | null {
+  const match = (text || "").slice(0, 2_500).match(LABELED_EFFECTIVE_DATE_RE);
+  return match?.[1] ? match[1].replace(/\s+/g, " ").trim() : null;
+}
+
 export function buildCanonicalPaidProServicesOpeningRecital(
   client: CanonicalPartyIdentityRecord,
   provider: CanonicalPartyIdentityRecord,
   intakeText?: string | null,
+  labeledEffectiveDate?: string | null,
 ): string {
   const clientName = client.fullLegalName.trim();
   const providerName = provider.fullLegalName.trim();
@@ -70,10 +83,12 @@ export function buildCanonicalPaidProServicesOpeningRecital(
   const phrase = recitalAgreementPhrase(title);
   const clientRole = client.roleLabel.replace(/\s+/g, " ").trim() || "Client";
   const providerRole = provider.roleLabel.replace(/\s+/g, " ").trim() || "Service Provider";
+  const date = (labeledEffectiveDate || "").replace(/\s+/g, " ").trim();
+  const asOf = date ? ` as of ${date} (the "Effective Date")` : "";
   return [
     title,
     "",
-    `This ${phrase} (this "Agreement") is entered into as of the Effective Date by and between ${clientName} ("${clientRole}") and ${providerName} ("${providerRole}"). ${clientRole} and ${providerRole} may be referred to individually as a "Party" and collectively as the "Parties."`,
+    `This ${phrase} (this "Agreement") is entered into${asOf} by and between ${clientName} ("${clientRole}") and ${providerName} ("${providerRole}"). ${clientRole} and ${providerRole} may be referred to individually as a "Party" and collectively as the "Parties."`,
     "",
   ].join("\n");
 }
@@ -403,7 +418,7 @@ export function isPaidProOpeningStructurallyValid(
   if (!PAID_PRO_CANONICAL_TITLE_RE.test(head)) {
     return false;
   }
-  if (!/entered\s+into\s+as\s+of/i.test(head)) {
+  if (!/entered\s+into\b/i.test(head)) {
     return false;
   }
   if (!head.includes(client) || !head.includes(provider)) {
@@ -500,6 +515,18 @@ export function repairPaidProServicesAgreementOpening(
   if (isPaidProOpeningStructurallyValid(body, records)) {
     return { text: body, repairs };
   }
+  const clientName = client.fullLegalName.trim();
+  const providerName = provider.fullLegalName.trim();
+  if (
+    clientName &&
+    providerName &&
+    body.includes(clientName) &&
+    body.includes(providerName) &&
+    /entered\s+into(?:\s+as\s+of\s+[A-Za-z]+\s+\d{1,2},\s+\d{4})?\s+by\s+and\s+between/i.test(body.slice(0, 2_500)) &&
+    !/as\s+of\s+the\s+Effective\s+Date/i.test(body.slice(0, 2_500))
+  ) {
+    return { text: body, repairs };
+  }
 
   const { operative, executionTail } = splitOperativeAndExecutionTail(body);
   const sec1Idx = findOpeningSectionOneIndex(operative);
@@ -511,7 +538,12 @@ export function repairPaidProServicesAgreementOpening(
   const remainder = executionTail
     ? `${remainderBody}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trim()
     : remainderBody;
-  const opening = buildCanonicalPaidProServicesOpeningRecital(client, provider, intakeText);
+  const opening = buildCanonicalPaidProServicesOpeningRecital(
+    client,
+    provider,
+    intakeText,
+    labeledEffectiveDateFromOpening(body),
+  );
   repairs.push("opening:prepend_canonical_services_recital");
   if (preservedPrefix) repairs.push("opening:preserve_pre_section_one_operative_blocks");
   return { text: `${opening}${remainder}`, repairs };
@@ -702,7 +734,9 @@ export function ensurePaidProServicesAgreementOpening(
   // Competing leftover titles / "is between" residue still repair once before freeze.
   const head = working.slice(0, 4_000);
   const hasCanonicalEnteredInto =
-    /entered\s+into\s+as\s+of\s+the\s+Effective\s+Date\s+by\s+and\s+between/i.test(head);
+    /entered\s+into(?:\s+as\s+of\s+(?:the\s+Effective\s+Date|[A-Za-z]+\s+\d{1,2},\s+\d{4}(?:\s+\(\s*the\s+["']Effective Date["']\s*\))?))?\s+by\s+and\s+between/i.test(
+      head,
+    );
   if (
     !needsPaidProServicesOpeningTitleRepair(working) &&
     hasCanonicalEnteredInto &&

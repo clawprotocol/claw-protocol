@@ -95,6 +95,8 @@ from backend.agreements.explicit_acceptance_authority import (
     ExplicitAcceptanceRecord,
     establish_explicit_acceptance,
 )
+from backend.agreements.completion_criteria_guard import apply_completion_criteria_guard
+from backend.agreements.date_meaning_guard import apply_date_meaning_guard
 from backend.agreements.premium_full_draft_quality_gate import (
     apply_unconfirmed_payment_timing_guard,
     unconfirmed_payment_questions_present,
@@ -5944,6 +5946,18 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             user_gap_answers=uga,
             document_text=doc,
             missing_material_info=list(out.missing_material_info or []),
+        )
+        doc, miss = apply_date_meaning_guard(
+            intake=intake_s,
+            user_gap_answers=uga,
+            document_text=doc,
+            missing_material_info=miss,
+        )
+        doc, miss = apply_completion_criteria_guard(
+            intake=intake_s,
+            user_gap_answers=uga,
+            document_text=doc,
+            missing_material_info=miss,
         )
         if unconfirmed_payment_questions_present(miss):
             generation_outcome = "needs_details"

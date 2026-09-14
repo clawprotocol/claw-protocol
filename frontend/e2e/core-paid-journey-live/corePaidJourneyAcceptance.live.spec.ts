@@ -10,6 +10,7 @@ import {
   articlePresentationIssues,
   articleQualityDefects,
   describeOperativeArticleCompare,
+  normalizeArticleWhitespace,
   operativeArticleFingerprint,
   type CorePaidJourneyRowId,
 } from "../../src/launch/corePaidJourneyAcceptanceMatrix";
@@ -17,6 +18,8 @@ import {
   UNCONFIRMED_INVOICE_CADENCE_QUESTION,
   UNCONFIRMED_PAYMENT_DUE_QUESTION,
   UNCONFIRMED_PAYMENT_TIMING_QUESTION,
+  unconfirmedCompletionCriteriaQuestion,
+  unconfirmedEffectiveDateQuestion,
 } from "../../src/components/agreements/proAgreementCompleteness";
 import {
   formatObservedJsonFailure,
@@ -87,11 +90,12 @@ function feesClause(article: string): string {
 }
 
 function hasCompleteClarifiedFees(article: string): boolean {
-  const fees = feesClause(article);
+  const fees = normalizeArticleWhitespace(feesClause(article));
+  const whole = normalizeArticleWhitespace(article);
   return (
     /October 1, 2026/.test(fees) &&
     /net\s*60|net sixty/i.test(fees) &&
-    /\$48,000/.test(article) &&
+    /\$48,000/.test(whole) &&
     !/monthly/i.test(fees) &&
     !/weekly/i.test(fees)
   );
@@ -1729,7 +1733,7 @@ test.describe("Core paid journey acceptance", () => {
     await expect
       .poll(async () => {
         afterComplete = await articleText(page);
-        const fees = afterComplete.split(/4\.\s+/i)[0] || afterComplete;
+        const fees = normalizeArticleWhitespace(afterComplete.split(/4\.\s+/i)[0] || afterComplete);
         return /October 1, 2026/.test(fees) && /net\s*60|net sixty/i.test(fees) && !/monthly/i.test(fees);
       }, { timeout: 90_000 })
       .toBeTruthy();
@@ -1738,7 +1742,7 @@ test.describe("Core paid journey acceptance", () => {
       page.getByTestId("payment-clarification-panel"),
       "editable reopen after delayed complete save must restore finished clarification from paper",
     ).toHaveCount(0, { timeout: 20_000 });
-    const fees = afterComplete.split(/4\.\s+/i)[0] || afterComplete;
+    const fees = normalizeArticleWhitespace(afterComplete.split(/4\.\s+/i)[0] || afterComplete);
     expect(fees).toMatch(/October 1, 2026/);
     expect(fees).toMatch(/net\s*60|net sixty/i);
     expect(fees).not.toMatch(/weekly/i);
@@ -1751,13 +1755,14 @@ test.describe("Core paid journey acceptance", () => {
     await expect
       .poll(async () => {
         afterReload = await articleText(page);
-        return /October 1, 2026/.test(afterReload) && /net\s*60|net sixty/i.test(afterReload);
+        const normalized = normalizeArticleWhitespace(afterReload);
+        return /October 1, 2026/.test(normalized) && /net\s*60|net sixty/i.test(normalized);
       }, { timeout: 90_000 })
       .toBeTruthy();
     const reloadId = await durableAgreementId(page);
     expect(reloadId).toBe(drafted.agreementId);
     await expect(page.getByTestId("payment-clarification-panel")).toHaveCount(0);
-    expect(afterReload).toMatch(/October 1, 2026/);
+    expect(normalizeArticleWhitespace(afterReload)).toMatch(/October 1, 2026/);
     expect(afterReload).toMatch(/net\s*60|net sixty/i);
 
     await page.goto("/app", { waitUntil: "domcontentloaded" });
@@ -1766,7 +1771,7 @@ test.describe("Core paid journey acceptance", () => {
     await expect(page).toHaveURL(new RegExp(drafted.agreementId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     const reopened = await page.locator("body").innerText();
     expect(reopened).toContain(FACTS.parties[0].name);
-    expect(reopened).toMatch(/October 1, 2026/);
+    expect(normalizeArticleWhitespace(reopened)).toMatch(/October 1, 2026/);
     expect(reopened).toMatch(/net\s*60|net sixty/i);
     await expect(page.getByTestId("payment-clarification-panel")).toHaveCount(0);
 
@@ -1786,17 +1791,18 @@ test.describe("Core paid journey acceptance", () => {
       .poll(
         async () => {
           freshReopen = await freshPage.locator("body").innerText();
+          const normalized = normalizeArticleWhitespace(freshReopen);
           return (
             freshReopen.includes(FACTS.parties[0].name) &&
-            /October 1, 2026/.test(freshReopen) &&
-            /net\s*60|net sixty/i.test(freshReopen)
+            /October 1, 2026/.test(normalized) &&
+            /net\s*60|net sixty/i.test(normalized)
           );
         },
         { timeout: 90_000 },
       )
       .toBeTruthy();
     expect(freshReopen).toContain(FACTS.parties[0].name);
-    expect(freshReopen).toMatch(/October 1, 2026/);
+    expect(normalizeArticleWhitespace(freshReopen)).toMatch(/October 1, 2026/);
     expect(freshReopen).toMatch(/net\s*60|net sixty/i);
     await expect(freshPage.getByTestId("payment-clarification-panel")).toHaveCount(0);
     await freshContext.close();
@@ -2041,6 +2047,133 @@ test.describe("Core paid journey acceptance", () => {
       throw error;
     } finally {
       record("C4_resume_apply_after_dashboard_reset", status, detail);
+    }
+  });
+
+  test("date meaning and consulting completion survive apply and fresh reopen", async ({ page, browser }) => {
+    let status: "pass" | "fail" = "fail";
+    let detail = "unfinished";
+    const dateQuestion = unconfirmedEffectiveDateQuestion("October 1, 2026");
+    const completionQuestion = unconfirmedCompletionCriteriaQuestion(CORE_PAID_JOURNEY_FILLED_INTAKE);
+    const contentAnswers = [
+      "The agreement effective date is the same as the October 1, 2026 service start.",
+      "Completion is Client's written confirmation that the implemented AI workflow is in operational use.",
+    ].join("\n");
+    const paperReady = (article: string) => {
+      const normalized = normalizeArticleWhitespace(article);
+      const opening = normalized.split(/\n\s*1[.)]\s+/)[0] || normalized.slice(0, 700);
+      return (
+        /October 1, 2026 \(the ["']Effective Date["']\)/i.test(opening) &&
+        /October 1, 2026/.test(normalized) &&
+        /written confirmation that the implemented AI workflow is in operational use/i.test(normalized) &&
+        /AI workflow implementation/i.test(normalized) &&
+        /\$48,000/.test(normalized) &&
+        !/as of the Effective Date by and between/i.test(opening)
+      );
+    };
+    try {
+      await seedCorePaidJourneyOwner(page);
+      const drafted = await draftThroughVisiblePaper(page, { skipSparse: true, skipSignerSetup: true });
+      const panel = page.getByTestId("paid-draft-content-clarification-panel");
+      await expect(panel, "date and completion questions must be visible after the production draft").toBeVisible({
+        timeout: 20_000,
+      });
+      await expect(panel.getByTestId("date-meaning-clarification-question")).toContainText(dateQuestion);
+      await expect(panel.getByTestId("completion-criteria-clarification-question")).toContainText(
+        completionQuestion,
+      );
+      let before = "";
+      await expect
+        .poll(async () => {
+          before = await articleText(page);
+          const normalized = normalizeArticleWhitespace(before);
+          const opening = normalized.split(/\n\s*1[.)]\s+/)[0] || normalized.slice(0, 700);
+          return (
+            /October 1, 2026/.test(normalized) &&
+            !/as of the Effective Date/i.test(opening) &&
+            !/entered into as of October 1, 2026/i.test(opening)
+          );
+        }, { timeout: 90_000 })
+        .toBeTruthy();
+      expect(normalizeArticleWhitespace(before)).toMatch(/October 1, 2026/);
+      expect(before).not.toMatch(/written confirmation that the implemented AI workflow/i);
+
+      await page.getByTestId("paid-draft-content-clarification-answer").fill(contentAnswers);
+      const snapshotPostDone = page.waitForResponse(
+        (res) =>
+          isCanonicalSnapshotCreatePost({
+            url: res.url(),
+            method: res.request().method(),
+            agreementId: drafted.agreementId,
+          }),
+        { timeout: 90_000 },
+      );
+      await page.getByTestId("paid-draft-content-clarification-apply").click();
+      const snapshotRes = await snapshotPostDone;
+      expect(snapshotRes.ok(), "content Apply must persist a snapshot").toBeTruthy();
+      const postedValue = await readObservedJson(snapshotRes, "c5_snapshot_create", Date.now());
+      const posted = snapshotFieldsFromObservedPayload(postedValue);
+      let afterApply = "";
+      await expect
+        .poll(async () => {
+          afterApply = await articleText(page);
+          return paperReady(afterApply) ? afterApply.length : 0;
+        }, { timeout: 90_000 })
+        .toBeGreaterThan(400);
+      await expect(panel.getByTestId("date-meaning-clarification-question")).toHaveCount(0, { timeout: 20_000 });
+      await expect(panel.getByTestId("completion-criteria-clarification-question")).toHaveCount(0, {
+        timeout: 20_000,
+      });
+      const persisted = await fetchOwnerCanonicalSnapshot(page, drafted.agreementId);
+      expect(persisted.ok, "authorized canonical GET must succeed after content Apply").toBeTruthy();
+      expect(persisted.snapshotId).toBe(posted.snapshotId);
+      expect(persisted.digest).toBe(posted.digest);
+      expect(paperReady(persisted.corpus)).toBeTruthy();
+      const visibleVsGet = describeOperativeArticleCompare(
+        "visible_document",
+        afterApply,
+        "canonical_get",
+        persisted.corpus,
+      );
+      expect(visibleVsGet.sameOperative, visibleVsGet.diff).toBe(true);
+
+      const freshContext = await browser.newContext({
+        viewport: page.viewportSize() ?? { width: 1280, height: 720 },
+      });
+      const freshPage = await freshContext.newPage();
+      const mintedNew = captureNewAgreementPosts(freshPage);
+      await seedCorePaidJourneyOwner(freshPage);
+      await freshPage.goto(`/app/create?agreementId=${drafted.agreementId}`, { waitUntil: "domcontentloaded" });
+      const leaked = await readCreateSessionState(freshPage);
+      expect(leaked.payment, "fresh context must not inherit payment sessionStorage").toBeNull();
+      let reopened = "";
+      await expect
+        .poll(async () => {
+          reopened = await articleText(freshPage);
+          return paperReady(reopened) ? reopened.length : 0;
+        }, { timeout: 90_000 })
+        .toBeGreaterThan(400);
+      await expect(freshPage.getByTestId("date-meaning-clarification-question")).toHaveCount(0);
+      await expect(freshPage.getByTestId("completion-criteria-clarification-question")).toHaveCount(0);
+      const freshGet = await fetchOwnerCanonicalSnapshot(freshPage, drafted.agreementId);
+      expect(freshGet.snapshotId).toBe(persisted.snapshotId);
+      expect(freshGet.digest).toBe(persisted.digest);
+      const freshCompare = describeOperativeArticleCompare("fresh_visible", reopened, "fresh_get", freshGet.corpus);
+      expect(freshCompare.sameOperative, freshCompare.diff).toBe(true);
+      expect(mintedNew, "opening the saved agreement must not mint a replacement").toEqual([]);
+      await freshContext.close();
+      persistCorePaidJourneyArticle({
+        ...ctx(),
+        agreementId: drafted.agreementId,
+        article: reopened,
+      });
+      status = "pass";
+      detail = `agreement=${drafted.agreementId} snapshot=${persisted.snapshotId} digest=${persisted.digest} len=${persisted.length} date+completion applied`;
+    } catch (error) {
+      detail = error instanceof Error ? error.message : String(error);
+      throw error;
+    } finally {
+      record("C5_date_and_completion_meaning", status, detail);
     }
   });
 });

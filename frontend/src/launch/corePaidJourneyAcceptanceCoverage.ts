@@ -13,7 +13,7 @@ function src(rel: string): string {
 }
 
 export function assertCorePaidJourneyAcceptanceContracts(): void {
-  if (CORE_PAID_JOURNEY_MATRIX.length < 16) {
+  if (CORE_PAID_JOURNEY_MATRIX.length < 17) {
     throw new Error("core paid journey matrix lost required customer rows");
   }
   const ids = CORE_PAID_JOURNEY_MATRIX.map((row) => row.id);
@@ -25,6 +25,7 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
     "C1_refresh_preserves_paper_version_path",
     "C3_fresh_context_editable_reopen",
     "C4_resume_apply_after_dashboard_reset",
+    "C5_date_and_completion_meaning",
   ]) {
     if (!ids.includes(required as (typeof ids)[number])) {
       throw new Error(`core paid journey matrix missing ${required}`);
@@ -156,6 +157,10 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
     !spec.includes("resume and apply after dashboard session reset") ||
     !spec.includes("C3_fresh_context_editable_reopen") ||
     !spec.includes("C4_resume_apply_after_dashboard_reset") ||
+    !spec.includes("C5_date_and_completion_meaning") ||
+    !spec.includes("paid-draft-content-clarification-panel") ||
+    !spec.includes("date-meaning-clarification-question") ||
+    !spec.includes("completion-criteria-clarification-question") ||
     !spec.includes("dashboard-create-new-agreement") ||
     !spec.includes("fresh context must not inherit payment sessionStorage") ||
     !spec.includes('return "applied"') ||
@@ -236,6 +241,14 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
   const advisory = src("../components/agreements/PaymentClarificationAdvisory.tsx");
   if (!advisory.includes("authorizedPaidProRevisionId") || advisory.includes("hashPaidProCorpus(getPaidProSourceOfTruthText() || \"\")")) {
     throw new Error("payment advisory still treats the empty-corpus hash as a live revision");
+  }
+  const visibleShell = src("../components/agreements/paidProVisibleDocumentShell.tsx");
+  if (!visibleShell.includes("PaidDraftContentAdvisory") || !visibleShell.includes("PaymentClarificationAdvisory")) {
+    throw new Error("visible paid review shell no longer mounts date/completion clarification on the painted paper");
+  }
+  const openingGuard = src("../components/agreements/paidProOpeningRecitalGuard.ts");
+  if (!openingGuard.includes("!/as\\s+of\\s+the\\s+Effective\\s+Date/i.test")) {
+    throw new Error("opening repair no longer refuses to invent an undefined Effective Date on a named-party recital");
   }
 
   const observe = src("./corePaidJourneySnapshotObserve.ts");

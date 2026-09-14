@@ -77,7 +77,8 @@ export type CorePaidJourneyRowId =
   | "C1_refresh_preserves_paper_version_path"
   | "C2_dashboard_reopen_same_agreement"
   | "C3_fresh_context_editable_reopen"
-  | "C4_resume_apply_after_dashboard_reset";
+  | "C4_resume_apply_after_dashboard_reset"
+  | "C5_date_and_completion_meaning";
 
 export type CorePaidJourneyRow = {
   id: CorePaidJourneyRowId;
@@ -182,6 +183,12 @@ export const CORE_PAID_JOURNEY_MATRIX: readonly CorePaidJourneyRow[] = [
     area: "continuity",
     title: "After dashboard session reset, resume the existing agreement and Apply the remaining payment due",
     proof: "workflow",
+  },
+  {
+    id: "C5_date_and_completion_meaning",
+    area: "quality",
+    title: "Missing effective-date meaning and consulting completion are asked, answered, and visible on reopen",
+    proof: "workflow_plus_stub_output",
   },
 ] as const;
 

@@ -5,9 +5,10 @@ import { CORE_PAID_JOURNEY_MATRIX } from "./corePaidJourneyAcceptanceMatrix";
 describe("core paid journey acceptance coverage", () => {
   it("keeps the customer matrix and live-journey contracts closed", () => {
     const ids = CORE_PAID_JOURNEY_MATRIX.map((row) => row.id);
-    expect(ids).toHaveLength(16);
+    expect(ids).toHaveLength(17);
     expect(ids).toContain("C3_fresh_context_editable_reopen");
     expect(ids).toContain("C4_resume_apply_after_dashboard_reset");
+    expect(ids).toContain("C5_date_and_completion_meaning");
     expect(() => assertCorePaidJourneyAcceptanceContracts()).not.toThrow();
   });
 

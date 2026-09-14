@@ -44,6 +44,7 @@ import {
 import { stripPremiumInstructionNoiseForDocument } from "./premiumInstructionStrip";
 import { VERIFIED_PAID_REVIEW_PAPER_SOURCE } from "./paidProVerifiedReviewPaper";
 import { PaymentClarificationAdvisory } from "./PaymentClarificationAdvisory";
+import { PaidDraftContentAdvisory } from "./PaidDraftContentAdvisory";
 
 export const PAID_PRO_VISIBLE_SHELL_COMPONENT_NAME = "PaidProVisibleDocumentShell";
 /** SoT length threshold for synchronous canonical plain forced render (Test292). */
@@ -391,6 +392,12 @@ export function PaidProVisibleDocumentShell({
   return (
     <div className="w-full max-w-full min-w-0">
       <PaymentClarificationAdvisory
+        agreementId={displayContext?.agreementId}
+        revisionId={authorityHash || undefined}
+        intakeText={displayContext?.intakeText}
+        body={renderPlain || authoritativePlain}
+      />
+      <PaidDraftContentAdvisory
         agreementId={displayContext?.agreementId}
         revisionId={authorityHash || undefined}
         intakeText={displayContext?.intakeText}

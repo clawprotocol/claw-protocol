@@ -105,7 +105,7 @@ def consulting_corpus_padded() -> str:
 def _consulting_corpus() -> str:
     sections = [
         "CONSULTING SERVICES AGREEMENT",
-        f"This Consulting Services Agreement (the \"Agreement\") is entered into as of {START} "
+        f"This Consulting Services Agreement (the \"Agreement\") is entered into "
         f"by and between {HARBOR} (\"Consultant\") and {IRONVALE} (\"Client\").",
         "1. PARTIES AND ROLES. Consultant is an independent professional services firm. "
         "Client is retaining Consultant to perform the services described in this Agreement. "
@@ -132,14 +132,13 @@ def _consulting_corpus() -> str:
         "11. TERMINATION. Either party may terminate for material breach after written notice "
         "and a ten-day opportunity to cure.",
         "12. ENTIRE AGREEMENT. This Agreement is the entire agreement. Electronic signatures are valid.",
-        "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.",
+        "IN WITNESS WHEREOF, the parties have executed this Agreement.",
         f"Consultant: {HARBOR}   By: {CONSULTANT_SIGNER}   Title: Principal   Date: ________",
         f"Client: {IRONVALE}   By: {CLIENT_SIGNER}   Title: Operations Lead   Date: ________",
-        "13. ADDITIONAL OPERATIVE TERMS. Consultant shall complete discovery, implementation, "
-        "acceptance testing, and knowledge-transfer handoff for the AI workflow. Client shall "
-        "nominate a single operational owner, furnish existing process documentation, and accept "
-        "or reject each milestone in writing within ten business days. The parties will hold a "
-        "monthly steering review. Neither party may assign this Agreement without prior written "
+        "13. ADDITIONAL OPERATIVE TERMS. Consultant shall complete discovery, implementation "
+        "planning, configuration, and knowledge-transfer handoff for the AI workflow. Client shall "
+        "nominate a single operational owner and furnish existing process documentation reasonably "
+        "required for the work. Neither party may assign this Agreement without prior written "
         "consent except to a surviving affiliate. Force majeure suspends performance only while "
         "the event continues. Notices are effective on the next business day after email send.",
     ]

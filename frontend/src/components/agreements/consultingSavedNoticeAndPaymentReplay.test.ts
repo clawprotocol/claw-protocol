@@ -21,6 +21,10 @@ import {
   UNCONFIRMED_PAYMENT_DUE_QUESTION,
   UNCONFIRMED_PAYMENT_TIMING_QUESTION,
   buildMaterialMissingItems,
+  isCompletionCriteriaQuestion,
+  isDateMeaningQuestion,
+  unconfirmedCompletionCriteriaQuestion,
+  unconfirmedEffectiveDateQuestion,
 } from "./proAgreementCompleteness";
 
 function replayFixture(): {
@@ -205,5 +209,37 @@ describe("consulting saved-evidence notice order and payment timing", () => {
       repairIncompleteIfToNoticeStanzas(working, harborParties()).text,
     );
     expect(second).toBe(first);
+  });
+
+  it("reproduces date-meaning and completion gaps on the preserved consulting paper", () => {
+    const raw = replayFixture();
+    const body = String(raw.visible_agreement || "");
+    expect(body).toMatch(/as of the Effective Date/i);
+    expect(body).toMatch(/begins on October 1, 2026/i);
+    const missing = buildMaterialMissingItems({
+      intakeRaw: CORE_PAID_JOURNEY_FILLED_INTAKE,
+      body,
+      serverMissing: raw.missing_material_info,
+    });
+    expect(missing.some((item) => item.question === unconfirmedEffectiveDateQuestion("October 1, 2026"))).toBe(
+      true,
+    );
+    expect(
+      missing.some((item) => item.question === unconfirmedCompletionCriteriaQuestion(CORE_PAID_JOURNEY_FILLED_INTAKE)),
+    ).toBe(true);
+    expect(missing.find((item) => isDateMeaningQuestion(item.question))?.canProceedWithoutAnswer).toBe(true);
+    expect(missing.find((item) => isCompletionCriteriaQuestion(item.question))?.canProceedWithoutAnswer).toBe(
+      true,
+    );
+    const resolved = buildMaterialMissingItems({
+      intakeRaw: CORE_PAID_JOURNEY_FILLED_INTAKE,
+      userGapAnswers: [
+        "The agreement effective date is the same as the October 1, 2026 service start.",
+        "Completion is Client's written confirmation that the implemented AI workflow is in operational use.",
+      ].join("\n"),
+      body: `${body}\n\nThis Consulting Services Agreement is entered into as of October 1, 2026 (the "Effective Date") by and between Harbor Peak Analytics LLC and Ironvale Manufacturing Inc.\nCompletion is Client's written confirmation that the implemented AI workflow is in operational use.`,
+    });
+    expect(resolved.some((item) => isDateMeaningQuestion(item.question))).toBe(false);
+    expect(resolved.some((item) => isCompletionCriteriaQuestion(item.question))).toBe(false);
   });
 });

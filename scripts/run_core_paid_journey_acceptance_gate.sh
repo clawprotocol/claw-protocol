@@ -75,6 +75,11 @@ CONTENT_FP="$(
       frontend/src/launch/corePaidJourneySnapshotObserve.ts \
       frontend/src/agreement/canonicalReviewSnapshotApi.ts \
       frontend/src/components/agreements/PaymentClarificationAdvisory.tsx \
+      frontend/src/components/agreements/PaidDraftContentAdvisory.tsx \
+      frontend/src/components/agreements/paidProDateMeaning.ts \
+      frontend/src/components/agreements/paidProCompletionCriteria.ts \
+      backend/agreements/date_meaning_guard.py \
+      backend/agreements/completion_criteria_guard.py \
       frontend/src/components/agreements/paidProVisibleDocumentShell.tsx \
       frontend/src/components/agreements/SimpleProFinalReviewScreen.tsx \
       backend/tests/test_live_drafting_output_boundary.py \
