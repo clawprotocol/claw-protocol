@@ -7,7 +7,7 @@ This evaluation does not authorize launch.
 
 - Branch: `stabilize/phase3b-paid-entry`
 - Base HEAD before this checkpoint: `aaeabe9f46dbd4db42c4b057f5bb9ad4298fb803`
-- Candidate commit: fill after local checkpoint (`git rev-parse HEAD`)
+- Candidate commit: `3c279f3a89a73bbac3e6f2d0fe3eadc7dd073bf0`
 - Artifacts: production frontend build from `frontend/` (`npm run build`) and backend `uvicorn backend.main:app` as in `Dockerfile`
 - Excluded from the commit: `evals/commercial-readiness/results/**`, official ledger, Railway/OpenAI credentials, activated increment policy copy
 
