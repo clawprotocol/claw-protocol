@@ -15,6 +15,7 @@ export {
   UNCONFIRMED_PAYMENT_DUE_QUESTION,
   UNCONFIRMED_PAYMENT_TIMING_QUESTION,
   buildMaterialMissingItems,
+  extractPaymentFacts,
   formatMaterialItemsForRevisePanel,
   materialItemsToClarificationStrings,
 } from "./revisionQuestionEngine";

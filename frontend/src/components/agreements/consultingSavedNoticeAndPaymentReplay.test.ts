@@ -148,6 +148,45 @@ describe("consulting saved-evidence notice order and payment timing", () => {
     expect(pay?.severity).toBe("material");
   });
 
+  it("later explicit answers resolve earlier TBD and are not re-asked", () => {
+    const raw = replayFixture();
+    const body = String(raw.authoritative_draft || "");
+    const resolved = buildMaterialMissingItems({
+      intakeRaw: `${CORE_PAID_JOURNEY_FILLED_INTAKE}\nPayment timing is TBD.`,
+      userGapAnswers: "Payment timing is TBD\nInvoice once on October 1, 2026. Payment due net 60.",
+      body,
+      serverMissing: [],
+    });
+    expect(resolved.some((i) => i.question === UNCONFIRMED_PAYMENT_TIMING_QUESTION)).toBe(false);
+    expect(resolved.some((i) => i.question === UNCONFIRMED_PAYMENT_DUE_QUESTION)).toBe(false);
+    expect(resolved.some((i) => i.question === UNCONFIRMED_INVOICE_CADENCE_QUESTION)).toBe(false);
+    expect(
+      resolved.some((i) => i.id === "payment_timing" || i.id === "payment_due" || i.id === "invoice_cadence"),
+    ).toBe(false);
+  });
+
+  it("weekly then monthly asks nothing extra and keeps canProceedWithoutAnswer advisory", () => {
+    const raw = replayFixture();
+    const body = String(raw.authoritative_draft || "");
+    const monthly = buildMaterialMissingItems({
+      intakeRaw: CORE_PAID_JOURNEY_FILLED_INTAKE,
+      userGapAnswers: "Invoice weekly. Payment due net 30.\nInvoice monthly.",
+      body,
+      serverMissing: [],
+    });
+    expect(monthly.some((i) => i.question === UNCONFIRMED_INVOICE_CADENCE_QUESTION)).toBe(false);
+    expect(monthly.some((i) => i.question === UNCONFIRMED_PAYMENT_TIMING_QUESTION)).toBe(false);
+    const conflicted = buildMaterialMissingItems({
+      intakeRaw: CORE_PAID_JOURNEY_FILLED_INTAKE,
+      userGapAnswers: "Invoice weekly and monthly.",
+      body,
+      serverMissing: [],
+    });
+    const cadenceAsk = conflicted.find((i) => i.question === UNCONFIRMED_INVOICE_CADENCE_QUESTION);
+    expect(cadenceAsk?.canProceedWithoutAnswer).toBe(true);
+    expect(cadenceAsk?.severity).toBe("material");
+  });
+
   it("complete answers are not re-asked and refresh keeps the same document identity", () => {
     const raw = replayFixture();
     const body = String(raw.authoritative_draft || "");

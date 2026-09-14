@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from backend.agreements.premium_full_draft_quality_gate import (
@@ -10,6 +11,7 @@ from backend.agreements.premium_full_draft_quality_gate import (
     UNCONFIRMED_PAYMENT_DUE_QUESTION,
     UNCONFIRMED_PAYMENT_TIMING_QUESTION,
     apply_unconfirmed_payment_timing_guard,
+    payment_section_text,
     unconfirmed_payment_questions_present,
 )
 
@@ -139,6 +141,81 @@ def test_unconfirmed_sixty_day_wording_is_detected() -> None:
     assert "Cure within thirty (30) days after written notice." in cleaned
 
 
+def test_invoice_once_on_october_1_2026_net_60_retains_date_and_deadline() -> None:
+    raw = _replay()
+    cleaned, missing = apply_unconfirmed_payment_timing_guard(
+        intake=HARBOR_INTAKE,
+        user_gap_answers="Invoice once on October 1, 2026. Payment due net 60.",
+        document_text=raw["authoritative_draft"],
+        missing_material_info=[],
+    )
+    fees = payment_section_text(cleaned)
+    assert not unconfirmed_payment_questions_present(missing)
+    assert "October 1, 2026" in fees
+    assert "net 60" in fees.lower() or "net sixty" in fees.lower()
+    assert "net 30" not in fees.lower()
+    assert "one or more installments" not in fees.lower()
+    assert "$48,000" in fees
+
+
+def test_later_explicit_answer_resolves_earlier_tbd() -> None:
+    raw = _replay()
+    cleaned, missing = apply_unconfirmed_payment_timing_guard(
+        intake=HARBOR_INTAKE + "\nPayment timing is TBD.",
+        user_gap_answers=(
+            "Payment timing is TBD\n"
+            "Invoice once on October 1, 2026. Payment due net 60."
+        ),
+        document_text=raw["authoritative_draft"],
+        missing_material_info=[],
+    )
+    fees = payment_section_text(cleaned)
+    assert not unconfirmed_payment_questions_present(missing)
+    assert "October 1, 2026" in fees
+    assert "net 60" in fees.lower() or "net sixty" in fees.lower()
+    assert "tbd" not in fees.lower()
+    assert "$48,000" in fees
+
+
+def test_weekly_then_monthly_leaves_one_consistent_cadence() -> None:
+    raw = _replay()
+    first, first_missing = apply_unconfirmed_payment_timing_guard(
+        intake=HARBOR_INTAKE,
+        user_gap_answers="Invoice weekly. Payment due net 30.",
+        document_text=raw["authoritative_draft"],
+        missing_material_info=[],
+    )
+    assert not unconfirmed_payment_questions_present(first_missing)
+    assert "weekly" in first.lower()
+    cleaned, missing = apply_unconfirmed_payment_timing_guard(
+        intake=HARBOR_INTAKE,
+        user_gap_answers="Invoice weekly. Payment due net 30.\nInvoice monthly.",
+        document_text=first,
+        missing_material_info=[],
+    )
+    fees = payment_section_text(cleaned)
+    assert not unconfirmed_payment_questions_present(missing)
+    assert "monthly" in fees.lower()
+    assert "weekly" not in fees.lower()
+    assert "$48,000" in fees
+    assert re.search(r"twelve|\b12\b", cleaned, re.I)
+
+
+def test_simultaneous_weekly_and_monthly_stays_unresolved() -> None:
+    raw = _replay()
+    cleaned, missing = apply_unconfirmed_payment_timing_guard(
+        intake=HARBOR_INTAKE,
+        user_gap_answers="Invoice weekly and monthly.",
+        document_text=raw["authoritative_draft"],
+        missing_material_info=[],
+    )
+    fees = payment_section_text(cleaned)
+    assert UNCONFIRMED_INVOICE_CADENCE_QUESTION in missing
+    both = "weekly" in fees.lower() and "monthly" in fees.lower()
+    assert not both
+    assert "$48,000" in fees
+
+
 def test_complete_answers_reach_the_working_draft() -> None:
     raw = _replay()
     cleaned, missing = apply_unconfirmed_payment_timing_guard(
@@ -148,8 +225,9 @@ def test_complete_answers_reach_the_working_draft() -> None:
         missing_material_info=[],
     )
     assert not unconfirmed_payment_questions_present(missing)
-    assert "one installment" in cleaned.lower()
-    assert "net 30" in cleaned.lower()
+    fees = payment_section_text(cleaned)
+    assert "October 1, 2026" in fees or "one installment" in fees.lower()
+    assert "net 30" in fees.lower()
     assert "one or more installments" not in cleaned.lower()
     assert "$48,000" in cleaned
     assert "3. Fees and Payment" in cleaned or "3. FEES AND PAYMENT" in cleaned

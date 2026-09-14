@@ -43,6 +43,7 @@ import {
 } from "./paidProSourceOfTruth";
 import { stripPremiumInstructionNoiseForDocument } from "./premiumInstructionStrip";
 import { VERIFIED_PAID_REVIEW_PAPER_SOURCE } from "./paidProVerifiedReviewPaper";
+import { PaymentClarificationAdvisory } from "./PaymentClarificationAdvisory";
 
 export const PAID_PRO_VISIBLE_SHELL_COMPONENT_NAME = "PaidProVisibleDocumentShell";
 /** SoT length threshold for synchronous canonical plain forced render (Test292). */
@@ -388,6 +389,12 @@ export function PaidProVisibleDocumentShell({
     renderPlain.trim().length > 0 ? hashPaidProCorpus(renderPlain.trim()) : "";
 
   return (
+    <div className="w-full max-w-full min-w-0">
+      <PaymentClarificationAdvisory
+        agreementId={displayContext?.agreementId}
+        intakeText={displayContext?.intakeText}
+        body={renderPlain || authoritativePlain}
+      />
     <div
       ref={shellRef}
       className="w-full max-w-full min-w-0"
@@ -443,6 +450,7 @@ export function PaidProVisibleDocumentShell({
           ) : null}
         </div>
       )}
+    </div>
     </div>
   );
 }

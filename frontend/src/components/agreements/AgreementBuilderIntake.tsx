@@ -683,6 +683,12 @@ import {
   PAID_PRO_FALLBACK_REBUILD_MIN_LEN,
 } from "./paidProVisibleDocumentShell";
 import {
+  appendPaymentClarificationAnswer,
+  persistPaymentClarification,
+  readPaymentClarification,
+  registerPaymentClarificationApply,
+} from "./paymentClarificationSession";
+import {
   hasCanonicalReviewCorpusForRender,
   PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN,
   PaidProDocumentBodyForcedRoute,
@@ -3966,6 +3972,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     | null
   >(null);
   const premiumLastGapAnswersRef = useRef<string>("");
+  const runPaymentClarificationRevisionRef = useRef<((userGapAnswers: string) => Promise<void>) | null>(
+    null,
+  );
+  useEffect(() => {
+    const stored = readPaymentClarification(reviewAgreementIdRef.current);
+    if (stored?.answers) premiumLastGapAnswersRef.current = stored.answers;
+    registerPaymentClarificationApply(async (answer) => {
+      const intake = (premiumGapBaseIntakeRef.current || intakeCombinedRef.current || "").trim();
+      const agreementId = (reviewAgreementIdRef.current || "pending").trim();
+      const next = appendPaymentClarificationAnswer(agreementId, intake, answer);
+      premiumLastGapAnswersRef.current = next;
+      const revise = runPaymentClarificationRevisionRef.current;
+      const run = runPremiumModelPassRef.current;
+      if (revise) {
+        await revise(next);
+        return;
+      }
+      if (!run) throw new Error("payment_clarification_apply_unavailable");
+      await run({
+        intakeText: intake,
+        userGapAnswers: next,
+        gapResolverSkippedWithDefaults: false,
+        premiumGenerationCallReason: "post_generate_tenet_recall",
+        postGenerateTenetRecall: true,
+      });
+    });
+    return () => registerPaymentClarificationApply(null);
+  }, []);
   const premiumPostGenerateTenetAskedRef = useRef(false);
   const premiumPostGenerateGapsActiveRef = useRef(false);
   const premiumGapBaseIntakeRef = useRef<string>("");
@@ -10969,6 +11003,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           paymentState: result.premiumRenderSource,
         });
         bumpPremiumSurfaceGateTick();
+        {
+          const paymentAgreementId = (
+            reviewAgreementIdRef.current ||
+            readCreateReviewAgreementResumeId() ||
+            "pending"
+          ).trim();
+          if (mergedIntake.trim()) {
+            persistPaymentClarification({
+              agreementId: paymentAgreementId,
+              intake: mergedIntake,
+              answers: premiumLastGapAnswersRef.current || readPaymentClarification(paymentAgreementId)?.answers || "",
+            });
+          }
+        }
         if (usePaidAuthoritativeBody) {
           const snapGen = result.agreementGenerationId;
           void (async () => {
@@ -12278,6 +12326,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
         runPremiumModelPassRef.current = runModelPass;
         premiumGapBaseIntakeRef.current = mergedIntake;
+        if (mergedIntake.trim()) {
+          persistPaymentClarification({
+            agreementId: (
+              reviewAgreementIdRef.current ||
+              readCreateReviewAgreementResumeId() ||
+              "pending"
+            ).trim(),
+            intake: mergedIntake,
+            answers: premiumLastGapAnswersRef.current || "",
+          });
+        }
         premiumPostGenerateTenetAskedRef.current = false;
         premiumPostGenerateGapsActiveRef.current = false;
 
@@ -17831,6 +17890,51 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       agreementDocumentText,
     ],
   );
+
+  useEffect(() => {
+    runPaymentClarificationRevisionRef.current = async (userGapAnswers: string) => {
+      const intakeText = (premiumGapBaseIntakeRef.current || intakeCombinedRef.current || "").trim();
+      const structured =
+        draftSnapshotRef.current || readPremiumCompletionSnapshot()?.premiumDraft || null;
+      if (!intakeText || !structured) {
+        throw new Error("payment_clarification_apply_unavailable");
+      }
+      const sessionGenForPass = getOrInitSessionAgreementGenerationId();
+      const result = await ensurePremiumCompletion({
+        intakeText,
+        originalUserIntakeRawForMerge: pickLongestPremiumIntakeCorpus(
+          48,
+          readOriginalUserIntakeRaw(),
+          readCreateComplexityResume()?.originalUserIntakeRaw,
+          stripPremiumUserNotesFromMergedIntake(intakeText),
+        ),
+        structuredDraft: structured,
+        agreementFamily: structured.agreement_family ?? detectAgreementFamily(intakeText),
+        guidedFlowId: resolveGuidedFlowId(intakeText, buildLiveDraftPreview(intakeText)),
+        simpleProductFlow,
+        partyRoleLabels: intakePartyRoleLabels,
+        parseDraft: (raw) => parseDraft(raw, { aiModelClass: "premium", checkoutCompletion: true }),
+        userGapAnswers,
+        gapResolverSkippedWithDefaults: false,
+        postGenerateTenetRecall: true,
+        agreementGenerationId: sessionGenForPass,
+        agreementId:
+          (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+        premiumRequestIntakeFingerprint: shortIntakeFingerprint(intakeText),
+        isPremiumRequestStillValid: () => true,
+        premiumGenerationCallReason: "post_generate_tenet_recall",
+        deferWaterfallFinish: true,
+      });
+      const body = (result?.winningPremiumBodyText || "").trim();
+      if (!result || result.staleIntakeOrGeneration || !body) {
+        throw new Error("payment_clarification_apply_unavailable");
+      }
+      const painted = await commitPaidProUserApprovedRevision(body, "payment_clarification_answer");
+      if (!painted.trim()) {
+        throw new Error("payment_clarification_apply_unavailable");
+      }
+    };
+  }, [commitPaidProUserApprovedRevision, simpleProductFlow, intakePartyRoleLabels]);
 
   const openPaidProDraftCardEditor = React.useCallback(() => {
     setPaidProCardAiInstruction("");

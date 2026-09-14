@@ -14,6 +14,11 @@ import {
   type CorePaidJourneyRowId,
 } from "../../src/launch/corePaidJourneyAcceptanceMatrix";
 import {
+  UNCONFIRMED_INVOICE_CADENCE_QUESTION,
+  UNCONFIRMED_PAYMENT_DUE_QUESTION,
+  UNCONFIRMED_PAYMENT_TIMING_QUESTION,
+} from "../../src/components/agreements/proAgreementCompleteness";
+import {
   persistCorePaidJourneyArticle,
   persistCorePaidJourneyArticleCompare,
   persistCorePaidJourneyNetwork,
@@ -1417,5 +1422,84 @@ test.describe("Core paid journey acceptance", () => {
     );
     expect(ceremonyOk, "every required signer ceremony must be durable, version-bound, and operatively identical").toBeTruthy();
     expect(completedDocOk && receiptOk, "completed document and persisted receipt must both bind the locked authority").toBeTruthy();
+  });
+
+  test("payment answers update the painted article and survive reload", async ({ page }) => {
+    expect(CORE_PAID_JOURNEY_FILLED_INTAKE).not.toMatch(/net\s*[- ]?30|installment|invoice monthly/i);
+    await seedCorePaidJourneyOwner(page);
+    const drafted = await draftThroughVisiblePaper(page, { skipSparse: true, skipSignerSetup: true });
+    const panel = page.getByTestId("payment-clarification-panel");
+    await expect(panel, "payment question must be visible after the production draft").toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(panel.getByTestId("payment-clarification-question")).toContainText(
+      UNCONFIRMED_PAYMENT_TIMING_QUESTION,
+    );
+
+    await page.getByTestId("payment-clarification-answer").fill("Invoice monthly");
+    await page.getByTestId("payment-clarification-apply").click();
+    await expect(panel.getByTestId("payment-clarification-question")).toContainText(
+      UNCONFIRMED_PAYMENT_DUE_QUESTION,
+      { timeout: 90_000 },
+    );
+    await expect(panel.getByTestId("payment-clarification-question")).not.toContainText(
+      UNCONFIRMED_PAYMENT_TIMING_QUESTION,
+    );
+    await expect(panel.getByTestId("payment-clarification-question")).not.toContainText(
+      UNCONFIRMED_INVOICE_CADENCE_QUESTION,
+    );
+    let afterPartial = "";
+    await expect
+      .poll(async () => {
+        afterPartial = await articleText(page);
+        const fees = afterPartial.split(/4\.\s+/i)[0] || afterPartial;
+        return /monthly/i.test(fees) && /\$48,000/.test(fees) && !/one or more installments/i.test(fees);
+      }, { timeout: 90_000 })
+      .toBeTruthy();
+    expect(afterPartial).toMatch(/\$48,000/);
+    expect(afterPartial).toMatch(/monthly/i);
+
+    await page.getByTestId("payment-clarification-answer").fill("Invoice once on October 1, 2026. Payment due net 60.");
+    await page.getByTestId("payment-clarification-apply").click();
+    await expect(panel).toHaveCount(0, { timeout: 90_000 });
+    let afterComplete = "";
+    await expect
+      .poll(async () => {
+        afterComplete = await articleText(page);
+        const fees = afterComplete.split(/4\.\s+/i)[0] || afterComplete;
+        return /October 1, 2026/.test(fees) && /net\s*60|net sixty/i.test(fees) && !/monthly/i.test(fees);
+      }, { timeout: 90_000 })
+      .toBeTruthy();
+    const fees = afterComplete.split(/4\.\s+/i)[0] || afterComplete;
+    expect(fees).toMatch(/October 1, 2026/);
+    expect(fees).toMatch(/net\s*60|net sixty/i);
+    expect(fees).not.toMatch(/weekly/i);
+    expect(fees).not.toMatch(/monthly/i);
+    expect(afterComplete).toContain(FACTS.parties[0].name);
+    expect(afterComplete).toContain("$48,000");
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    let afterReload = "";
+    await expect
+      .poll(async () => {
+        afterReload = await articleText(page);
+        return /October 1, 2026/.test(afterReload) && /net\s*60|net sixty/i.test(afterReload);
+      }, { timeout: 90_000 })
+      .toBeTruthy();
+    const reloadId = await durableAgreementId(page);
+    expect(reloadId).toBe(drafted.agreementId);
+    await expect(page.getByTestId("payment-clarification-panel")).toHaveCount(0);
+    expect(afterReload).toMatch(/October 1, 2026/);
+    expect(afterReload).toMatch(/net\s*60|net sixty/i);
+
+    await page.goto("/app", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("body")).toContainText(/Consulting|Harbor Peak|Ironvale/i, { timeout: 20_000 });
+    await page.goto(`/app/agreements/${drafted.agreementId}/view`, { waitUntil: "domcontentloaded" });
+    await expect(page).toHaveURL(new RegExp(drafted.agreementId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    const reopened = await page.locator("body").innerText();
+    expect(reopened).toContain(FACTS.parties[0].name);
+    expect(reopened).toMatch(/October 1, 2026/);
+    expect(reopened).toMatch(/net\s*60|net sixty/i);
+    await expect(page.getByTestId("payment-clarification-panel")).toHaveCount(0);
   });
 });

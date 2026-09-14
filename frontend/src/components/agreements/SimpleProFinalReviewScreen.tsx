@@ -18,6 +18,7 @@ import {
 import { PaidProReviewNextStepCallout } from "./PaidProReviewNextStepCallout";
 import { PaidProReviewStatusPanel } from "./PaidProReviewStatusPanel";
 import { PaidProSignerSavedConfirmationBanner } from "./PaidProSignerSavedConfirmationBanner";
+import { PaymentClarificationAdvisory } from "./PaymentClarificationAdvisory";
 import {
   PAID_PRO_FINAL_VERSION_HEADLINE,
   resolvePaidProFinalVersionCopy,
@@ -765,6 +766,7 @@ export function SimpleProFinalReviewScreen({
 
       {documentFirst ? (
         <>
+          <PaymentClarificationAdvisory body={canonicalPlainForRender || paidReviewPlain} />
           {documentBlock}
           {postDocumentGuidance}
           {!suppressPostDocumentScrollSpacer && stickyBottomScrollInsetPx > 0 ? (
@@ -774,6 +776,7 @@ export function SimpleProFinalReviewScreen({
       ) : (
         <>
           {postDocumentGuidance}
+          <PaymentClarificationAdvisory body={canonicalPlainForRender || paidReviewPlain} />
           {documentBlock}
           {!suppressPostDocumentScrollSpacer && stickyBottomScrollInsetPx > 0 ? (
             <PaidProReviewStickyScrollSpacer heightPx={stickyBottomScrollInsetPx} />

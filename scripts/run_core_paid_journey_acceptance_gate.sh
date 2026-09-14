@@ -64,6 +64,12 @@ CONTENT_FP="$(
       backend/security/redaction.py \
       backend/security/agreement_identity.py \
       backend/agreements/premium_agreement_validation.py \
+      backend/agreements/premium_full_draft_quality_gate.py \
+      frontend/src/components/agreements/proAgreementCompleteness/revisionQuestionEngine.ts \
+      frontend/src/components/agreements/paymentClarificationSession.ts \
+      frontend/src/components/agreements/PaymentClarificationAdvisory.tsx \
+      frontend/src/components/agreements/paidProVisibleDocumentShell.tsx \
+      frontend/src/components/agreements/SimpleProFinalReviewScreen.tsx \
       backend/tests/test_live_drafting_output_boundary.py \
       backend/quality_eval_budget.py \
       backend/jwt_acceptance_jwks.py \
