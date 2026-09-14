@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Isolated production-build checks; real drafting requires --live + passed preflight.
 
---offline-journey exercises Harbor + SaaS through production draft/Apply/GET/reopen
-with the acceptance stub. It is not a live-quality pass.
+--offline-journey exercises Harbor + SaaS through production draft/Apply/GET/reopen.
+Harbor may replay captured live parse/premium bodies; SaaS stays on the acceptance
+stub. Neither is a live-quality pass.
 
 Only live mode reads the explicitly scoped Railway drafting credential. It never
 deploys, changes hosted state, or passes that credential to the frontend.
@@ -32,6 +33,11 @@ def main() -> int:
     parser.add_argument('--preflight', type=Path)
     parser.add_argument('--offline-journey-evidence', type=Path)
     parser.add_argument('--filled-only', action='store_true')
+    parser.add_argument(
+        '--replay-live-evidence',
+        type=Path,
+        help='Captured live result dir. Offline Harbor parse/draft replay only; not a provider call.',
+    )
     parser.add_argument('--increment-policy', type=Path,
                         help='Increment sidecar to select. Defaults to the committed inactive policy.')
     parser.add_argument('--authorize-increment', action='store_true',
@@ -43,6 +49,8 @@ def main() -> int:
         raise RuntimeError('routing_audit_is_no_spend_only')
     if args.offline_journey and (args.live or args.audit_paid_entry):
         raise RuntimeError('offline_journey_is_no_spend_only')
+    if args.replay_live_evidence and args.live:
+        raise RuntimeError('live_replay_is_no_spend_only')
     from backend.quality_eval_live_prepare import (
         DEFAULT_INACTIVE_POLICY,
         assert_live_provider_may_be_contacted,
@@ -115,8 +123,15 @@ def main() -> int:
         'QUALITY_EVAL_RESULT_DIR': str(out),
         'QUALITY_EVAL_CASE': args.case,
     })
+    replay_dir = None
     if args.offline_journey:
         env['QUALITY_EVAL_OFFLINE_JOURNEY'] = '1'
+        default_replay = ROOT / 'evals/commercial-readiness/results/quality-eval-live/20260914T195201Z-5037'
+        replay_dir = args.replay_live_evidence or (default_replay if default_replay.is_dir() else None)
+        if replay_dir:
+            if not (replay_dir / 'consulting-desktop-model-endpoints.json').is_file():
+                raise RuntimeError('replay_live_evidence_missing_harbor_endpoints')
+            env['QUALITY_EVAL_REPLAY_LIVE_DIR'] = str(replay_dir.resolve())
     if args.filled_only or args.live:
         env['QUALITY_EVAL_FILLED_ONLY'] = '1'
     env['CLAW_QUALITY_EVAL_INCREMENT_PATH'] = increment_selection['path']
@@ -157,6 +172,13 @@ def main() -> int:
                 'viewports': ['desktop', 'mobile'],
                 'retries': 0,
                 'model': 'gpt-5.4' if args.live else 'acceptance-stub',
+                'harbor_evidence': 'live-replay' if replay_dir else ('live-model' if args.live else 'acceptance-stub'),
+                'saas_evidence': 'acceptance-stub' if args.offline_journey else ('live-model' if args.live else 'acceptance-stub'),
+                'replay_boundary': (
+                    'captured Harbor parse + premium-full-draft bodies; frontend transforms, date/payment guards, display, Apply, GET, and reopen are current product code'
+                    if replay_dir else None
+                ),
+                'replay_live_dir': str(replay_dir) if replay_dir else None,
                 'auth_provider': 'local-ES256/SDK-storage',
                 'filled_only': bool(args.filled_only or args.live),
                 'increment_policy': increment_selection['basename'],
@@ -231,13 +253,20 @@ def main() -> int:
             run('browser', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',
                 'qualityEvalDrafts.live.spec.ts','--workers=1','--retries=0','--max-failures=1','--reporter=line', *case_filter],
                 ROOT/'frontend', timeout=1500)
-            print('offline_journey=PASS; stub workflow only; live quality not claimed', flush=True)
+            print(
+                'offline_journey=PASS; Harbor live-replay + SaaS stub; not fresh-model evidence; live quality not claimed',
+                flush=True,
+            )
             (out/'status.json').write_text(json.dumps({
                 'status': 'OFFLINE_JOURNEY_PASS',
                 'cases': identity['selected_cases'],
                 'viewports': ['desktop', 'mobile'],
                 'model_calls': 0,
+                'harbor_evidence': identity.get('harbor_evidence'),
+                'saas_evidence': identity.get('saas_evidence'),
+                'replay_boundary': identity.get('replay_boundary'),
                 'live_quality': 'not_claimed',
+                'fresh_model_quality': 'unverified',
                 'manual_edit_recovery': 'unverified',
                 'recipient_paths': 'not_yet_exercised',
             })+'\n')

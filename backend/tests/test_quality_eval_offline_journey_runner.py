@@ -17,6 +17,7 @@ def test_offline_journey_help_and_conflicts() -> None:
     assert "--filled-only" in help_text
     assert "--increment-policy" in help_text
     assert "--authorize-increment" in help_text
+    assert "--replay-live-evidence" in help_text
     assert "--live" in help_text
     conflict = subprocess.run(
         [sys.executable, str(SCRIPT), "--offline-journey", "--live"],

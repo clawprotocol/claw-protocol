@@ -227,7 +227,10 @@ export function stripPresentationChromeForOperativeCompare(article: string): str
     .replace(/^\s*Document\s*$/gim, "")
     .replace(/Draft Agreement\s*\(non-binding template\)/gi, "")
     .replace(/Agreement locked for signature/gi, "")
-    .replace(/Completed agreement/gi, "");
+    .replace(/Completed agreement/gi, "")
+    // After UI banners are gone, a leftover uppercase title is display chrome when
+    // the stored corpus starts at the recital. Do not treat it as operative text.
+    .replace(/^\s*[A-Z0-9][A-Z0-9 /&'’\-—,()]{2,120}AGREEMENT\s*\n+/, "");
   return stripSignatureMetadataForOperativeCompare(withoutBanner);
 }
 

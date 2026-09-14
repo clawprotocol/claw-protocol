@@ -268,6 +268,21 @@ def call_legal_llm(
             sorted(kwargs.keys()),
         )
     from backend.llm_acceptance_stub import acceptance_stub_enabled, stub_legal_llm_completion
+    from backend.quality_eval_live_replay import replay_legal_llm_completion
+
+    replayed = replay_legal_llm_completion(messages, call_purpose=call_purpose)
+    if replayed is not None:
+        if usage_sink is not None:
+            usage_sink.append(
+                {
+                    "call_purpose": (call_purpose or airlock_log_context or "live_replay"),
+                    "requested_model": model or DEFAULT_MODEL,
+                    "returned_model": "live-replay",
+                    "finish_reason": "stop",
+                    "status": "ok",
+                }
+            )
+        return replayed
 
     if acceptance_stub_enabled():
         text = stub_legal_llm_completion(messages, call_purpose=call_purpose)

@@ -149,6 +149,50 @@ describe("paidProDomainScopeGuard", () => {
     expect(graph.deliverableType).toContain("workflow mapping");
   });
 
+  const HARBOR_INTAKE =
+    "Draft a consulting services agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Scope is AI workflow implementation. Fixed fee $48,000. Term twelve months starting October 1, 2026. Governing law Delaware. Consultant owns pre-existing tools; Client owns deliverables after payment.";
+
+  it("keeps supplied AI workflow scope and does not introduce Service Provider", () => {
+    const liveServer = [
+      "1. Services",
+      "Consultant will provide consulting and implementation support services to Client focused on AI workflow implementation during the Term. The services are advisory and implementation-related in nature and may include planning, configuration support, workflow design, process recommendations, documentation, and related deliverables created for Client in connection with Client’s AI workflow implementation needs, as agreed by the parties in writing from time to time.",
+      "",
+      "2. Term",
+      "The term of this Agreement begins on October 1, 2026 and continues for twelve (12) months unless earlier terminated in accordance with this Agreement.",
+    ].join("\n");
+    const { text, repairs } = sanitizePaidProDomainScopeContamination(liveServer, HARBOR_INTAKE, {
+      providerLabel: "Harbor Peak Analytics LLC",
+      clientLabel: "Ironvale Manufacturing Inc.",
+    });
+    expect(text).toMatch(/AI workflow implementation/i);
+    expect(text).not.toMatch(/Service Provider will perform professional consulting/i);
+    expect(text).not.toMatch(/configuration support/i);
+    expect(repairs.length).toBeGreaterThan(0);
+  });
+
+  it("strips unsupported additions from a mixed valid-scope section", () => {
+    const mixed = [
+      "1. Services",
+      "Consultant will perform AI workflow implementation and also manage CRM campaigns, sales outreach, and configuration support.",
+      "",
+      "2. Term",
+      "The term is twelve (12) months.",
+    ].join("\n");
+    const { text } = sanitizePaidProDomainScopeContamination(mixed, HARBOR_INTAKE);
+    expect(text).toMatch(/AI workflow implementation/i);
+    expect(text).not.toMatch(/configuration support/i);
+  });
+
+  it("still replaces a fully unsupported consulting section with neutral language", () => {
+    const { text } = sanitizePaidProDomainScopeContamination(
+      contaminatedConsultingCorpus(),
+      SIMPLE_CONSULTING_INTAKE,
+      { providerLabel: "Harbor Peak Automation LLC", clientLabel: "Red Mesa Logistics LLC" },
+    );
+    expect(text).not.toMatch(/\bAI workflow\b/i);
+    expect(text).toMatch(/professional consulting/i);
+  });
+
   it("review render sanitizer strips unsupported domain language for simple consulting", () => {
     const parties = buildLivePaidProSignerMetadataAuthority({
       partyCount: 2,

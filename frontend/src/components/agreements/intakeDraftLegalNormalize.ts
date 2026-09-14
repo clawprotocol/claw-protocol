@@ -94,33 +94,60 @@ function matchMonthDate(s: string): { month: string; day: number; year: number }
   return { month: m[1], day: Number(m[2]), year: Number(m[3]) };
 }
 
-/** Extract a single human-readable start/effective date from free text when parse missed it. */
+function formatMatchedCalendarDate(raw: string, re: RegExp): string | null {
+  const m = raw.match(re);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  return formatCalendarDate(y, mo, d) || null;
+}
+
+/** Service/term start only — not the agreement effective date. */
+export function extractServiceStartFromRawIntake(raw: string): string | null {
+  const t = collapseWs(raw);
+  if (!t) return null;
+  const startPrefix =
+    /(?:term(?:\s+of\s+this\s+agreement)?\s+)?(?:twelve(?:\s*\(\s*12\s*\))?\s+months?|12\s+months?|starting|start(?:s|ing)?|begins?(?:\s+on)?|commencing|service start(?:s|ing)?(?:\s+on)?)\s+/i;
+  const matches = [...t.matchAll(new RegExp(startPrefix.source, "gi"))];
+  for (const pm of matches) {
+    if (pm.index == null) continue;
+    const slice = t.slice(pm.index + pm[0].length);
+    if (/^effective\b/i.test(slice)) continue;
+    const hit = matchMonthDate(slice);
+    if (hit) {
+      const mo = MONTH_MAP[hit.month.toLowerCase()];
+      if (mo) return formatCalendarDate(hit.year, mo, hit.day) || null;
+    }
+  }
+  return null;
+}
+
+function intakeLabelsAgreementEffectiveDate(raw: string): boolean {
+  return /\b(?:agreement\s+)?effective(?:\s+date)?\b|\bas of\b/i.test(raw || "");
+}
+
+/** Extract a labeled agreement effective date. Service/term start is not copied here. */
 export function extractEffectiveDateFromRawIntake(raw: string): string | null {
   const t = collapseWs(raw);
   if (!t) return null;
+  if (!intakeLabelsAgreementEffectiveDate(t)) return null;
 
-  const iso = t.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/);
-  if (iso) {
-    const y = Number(iso[1]);
-    const mo = Number(iso[2]);
-    const d = Number(iso[3]);
-    const out = formatCalendarDate(y, mo, d);
-    return out || null;
+  const labeledIso = t.match(/\beffective(?:\s+date)?(?:\s+is)?(?:\s+as of)?\s+(20\d{2})-(\d{1,2})-(\d{1,2})\b/i);
+  if (labeledIso) return formatMatchedCalendarDate(labeledIso[0], /(20\d{2})-(\d{1,2})-(\d{1,2})/);
+
+  const labeledSlash = t.match(/\beffective(?:\s+date)?(?:\s+is)?(?:\s+as of)?\s+(\d{1,2})\/(\d{1,2})\/(20\d{2})\b/i);
+  if (labeledSlash) {
+    const mo = Number(labeledSlash[1]);
+    const d = Number(labeledSlash[2]);
+    const y = Number(labeledSlash[3]);
+    return formatCalendarDate(y, mo, d) || null;
   }
 
-  const slash = t.match(/\b(\d{1,2})\/(\d{1,2})\/(20\d{2})\b/);
-  if (slash) {
-    const mo = Number(slash[1]);
-    const d = Number(slash[2]);
-    const y = Number(slash[3]);
-    const out = formatCalendarDate(y, mo, d);
-    return out || null;
-  }
-
-  const prefix = /(?:starting|start(?:ing)?|effective|begins?|commencing|as of)\s+/i;
+  const prefix = /(?:effective(?:\s+date)?(?:\s+is)?|as of)\s+/i;
   const pm = t.match(prefix);
-  const slice = pm && pm.index != null ? t.slice(pm.index + pm[0].length) : t;
-  const hit = matchMonthDate(slice) || matchMonthDate(t);
+  const slice = pm && pm.index != null ? t.slice(pm.index + pm[0].length) : "";
+  const hit = matchMonthDate(slice);
   if (hit) {
     const mo = MONTH_MAP[hit.month.toLowerCase()];
     if (!mo) return null;
@@ -128,6 +155,34 @@ export function extractEffectiveDateFromRawIntake(raw: string): string | null {
   }
 
   return null;
+}
+
+export type LegalNormalizeOptions = {
+  /** Starter shells may fill a documented default. Premium must not present that default as a customer fact. */
+  applyStarterTerminationDefault?: boolean;
+};
+
+function sameCalendarDate(a: string | null | undefined, b: string | null | undefined): boolean {
+  const left = collapseWs(a || "").toLowerCase();
+  const right = collapseWs(b || "").toLowerCase();
+  return Boolean(left && right && left === right);
+}
+
+/** Drop a parse/context effective date that is only the service start. */
+export function clearUnconfirmedServiceStartEffectiveDate(
+  parsed: ParsedDraftShape,
+  rawIntake: string,
+): ParsedDraftShape {
+  const serviceStart = extractServiceStartFromRawIntake(rawIntake);
+  const current = (parsed.effective_date || "").trim();
+  if (!current || !serviceStart) return parsed;
+  if (intakeLabelsAgreementEffectiveDate(rawIntake) && extractEffectiveDateFromRawIntake(rawIntake)) {
+    return parsed;
+  }
+  if (sameCalendarDate(current, serviceStart) || current.toLowerCase().includes(serviceStart.toLowerCase())) {
+    return { ...parsed, effective_date: null };
+  }
+  return parsed;
 }
 
 const AT_WILL_TERMINATION =
@@ -140,6 +195,20 @@ function rawHasAtWill(raw: string): boolean {
 
 function draftTerminationSummaryIsUnset(parsed: ParsedDraftShape): boolean {
   return terminationSummaryIsUnset(parsed.termination_summary);
+}
+
+function intakeStatesTermination(raw: string): boolean {
+  return /\b(?:terminat|for convenience|cure period|at[\s-]?will|end the relationship|without cause)\b/i.test(
+    raw,
+  );
+}
+
+/** True when structured termination is the documented starter default, not a customer fact. */
+function isMechanicallyAppliedStarterTermination(summary: string | null | undefined): boolean {
+  const t = collapseWs(summary || "");
+  if (!t) return false;
+  const starter = collapseWs(STARTER_DEFAULT_TERMINATION_SUMMARY);
+  return t === starter || t.startsWith(starter);
 }
 
 /** When intake clearly describes termination notice but duration still looks like a notice period. */
@@ -245,9 +314,14 @@ function applyPersonalLoanInstallmentWordingFromIntake(
  * Upgrade parsed draft using raw intake (deterministic).
  * Safe to run after `applySimpleFlowSmartDefaults` and canonical type alignment.
  */
-export function normalizeParsedDraftLegalConcepts(parsed: ParsedDraftShape, rawIntake: string): ParsedDraftShape {
+export function normalizeParsedDraftLegalConcepts(
+  parsed: ParsedDraftShape,
+  rawIntake: string,
+  options?: LegalNormalizeOptions,
+): ParsedDraftShape {
   const raw = collapseWs(rawIntake);
   if (!raw) return parsed;
+  const applyStarterTerminationDefault = options?.applyStarterTerminationDefault !== false;
 
   let next: ParsedDraftShape = { ...parsed };
 
@@ -284,9 +358,16 @@ export function normalizeParsedDraftLegalConcepts(parsed: ParsedDraftShape, rawI
   next = backfillTerminationSummaryFromIntake(next, raw);
   next = softenGenericDurationWhenTerminationRich(next, raw);
   next = applyPersonalLoanInstallmentWordingFromIntake(next, raw);
-  if (draftTerminationSummaryIsUnset(next)) {
+  if (applyStarterTerminationDefault && draftTerminationSummaryIsUnset(next)) {
     next = { ...next, termination_summary: STARTER_DEFAULT_TERMINATION_SUMMARY };
+  } else if (
+    !applyStarterTerminationDefault &&
+    isMechanicallyAppliedStarterTermination(next.termination_summary) &&
+    !intakeStatesTermination(raw)
+  ) {
+    next = { ...next, termination_summary: undefined };
   }
+  next = clearUnconfirmedServiceStartEffectiveDate(next, raw);
 
   return next;
 }

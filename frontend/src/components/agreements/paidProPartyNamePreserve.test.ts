@@ -33,6 +33,42 @@ describe("paidProPartyNamePreserve", () => {
     expect(shortFormsFromLegalName("Silver Mesa Analytics LP")).toContain("Silver Mesa");
   });
 
+  it("collapses a leftover entity word after Inc in a notice header", () => {
+    const parties = ["Harbor Peak Analytics LLC", "Ironvale Manufacturing Inc."];
+    const body = [
+      "If to Ironvale Manufacturing Inc. Manufacturing.:",
+      "Ironvale Manufacturing Inc.",
+      "Attn: Jordan Hale",
+    ].join("\n");
+    const out = collapseDuplicateNoticeEntityLines(body, parties);
+    expect(out).toMatch(/^If to Ironvale Manufacturing Inc\.:$/m);
+    expect(out).not.toMatch(/Inc\. Manufacturing/);
+  });
+
+  it("collapses a leftover Inc token after the full legal name", () => {
+    const parties = ["Harbor Peak Analytics LLC", "Ironvale Manufacturing Inc."];
+    const out = collapseDuplicateNoticeEntityLines(
+      "If to Ironvale Manufacturing Inc. Manufacturing Inc.:\nIronvale Manufacturing Inc.",
+      parties,
+    );
+    expect(out).toMatch(/^If to Ironvale Manufacturing Inc\.:$/m);
+    expect(out).not.toMatch(/Inc\. Manufacturing Inc/);
+  });
+
+  it("does not append leftover industry words when Inc already lacks a period", () => {
+    const intake =
+      "Draft a consulting services agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client).";
+    const body =
+      'This Agreement is entered into by and between Harbor Peak Analytics LLC, as "Consultant," and Ironvale Manufacturing Inc, as "Client."';
+    const out = preserveFullLegalPartyNames(
+      body,
+      ["Harbor Peak Analytics LLC", "Ironvale Manufacturing Inc."],
+      intake,
+    );
+    expect(out).toMatch(/Ironvale Manufacturing Inc\.?, as "Client\."/);
+    expect(out).not.toMatch(/Inc\. Manufacturing/);
+  });
+
   it("preserves full names in preamble when model shortened them", () => {
     const parties = [
       "Ironclad Systems Group LLC",

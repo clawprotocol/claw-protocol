@@ -6,9 +6,10 @@ Register date: 2026-09-14 (America/Chicago) / 2026-09-14 UTC
 Live-eval increment proposal: `QUALITY_EVAL_INCREMENTAL_AUTHORIZATION_2026-09-14.md` (inactive sidecar prepared; not authorized, not executed)  
 Continuity C3/C4 close: `68775a946b09a48708fb4ef6eff55e327acea7ed+src-185caa72f8f6a3c6c444dd22163afa65d032219b+run-20260914T143749Z-71780`  
 Date/completion official identity: `96cd7248d803a8bdf2d8072ab409d242e6a255f5+src-ba7dbe25691bf522da2a95a9b68db31fbacc694b+run-20260914T155024Z-82989`  
-Official verified fingerprint (this batch): `ba7dbe25691bf522da2a95a9b68db31fbacc694b`  
-Candidate HEAD at official run: `96cd7248d803a8bdf2d8072ab409d242e6a255f5`  
-Implementation commit (same fingerprint): `95ebe9525041e9e62436bd6e49e7bcb4440ef487`
+Official verified fingerprint (C5 close, unchanged): `ba7dbe25691bf522da2a95a9b68db31fbacc694b`  
+Customer-meaning offline identity: `quality-eval-offline-journey/20260914T204736Z-13517` (`OFFLINE_JOURNEY_PASS`, Harbor live-replay + SaaS stub)  
+Official stub gate on this source: `6ebace85109fda42065fd653ff9fab6dec2a3a73+src-33b6422e9e5d04aa7df3ff3823e640de4d456b6b+run-20260914T205116Z-13943` — **not green** (14/18; C4 and payment-reload failed desktop+mobile). Preserve that dir.  
+Base HEAD before this checkpoint: `6ebace85109fda42065fd653ff9fab6dec2a3a73`
 
 This register is **not** a launch authorization. This batch cannot establish launch readiness. Status labels are reconciled against the latest official evidence; older pass/fail marks are not carried forward when the candidate or proof surface changed.
 
@@ -38,12 +39,12 @@ Owners are unknown unless a checkpoint names one.
 | Field | Value |
 |---|---|
 | Customer impact | Harbor/Ironvale paper from the live model must be commercially usable, not only stub-shaped. |
-| Evidence date/source | `LIVE_DRAFTING_BOUNDARY_REPAIR_CHECKPOINT_2026-09-13.md`. Ledger inspected only (2026-09-14). Offline production-preview journey `evals/commercial-readiness/results/quality-eval-offline-journey/20260914T174441Z-89126`: Harbor+SaaS desktop and mobile stub sequence PASS (`status=OFFLINE_JOURNEY_PASS`, `model_calls=0`). Harbor applied digest `ab5f44aa…` / 2903 chars (same as official C5). SaaS snapshot `crs_99e3dffc…` / digest `5f7c2d34…` / 2757 chars. Failed offline dirs from this batch preserved. |
-| Status | **missing evidence** for live-model quality. Offline Harbor+SaaS production sequence is exercised on this candidate; that is not a live-quality pass. Prior consulting retry is a technical drafting-path pass, not commercial acceptance. Fresh live Harbor + SaaS quality is not authorized by this batch. |
+| Evidence date/source | Failed live increment `quality-eval-live/20260914T195201Z-5037` preserved. Offline correction `quality-eval-offline-journey/20260914T204736Z-13517`: Harbor live-replay + SaaS stub, desktop+mobile, `model_calls=0`, `OFFLINE_JOURNEY_PASS`. Harbor applied digest `e6c3e8a375755ebde1d5f9ec19d4e02625c9a1686dfd02e43a89ba52a2916e3b` / 9424 chars (`crs_58f36a9a…` desktop, `crs_69ba067e…` mobile). SaaS digest `5f7c2d3450c2029dd8291e8b53abcb4b015a7f6e600bea0f66dbdcabf1abceff` / 2757 chars. Failed offline dirs from this batch preserved. Ledger inspected only. |
+| Status | **offline customer-meaning correction verified** through the production path against captured Harbor bodies. **Fresh live Harbor + SaaS quality remains unverified.** Replay is not fresh-model evidence. Official stub gate on this source is **not green**. |
 | Owner | unknown |
 | Exit criterion | Separately authorized live `gpt-5.4` run of Harbor consulting and Orion Harbor/Northwind SaaS through production draft/clarification/display/reopen. Accept only if the opening does not invent an undefined Effective Date, consulting completion is asked or already supplied without invented milestones/SLAs, the SaaS control stays hosted-access-only, and `canProceedWithoutAnswer` remains true. Exhausted `primary` (2/2) and `bootstrap_parse` (2/2) block that run until a new approval. Remaining dollars do not authorize those buckets. |
 
-Ledger snapshot (inspected, not modified): ceiling **$8.00** / stored ceiling `16000000`, model `gpt-5.4`, not halted, attempts **11/16**, known-usage **$0.249751**, reserved **$0.611731**, unknown-usage **0**. `primary` 2/2 and `bootstrap_parse` 2/2 exhausted.
+Ledger snapshot (inspected, not modified): ceiling **$8.00** / stored ceiling `16000000`, model `gpt-5.4`, not halted, attempts **15**, known-usage **$0.366909**, reserved **$0.970711** (1,941,421 units), unknown-usage **0**. Buckets used: `primary` 3, `parse` 4, `bootstrap_parse` 3, `repair` 2, `bootstrap_one_pager` 3. Under the previous increment (sidecar still inactive): **1 primary remaining**, **0 repair remaining**, global 15/20 if attached. Do not execute or renew.
 
 ## 3. Billing and entitlements
 
@@ -130,6 +131,7 @@ Ledger snapshot (inspected, not modified): ceiling **$8.00** / stored ceiling `1
 | `96cd7248+src-c0f5e6f9b4df+run-20260914T153730Z-80809` | 16/18; C3/C4 and payment-reload green; C5 panel mounted | C5 first-draft still invented undefined Effective Date |
 | `96cd7248+src-ba7dbe25691b+run-20260914T155024Z-82989` | Official 18/18 tests; 34/34 required viewport rows; `gate_green=true`; C3/C4 kept; C5 desktop+mobile closed | Fresh live-model quality; hosted billing/authentication/delivery/ops; launch |
 | `aaeabe9f+src-d80e4cdf9e82+run-20260914T181043Z-92178` | Official 18/18 stub **regression** after increment-reservation hook in `quality_eval_budget.py`; C3/C4/C5 customer outcomes still pass. Fingerprint changed; do not attribute the C5 close to this source automatically | Fresh live-model quality; increment sidecar still inactive; launch |
+| `6ebace85+src-33b6422e9e5d+run-20260914T205116Z-13943` | C3 and C5 desktop+mobile still passed on the customer-meaning source. Fingerprint changed: `llm_router.py` now consults local live-replay before the acceptance stub (production never honors it; this run had replay unset and used stub papers) | Official **not green**: payment-reload and C4 desktop+mobile failed (14/18, `viewport_incomplete=2`). Do not treat C4 as closed on this fingerprint. Fresh live quality; hosted readiness |
 
 Harbor filled intake remains: fixed $48,000, no invoicing schedule, no net-30. Official I2 stays party-name `agreement-intake-clarification`.
 
@@ -141,7 +143,7 @@ This queue is the remaining customer-facing work. Items are not launch claims. R
 
 | ID | Customer outcome | Kind | Next action | Observable exit |
 |---|---|---|---|---|
-| Q1 | Live Harbor + SaaS paper is commercially usable through intake → draft → clarification where needed → Apply → snapshot-create → authorized GET → visible paper → fresh editable reopen | **failed on first Harbor sample** (`quality-eval-live/20260914T195201Z-5037`): painted first draft lost supplied scope; SaaS not generated; increment repair used. Not a live-quality pass. | Preserve that live dir. Additional provider calls need a new explicit authorization. Matching no-spend used: preflight `20260914T194132Z-3559` and filled-only offline `20260914T194232Z-3885`. | Both live papers meet the increment quality bar; same agreement/snapshot identity; `canProceedWithoutAnswer` unchanged. Not launch. |
+| Q1 | Live Harbor + SaaS paper is commercially usable through intake → draft → clarification where needed → Apply → snapshot-create → authorized GET → visible paper → fresh editable reopen | **offline correction verified** on `20260914T204736Z-13517` (Harbor live-replay + SaaS stub; not fresh-model). **Live Harbor sample still failed** (`20260914T195201Z-5037`); SaaS was not live-generated; repair allowance used. Official stub gate on this source is not green (C4 + payment-reload). | Preserve live and failed official dirs. Next live eval needs a new explicit authorization. Do not execute or renew the previous increment. | Both *fresh-model* papers meet the increment quality bar; same agreement/snapshot identity; `canProceedWithoutAnswer` unchanged. Not launch. |
 | Q2 | Hosted authentication: a paying owner can sign in and reach paid Create without a synthetic local JWT | **partial on older staging `160079e`** (admin-assisted test login → dashboard → paid Create → resume `49d15cdc` → reload → logout). Local session lifecycle is not on that deploy. Customer-initiated magic-link/email login remains unverified. | After this candidate is deployed to staging, repeat the hosted session pass on the new revision. Cross-account isolation still needs a second authorized session. | Real hosted session on the candidate opens `/app/create` and sees intake; no provider drafting required |
 | Q3 | Paid access / billing: checkout return unlocks the correct workspace only | **missing evidence** (Phase 3B not re-run on this HEAD) | Separately authorized Stripe/entitlement pass; no ledger rewrite | Checkout return entitles the owner org only; wrong-org remains blocked |
 | Q4 | Recipient delivery: review or direct-sign recipients read the locked owner paper | **missing evidence** as launch-ready; A1–B3 passed as stub regressions on `src-185caa72f8f6` / re-passed on `src-ba7dbe25691b` | After Q1, reuse stub A/B rows; live email remains unauthorized | Official A1–B3 still green on the current fingerprint; live email is a later increment |

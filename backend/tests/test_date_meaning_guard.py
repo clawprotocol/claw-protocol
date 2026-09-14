@@ -52,6 +52,25 @@ def test_only_service_start_strips_undefined_and_interchanged_effective_dates() 
     assert "begins on October 1, 2026" in authoritative
 
 
+def test_live_comma_opening_writes_labeled_effective_date() -> None:
+    live = (
+        'This AI Workflow Implementation Consulting Services Agreement (the "Agreement") '
+        'is entered into as of October 1, 2026, by and between Harbor Peak Analytics LLC, '
+        'as "Consultant," and Ironvale Manufacturing Inc, as "Client."\n\n'
+        "1. Services\nConsultant will perform AI workflow implementation.\n\n"
+        "2. Term\nThe term of this Agreement begins on October 1, 2026."
+    )
+    cleaned, missing = apply_date_meaning_guard(
+        intake=HARBOR_INTAKE,
+        user_gap_answers="The agreement effective date is the same as the October 1, 2026 service start.",
+        document_text=live,
+        missing_material_info=[],
+    )
+    opening = cleaned.split("1. Services")[0]
+    assert 'as of October 1, 2026 (the "Effective Date") by and between' in opening
+    assert DATE_QUESTION not in missing
+
+
 def test_explicit_same_date_writes_labeled_effective_date() -> None:
     raw = _replay()
     cleaned, missing = apply_date_meaning_guard(

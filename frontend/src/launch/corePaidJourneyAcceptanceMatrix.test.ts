@@ -55,6 +55,14 @@ describe("core paid journey article inspectors", () => {
     expect(describeOperativeArticleCompare("owner", base, "changed", changed).sameOperative).toBe(false);
   });
 
+  it("treats a leading display title as presentation when the stored corpus has no title line", () => {
+    const stored = consultingPositiveSnippet().replace(/^\s*CONSULTING SERVICES AGREEMENT\s*/, "").trim();
+    const visible = `CONSULTING SERVICES AGREEMENT\n\n${stored}`;
+    const compare = describeOperativeArticleCompare("visible_document", visible, "canonical_get", stored);
+    expect(compare.sameOperative).toBe(true);
+    expect(compare.presentationOnly).toBe(true);
+  });
+
   it("fingerprints operative paper without signature metadata", () => {
     const base = consultingPositiveSnippet();
     const withSigNoise = `${base}\n\nIN WITNESS WHEREOF\nBy: ________________\nName: scratch`;

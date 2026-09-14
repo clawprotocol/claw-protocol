@@ -218,6 +218,24 @@ describe("quality-eval Harbor meaning and Apply explainability", () => {
       ok: true,
       reasons: [],
     });
+    const liveFirst = [
+      'This AI Workflow Implementation Consulting Services Agreement (the "Agreement") is entered into by and between Harbor Peak Analytics LLC, as "Consultant," and Ironvale Manufacturing Inc. ("Client").',
+      "1. Services. Consultant will provide consulting and implementation services focused on AI workflow implementation.",
+      "2. Term. The term begins on October 1, 2026 and continues for twelve (12) months.",
+      "3. Fees. Client will pay $48,000.",
+      "11. Governing Law. Delaware.",
+    ].join("\n");
+    const liveApplied = [
+      'This AI Workflow Implementation Consulting Services Agreement (the "Agreement") is entered into as of October 1, 2026 (the "Effective Date") by and between Harbor Peak Analytics LLC, as "Consultant," and Ironvale Manufacturing Inc. ("Client").',
+      "1. Services. Consultant will provide consulting and implementation services focused on AI workflow implementation. Completion is Client's written confirmation that the implemented AI workflow is in operational use.",
+      "2. Term. The term begins on October 1, 2026 and continues for twelve (12) months.",
+      "3. Fees. Client will pay $48,000.",
+      "11. Governing Law. Delaware.",
+    ].join("\n");
+    expect(applyChangesExplainedByAnswers(liveFirst, liveApplied, HARBOR_ANSWERS)).toEqual({
+      ok: true,
+      reasons: [],
+    });
     expect(
       applyChangesExplainedByAnswers(
         paintedFirst,
@@ -346,9 +364,8 @@ describe("quality-eval Harbor meaning and Apply explainability", () => {
     };
     const paintedCheck = checkHarborFirstDraftMeaning(painted);
     expect(paintedCheck.ok).toBe(false);
-    expect(paintedCheck.reasons).toEqual(
-      expect.arrayContaining(["missing_supplied_scope", "missing_term_duration"]),
-    );
+    expect(paintedCheck.reasons).toEqual(expect.arrayContaining(["missing_supplied_scope"]));
+    expect(paintedCheck.reasons).not.toContain("missing_term_duration");
     expect(painted).not.toMatch(/AI workflow implementation/i);
     expect(premium.document_text || "").toMatch(/AI workflow implementation/i);
     expect(premium.document_text || "").toMatch(/twelve \(12\) months/i);

@@ -42,11 +42,11 @@ _OPENING_AS_OF_EFFECTIVE_RE = re.compile(
     re.I,
 )
 _OPENING_AS_OF_DATE_RE = re.compile(
-    rf"(entered\s+into\s+)as\s+of\s+{_DATE}(?:\s+\(the\s+[\"']Effective Date[\"']\))?(\s+by\s+and\s+between)",
+    rf"(entered\s+into\s+)as\s+of\s+{_DATE},?(?:\s+\(the\s+[\"']Effective Date[\"']\))?(\s+by\s+and\s+between)",
     re.I,
 )
 _OPENING_EFFECTIVE_AS_OF_RE = re.compile(
-    rf"(,\s*)?effective\s+as\s+of\s+{_DATE}(?:\s+\(the\s+[\"']Effective Date[\"']\))?",
+    rf"(,\s*)?effective\s+as\s+of\s+{_DATE},?(?:\s+\(the\s+[\"']Effective Date[\"']\))?",
     re.I,
 )
 _IN_WITNESS_EFFECTIVE_RE = re.compile(

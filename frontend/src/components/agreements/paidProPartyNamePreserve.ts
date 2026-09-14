@@ -72,6 +72,26 @@ function escapeRe(s: string): string {
 }
 
 /** Collapse adjacent duplicate legal-entity phrases (malformed notice headers / entity lines). */
+function stripRedundantTrailingEntityToken(phrase: string, entity: string): string | null {
+  const norm = (value: string) =>
+    value
+      .replace(/\s+/g, " ")
+      .replace(/\.+(?=\s|$)/g, "")
+      .trim()
+      .toLowerCase();
+  const entityNorm = norm(entity);
+  const phraseNorm = norm(phrase);
+  if (!entityNorm || !phraseNorm.startsWith(entityNorm)) return null;
+  const extra = phraseNorm.slice(entityNorm.length).trim();
+  if (!extra) return entity;
+  const entityTokens = entityNorm.split(/\s+/).filter(Boolean);
+  const extraTokens = extra.split(/\s+/).filter(Boolean);
+  if (extraTokens.length > 0 && extraTokens.every((token) => entityTokens.includes(token))) {
+    return entity;
+  }
+  return null;
+}
+
 export function collapseDuplicatedLegalEntityPhrase(
   phrase: string,
   fullNames?: readonly string[],
@@ -82,6 +102,11 @@ export function collapseDuplicatedLegalEntityPhrase(
   for (const full of names) {
     const entity = full.trim();
     if (!entity) continue;
+    const redundant = stripRedundantTrailingEntityToken(out, entity);
+    if (redundant) {
+      out = redundant;
+      continue;
+    }
     const escaped = escapeRe(entity);
     const re = new RegExp(`(${escaped})\\s+\\1`, "gi");
     if (re.test(out)) {
@@ -586,6 +611,21 @@ export function resolveAuthoritativePartiesForRecitalPolish(
   return [];
 }
 
+/** True when tail already continues the legal name, ignoring Inc vs Inc. punctuation. */
+function textStartsWithLegalNameRemainder(text: string, remainder: string): boolean {
+  const norm = (value: string) =>
+    value
+      .replace(/\s+/g, " ")
+      .replace(/\.+(?=\s|$)/g, "")
+      .toLowerCase();
+  const expected = norm(remainder).replace(/^\s+/, "");
+  if (!expected) return true;
+  const actual = norm(text).replace(/^\s+/, "");
+  if (!actual.startsWith(expected)) return false;
+  const after = actual.slice(expected.length);
+  return after === "" || /^[\s,;:'")\]]/.test(after);
+}
+
 function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly string[]): string {
   const pairs: { short: string; full: string }[] = [];
   for (const full of fullNames) {
@@ -620,10 +660,13 @@ function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly str
       if (isRoleLabelInNoticeRegion(offset, match)) return match;
       const window = out.slice(Math.max(0, offset - 8), offset + match.length + 16);
       if (/\[\[LDG_(?:EMAIL|URL)_\d+\]\]/i.test(window)) return match;
-      const tail = out.slice(offset + match.length);
+      const fromMatch = out.slice(offset);
+      const tail = fromMatch.slice(match.length);
       const remainder = full.slice(match.length);
-      if (remainder && tail.toLowerCase().startsWith(remainder.toLowerCase())) return match;
-      if (out.slice(offset).toLowerCase().startsWith(full.toLowerCase())) return match;
+      // Inc vs Inc. (and other suffix punctuation) is the same legal name, not a
+      // missing short form. Expanding here creates "Inc. Manufacturing".
+      if (remainder && textStartsWithLegalNameRemainder(tail, remainder)) return match;
+      if (textStartsWithLegalNameRemainder(fromMatch, full)) return match;
       return full;
     });
     if (next !== out) out = next;

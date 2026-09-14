@@ -1,15 +1,19 @@
-# Staging deployment proposal — local candidate after live increment
+# Staging deployment proposal — customer-meaning offline correction
 
 Do **not** push or deploy until this proposal is explicitly approved.  
-This evaluation does not authorize launch.
+This evaluation does not authorize launch. Official stub gate on this source is **not green**.
 
 ## Candidate
 
 - Branch: `stabilize/phase3b-paid-entry`
-- Base HEAD before this checkpoint: `aaeabe9f46dbd4db42c4b057f5bb9ad4298fb803`
-- Candidate commit: `3c279f3a89a73bbac3e6f2d0fe3eadc7dd073bf0`
+- Base HEAD before this checkpoint: `6ebace85109fda42065fd653ff9fab6dec2a3a73`
+- Candidate: the local commit that records this customer-meaning correction (same working tree that produced the identities below)
+- Offline proof: `evals/commercial-readiness/results/quality-eval-offline-journey/20260914T204736Z-13517` (`OFFLINE_JOURNEY_PASS`, `model_calls=0`)
+- Official stub gate: `6ebace85109fda42065fd653ff9fab6dec2a3a73+src-33b6422e9e5d04aa7df3ff3823e640de4d456b6b+run-20260914T205116Z-13943` — **14/18**, C4 and payment-reload failed desktop+mobile. Preserve that dir.
 - Artifacts: production frontend build from `frontend/` (`npm run build`) and backend `uvicorn backend.main:app` as in `Dockerfile`
 - Excluded from the commit: `evals/commercial-readiness/results/**`, official ledger, Railway/OpenAI credentials, activated increment policy copy
+
+Replay boundary (do not collapse): captured Harbor parse + premium-full-draft **bodies** are live-model evidence. Transforms, sanitizer, date/payment guards, display, Apply, GET, and reopen are current product code. SaaS used the acceptance stub. This is **not** fresh-model evidence.
 
 ## Currently deployed staging (do not treat as this candidate)
 
@@ -20,13 +24,13 @@ This evaluation does not authorize launch.
 
 Production remains `main` from 2026-08-25 (`a9102eb4` / `8f128121`) and is not the target.
 
-This candidate is the unpaid-entry / session-lifecycle / evaluation-prep tree on `aaeabe9f` plus the uncommitted commercial-readiness work. It is **not** `160079e`.
-
 ## Differences that matter for hosted review
 
-- Local AuthProvider / `currentUser` lifecycle (signed-out and failed-refresh ignore storage; JWT-shaped token required). **Not on staging `160079e`.**
-- Evaluation checker and increment runner are local-only and must not change hosted model routing.
-- Live Harbor painted-paper scope loss is a **product display** issue on this candidate’s production handlers; deploying will carry that behavior unless separately fixed under a new authorization.
+- Explicit customer scope now outranks industry inference from entity names.
+- Premium request no longer carries biotech/CRM/campaign/sales contamination or a starter convenience-termination default as if it were a customer fact.
+- Display sanitizer strips unsupported additions without replacing a valid Services section.
+- Official fingerprint changed because `llm_router.py` can replay captured Harbor bodies in local/test only. Production never honors the replay directory.
+- Official C4 / payment-reload are **unverified on this fingerprint**. Do not deploy as if those rows were still closed.
 
 ## Configuration / migration
 
@@ -43,19 +47,18 @@ This candidate is the unpaid-entry / session-lifecycle / evaluation-prep tree on
 
 ## Post-deployment verification (hosted, this candidate)
 
-Use an existing authorized owner. Do not seed a synthetic JWT, create accounts, send customer email, or draft with the live provider.
+Do not deploy until official C4 and payment-reload are green on this source. If later approved:
 
 1. Signed-out `/app` and an owner agreement URL require sign-in.
 2. Genuine hosted session reaches the entitled workspace.
 3. Paid `/app/create` shows entitled intake (do not submit a live draft).
 4. Resume an existing agreement, reload, confirm the same paper.
 5. Logout returns dashboard and owner agreement URLs to sign-in required.
-6. If a second authorized session is available, confirm account/workspace isolation.
 
 ## Prior hosted evidence (older deploy only)
 
-Admin-assisted staging test login on **`160079e`** reached dashboard, paid Create, resume `49d15cdc-09c8-44a8-bea5-0579f55f84ef`, reload, and logout. That is **not** evidence for this candidate. Customer-initiated magic-link / email delivery remains **unverified**.
+Admin-assisted staging test login on **`160079e`** reached dashboard, paid Create, resume `49d15cdc-09c8-44a8-bea5-a5f55f84ef`, reload, and logout. That is **not** evidence for this candidate. Customer-initiated magic-link / email delivery remains **unverified**.
 
 ## Approval requested
 
-Deploy this checkpoint’s frontend and backend to Railway **staging** (`extraordinary-creativity` / environment `0a507476-6f9b-4170-9721-a1315f593de7`) only. No production deploy, no push requirement beyond whatever the operator uses to reach those services, no increment policy, no provider drafting in the verification pass.
+**Do not deploy this checkpoint** while official stub gate is red. When C4 and payment-reload are re-closed, deploy frontend and backend to Railway **staging** only. No production deploy, no increment policy, no provider drafting in the verification pass.

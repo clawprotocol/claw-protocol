@@ -54,6 +54,31 @@ Revenue sharing: Red Mesa Logistics LLC 50%, Harbor Peak Automation LLC 30%, Blu
     expect(s.payment).toMatch(/50\s*%/);
   });
 
+  it("prefers explicit scope over industry tokens inside a company name", () => {
+    const s = parseIntakeToStructuredAgreement(
+      "Draft a consulting services agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Scope is AI workflow implementation. Fixed fee $48,000.",
+    );
+    expect(s.scope).toMatch(/AI workflow implementation/i);
+    expect(s.scope).not.toMatch(/biotech|manufacturing, supply-chain/i);
+    expect(s.scopeInferred).toBe(false);
+  });
+
+  it("does not invent manufacturing obligations from a renamed client entity", () => {
+    const s = parseIntakeToStructuredAgreement(
+      "Draft a consulting services agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Biotech Manufacturing Inc. (Client). Scope is AI workflow implementation.",
+    );
+    expect(s.scope).toMatch(/AI workflow implementation/i);
+    expect(s.scope).not.toMatch(/Biotech, manufacturing/i);
+  });
+
+  it("does not let a following character dump become labeled scope", () => {
+    const blob = "B".repeat(500);
+    const s = parseIntakeToStructuredAgreement(`Between Acme LLC and Beta LLC.\nScope: weekly cleaning.\n\n${blob}`);
+    expect(s.scope.toLowerCase()).toMatch(/weekly cleaning/);
+    expect(s.scope).not.toContain("BBBB");
+    expect(s.scopeInferred).toBe(false);
+  });
+
   it("extracts twenty-four (24) months from labeled Term line", () => {
     const s = parseIntakeToStructuredAgreement("Term: twenty-four (24) months.");
     expect(s.term).toMatch(/twenty-four\s*\(24\)\s+months|24\s+months/i);

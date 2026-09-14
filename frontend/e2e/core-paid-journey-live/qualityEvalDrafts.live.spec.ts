@@ -115,6 +115,18 @@ for (const scenario of selected) {
         );
       }
       writeQualityEvalArtifact("premium-result.json", JSON.stringify(generated, null, 2), scenario.id);
+      const premiumRequest = generatedResponse.request().postDataJSON() as {
+        context?: { purpose?: string; additional_terms?: string; effective_date?: string; termination_summary?: string };
+      };
+      writeQualityEvalArtifact("premium-request.json", JSON.stringify(premiumRequest, null, 2), scenario.id);
+      if (scenario.id === "consulting") {
+        expect(premiumRequest.context?.purpose || "").toMatch(/AI workflow implementation/i);
+        expect(premiumRequest.context?.purpose || "").not.toMatch(/Biotech, manufacturing/i);
+        expect(premiumRequest.context?.additional_terms || "").not.toMatch(/\bCRM\b/i);
+        expect(premiumRequest.context?.additional_terms || "").not.toMatch(/sales representative/i);
+        expect(premiumRequest.context?.effective_date || "").not.toMatch(/October 1, 2026/);
+        expect(premiumRequest.context?.termination_summary || "").not.toMatch(/for convenience/i);
+      }
       expect(generatedResponse.ok(), "Premium handler must finish successfully").toBeTruthy();
       expect(generated.generation_ok, "A degraded response is not an accepted premium draft").toBe(true);
       expect(
@@ -272,7 +284,12 @@ for (const scenario of selected) {
               scripted_actions: scriptedActions,
               customer_manual_corrections: "not_assessed",
               customer_effort: "not_assessed",
-              environment: process.env.CLAW_QUALITY_EVAL_LIVE === "1" ? "live-model" : "acceptance-stub",
+              environment:
+                process.env.CLAW_QUALITY_EVAL_LIVE === "1"
+                  ? "live-model"
+                  : process.env.QUALITY_EVAL_REPLAY_LIVE_DIR
+                    ? "live-replay"
+                    : "acceptance-stub",
             },
             quality: process.env.CLAW_QUALITY_EVAL_LIVE === "1" ? "human_review_required" : "offline_stub_workflow",
             live_quality: "not_claimed",

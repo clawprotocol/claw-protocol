@@ -1475,7 +1475,7 @@ async function runPremiumCompletionInner(
   });
   merged = applyHardFamilyLocks(merged, rawIntake);
   merged = alignTitleWithCanonical(merged, rawIntake);
-  merged = normalizeParsedDraftLegalConcepts(merged, rawIntake);
+  merged = normalizeParsedDraftLegalConcepts(merged, rawIntake, { applyStarterTerminationDefault: false });
   merged = { ...merged, parties: extractCleanPremiumParties(rawIntake, merged) };
   merged = { ...merged, title: inferPremiumTitle(merged, rawIntake) };
   if (import.meta.env.DEV) {
@@ -1493,7 +1493,7 @@ async function runPremiumCompletionInner(
   merged = synthesizePremiumScopeAndOperativeFields(merged, rawIntake);
   merged = injectCoreClausesConservative(merged, rawIntake);
   merged = polishAllTextFields(merged);
-  merged = normalizeParsedDraftLegalConcepts(merged, rawIntake);
+  merged = normalizeParsedDraftLegalConcepts(merged, rawIntake, { applyStarterTerminationDefault: false });
   merged = ensurePremiumDraftMeetsReviewGate(merged, rawIntake);
   merged = elevatePremiumPaymentTermsFromIntake(merged, rawIntake);
   merged = applyJointVentureEconomicsExpansion(merged, rawForSoT || rawIntake);
@@ -1639,7 +1639,9 @@ async function runPremiumCompletionInner(
   let trackB = mergePremiumParsePreferFresh(input.structuredDraft, trackBParse, rawForSoT || rawIntake);
   trackB = runIntakeDefaultsAndRoles(trackB, rawForSoT || rawIntake, input.simpleProductFlow, input.partyRoleLabels);
   trackB = applyHardFamilyLocks(trackB, rawForSoT || rawIntake);
-  trackB = normalizeParsedDraftLegalConcepts(trackB, rawForSoT || rawIntake);
+  trackB = normalizeParsedDraftLegalConcepts(trackB, rawForSoT || rawIntake, {
+    applyStarterTerminationDefault: false,
+  });
   trackB = synthesizePremiumScopeAndOperativeFields(trackB, rawForSoT || rawIntake);
   trackB = injectCoreClausesConservative(trackB, rawForSoT || rawIntake);
   trackB = elevatePremiumPaymentTermsFromIntake(trackB, rawForSoT || rawIntake);

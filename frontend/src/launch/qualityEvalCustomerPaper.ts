@@ -14,7 +14,8 @@ const CHANGED_NET = /\bnet[- ]*(?:60|90|sixty|ninety)\b/i;
 const NET_30 =
   /\b(?:net[- ]*(?:30|thirty)|payable within (?:30|thirty) days|due (?:in |within )(?:30|thirty) days)\b/i;
 const ANNUAL_FEE = /\b(?:annual(?:ly)?|per year|yearly)\b/i;
-const TWELVE_MONTHS = /\b(?:twelve[- ]months?|12[- ]months?|12-month|one[- ]year)\b/i;
+const TWELVE_MONTHS =
+  /\b(?:twelve(?:\s*\(\s*12\s*\))?\s*months?|12(?:\s*\(\s*12\s*\))?\s*months?|12-month|one[- ]year)\b/i;
 const HOSTED_SCOPE = /\b(?:hosted platform|hosted access|hosted software)\b/i;
 const NO_PROFESSIONAL =
   /\b(?:no professional services|without professional services|hosted platform only|hosted access only|hosted software access only|shall not perform professional services)\b/i;
@@ -74,7 +75,7 @@ export function checkHarborFirstDraftMeaning(article: string): PaperCheck {
   if (!/AI workflow implementation/i.test(text)) reasons.push("missing_supplied_scope");
   if (!/Delaware/i.test(text)) reasons.push("missing_governing_law");
   if (!/October 1, 2026/.test(text)) reasons.push("missing_service_start");
-  if (!TWELVE_MONTHS.test(text) && !/twelve months/i.test(text)) reasons.push("missing_term_duration");
+  if (!TWELVE_MONTHS.test(text)) reasons.push("missing_term_duration");
   if (UNDEFINED_EFFECTIVE.test(text)) reasons.push("invented_undefined_effective_date");
   if (CUSTOMER_EFFECTIVE.test(text)) reasons.push("invented_effective_date_before_answer");
   if (CUSTOMER_COMPLETION.test(text)) reasons.push("invented_completion_before_answer");
@@ -109,8 +110,12 @@ export function stripAuthorizedHarborApplyDecorations(article: string): string {
   let text = article || "";
   text = text.replace(/^\s*CONSULTING SERVICES AGREEMENT\s*/i, "");
   text = text.replace(
-    /This Consulting Services Agreement(?:\s*\((?:the|this) ["']Agreement["']\))?\s+is entered into(?:\s+as of October 1, 2026(?:\s*\(the ["']Effective Date["']\))?)?\s+by and between/gi,
+    /This (?:AI Workflow Implementation )?Consulting Services Agreement(?:\s*\((?:the|this) ["']Agreement["']\))?\s+is entered into(?:\s+as of October 1, 2026(?:,)?(?:\s*\(the ["']Effective Date["']\))?)?\s+by and between/gi,
     "This Consulting Services Agreement is entered into by and between",
+  );
+  text = text.replace(
+    /\s+as of October 1, 2026(?:,)?(?:\s*\(the ["']Effective Date["']\))?/gi,
+    "",
   );
   text = text.replace(
     /\s*(?:The )?(?:Consultant and Client|parties) may be referred to individually as a ["']Party["'] and collectively as the ["']Parties\.?["']\.?\s*/gi,

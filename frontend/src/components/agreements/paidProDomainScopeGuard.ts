@@ -119,7 +119,11 @@ function intakeCategorySupport(blob: string, category: DomainScopeCategory): boo
     case "software":
       return /\b(?:software|SaaS|application|app|source\s+code)\b/i.test(text);
     case "implementation_support":
-      return intakeAllowsGenericImplementationLanguage(text) || /\bimplementation\s+(?:support|assistance)\b/i.test(text);
+      return (
+        intakeAllowsGenericImplementationLanguage(text) ||
+        /\bimplementation\s+(?:support|assistance)\b/i.test(text) ||
+        /\bAI\s+workflow\s+implementation\b/i.test(text)
+      );
     case "demo":
       return /\b(?:demo|demonstration|walkthrough)\b/i.test(text);
     case "acceptance_review":
@@ -150,8 +154,28 @@ export function intakeExplicitlyRequestsDomainScope(blob: string): boolean {
 }
 
 export function intakeSupportsDomainCategory(blob: string, category: DomainScopeCategory): boolean {
-  if (intakeExplicitlyRequestsDomainScope(blob)) return true;
   return intakeCategorySupport(blob, category);
+}
+
+export function explicitCustomerScopePhrases(intake: string): string[] {
+  const text = (intake || "").trim();
+  if (!text) return [];
+  const out: string[] = [];
+  const labeled = text.match(/\b(?:scope|purpose|services?)\s*(?:is|:|-)\s*([^.!\n]+)/i);
+  if (labeled?.[1]) {
+    const phrase = labeled[1].replace(/\s+/g, " ").trim();
+    if (phrase.length >= 8) out.push(phrase);
+  }
+  for (const match of text.matchAll(/\bAI\s+workflow(?:\s+(?:implementation|setup|services?))?/gi)) {
+    if (match[0]) out.push(match[0].replace(/\s+/g, " ").trim());
+  }
+  return [...new Set(out)];
+}
+
+function sectionKeepsCustomerScope(sectionBody: string, intake: string): boolean {
+  const body = (sectionBody || "").toLowerCase();
+  if (!body.trim()) return false;
+  return explicitCustomerScopePhrases(intake).some((phrase) => phrase.length >= 8 && body.includes(phrase.toLowerCase()));
 }
 
 export function detectUnsupportedDomainContamination(
@@ -159,7 +183,7 @@ export function detectUnsupportedDomainContamination(
   intake: string,
 ): { contaminated: boolean; ruleIds: string[] } {
   const text = (corpus || "").trim();
-  if (!text || intakeExplicitlyRequestsDomainScope(intake)) {
+  if (!text) {
     return { contaminated: false, ruleIds: [] };
   }
   const ruleIds: string[] = [];
@@ -216,8 +240,7 @@ function neutralizeContaminatedScopeSections(
   intake: string,
   opts?: { providerLabel?: string; clientLabel?: string },
 ): { text: string; repairs: string[] } {
-  if (intakeExplicitlyRequestsDomainScope(intake)) return { text, repairs: [] };
-  const provider = (opts?.providerLabel || "Service Provider").trim() || "Service Provider";
+  const provider = (opts?.providerLabel || "").trim();
   const client = (opts?.clientLabel || "Client").trim() || "Client";
   const lines = text.split("\n");
   const out: string[] = [];
@@ -240,8 +263,13 @@ function neutralizeContaminatedScopeSections(
       }
       const sectionBody = sectionLines.join("\n");
       const hits = detectUnsupportedDomainContamination(sectionBody, intake);
-      if (hits.contaminated) {
-        out.push(neutralScopeBody(provider, client));
+      if (hits.contaminated && sectionKeepsCustomerScope(sectionBody, intake)) {
+        const inline = neutralizeRecitalAndInlinePhrases(sectionBody, intake);
+        out.push(inline.text);
+        repairs.push("stripped_unsupported_scope_additions");
+        repairs.push(...inline.repairs);
+      } else if (hits.contaminated) {
+        out.push(neutralScopeBody(provider || "Service Provider", client));
         repairs.push("neutralized_scope_section");
       } else {
         out.push(...sectionLines);
@@ -273,7 +301,8 @@ function neutralizeRecitalAndInlinePhrases(text: string, intake: string): { text
     [/\bworkflow mapping, configuration planning, implementation support\b/gi, "professional consulting services"],
     [/\bworkflow mapping\b/gi, "scope analysis"],
     [/\bconfiguration planning\b/gi, "planning"],
-    [/\bimplementation support\b/gi, "professional services"],
+    [/\bimplementation support\b/gi, "implementation"],
+    [/\bconfiguration support\b/gi, "planning"],
     [/\bpractical demonstration or (?:acceptance )?review\b/gi, "delivery review"],
     [/\bacceptance demonstration\b/gi, "delivery confirmation"],
     [/\bautomation logic or prompts\b/gi, "agreed deliverables"],
@@ -316,10 +345,6 @@ export function sanitizePaidProDomainScopeContamination(
     intakeDescribesBrandLicensingDistributionManufacturingStack(intakeText) ||
     intakeHasMultiPartySpecializedCommercialRoles(intakeText)
   ) {
-    return { text, repairs: [] };
-  }
-
-  if (intakeExplicitlyRequestsDomainScope(intakeText)) {
     return { text, repairs: [] };
   }
 
