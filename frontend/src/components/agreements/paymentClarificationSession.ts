@@ -3,12 +3,20 @@ import { getOrgId, subscribeToOrgContextChanges } from "../../launch/orgContext"
 import {
   clearPaidProRevisionOperationsForTests,
   readActivePaidProRevisionOperation,
+  readPaidProLiveRevisionView,
 } from "./paidProRevisionOperation";
+import { selectVerifiedPaidReviewPaper } from "./paidProVerifiedReviewPaper";
+import {
+  authorizedPaidProRevisionId,
+  getPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
+} from "./paidProSourceOfTruthState";
 import {
   UNCONFIRMED_INVOICE_CADENCE_QUESTION,
   UNCONFIRMED_PAYMENT_DUE_QUESTION,
   UNCONFIRMED_PAYMENT_TIMING_QUESTION,
   buildMaterialMissingItems,
+  extractPaymentFacts,
   paymentSectionText,
 } from "./proAgreementCompleteness";
 
@@ -145,6 +153,28 @@ function handlerKey(scope?: PaymentClarificationScope | null): string | null {
   return `${userId}\u0000${organizationId}\u0000${agreementId ? `${agreementId}\u0000${revisionId}` : `draft:${draftSessionId}`}`;
 }
 
+function agreementSessionHandlerKey(scope?: PaymentClarificationScope | null): string | null {
+  if (!hasExactScope(scope)) return null;
+  const userId = normalizeId(scope.userId);
+  const organizationId = normalizeId(scope.organizationId);
+  const agreementId = normalizeId(scope.agreementId);
+  if (!userId || !organizationId || !agreementId) return null;
+  return `${userId}\u0000${organizationId}\u0000session:${agreementId}`;
+}
+
+/** Current authorized paper hash. Used to rebind Apply after resume without inventing a revision. */
+export function resolveLivePaymentClarificationRevision(agreementId?: string | null): string {
+  const sotHash = getPaidProSourceOfTruth()?.hash?.trim() || "";
+  if (sotHash && sotHash !== "empty") return sotHash;
+  const sotText = getPaidProSourceOfTruthText().trim();
+  const fromSot = authorizedPaidProRevisionId(sotText);
+  if (fromSot) return fromSot;
+  const id = normalizeId(agreementId);
+  if (!id) return "";
+  const verified = String(selectVerifiedPaidReviewPaper({ agreementId: id })?.plain || "").trim();
+  return authorizedPaidProRevisionId(verified);
+}
+
 function newOpaqueId(prefix: string): string {
   const rand =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -214,6 +244,73 @@ export function readPaymentClarification(
   if (!scope || typeof scope === "string") return null;
   if (!hasExactScope(scope)) return null;
   return readAll().find((row) => matchesScope(row, scope)) ?? null;
+}
+
+/**
+ * Applied answers for Apply after resume. Exact revision wins. A prior revision’s
+ * answers are reused only when the authorized paper already confirms them — never
+ * to hide a gap the current paper still has.
+ */
+export function readRecoveredPaymentClarificationAnswers(
+  scope?: PaymentClarificationScope | null,
+  authorizedBody?: string | null,
+): string {
+  if (!scope || !hasExactScope(scope)) return "";
+  const exact = readPaymentClarification(scope)?.appliedAnswers?.trim() || "";
+  if (exact) return exact;
+  const userId = normalizeId(scope.userId);
+  const organizationId = normalizeId(scope.organizationId);
+  const agreementId = normalizeId(scope.agreementId);
+  if (!agreementId) return "";
+  const prior = readAll()
+    .filter(
+      (row) =>
+        row.userId === userId &&
+        row.organizationId === organizationId &&
+        row.agreementId === agreementId &&
+        row.appliedAnswers.trim(),
+    )
+    .map((row) => row.appliedAnswers.trim())
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  if (!prior) return "";
+  const body = String(authorizedBody || "").trim();
+  if (!body) return "";
+  if (!recoveredAnswersAgreeWithAuthorizedPaper(prior, body)) return "";
+  const bodyOnly = paymentClarificationQuestions({
+    intake: "",
+    appliedAnswers: "",
+    authorizedBody: body,
+    body,
+  });
+  const withPrior = paymentClarificationQuestions({
+    intake: "",
+    appliedAnswers: prior,
+    authorizedBody: body,
+    body,
+  });
+  if (bodyOnly.some((question) => !withPrior.includes(question))) return "";
+  return prior;
+}
+
+/**
+ * Prior answers may suppress questions without matching current paper
+ * (weekly/net-30 vs monthly/net-60). Recovery requires the values to agree.
+ */
+export function recoveredAnswersAgreeWithAuthorizedPaper(prior: string, authorizedBody: string): boolean {
+  const paper = paymentSectionText(authorizedBody) || authorizedBody;
+  const priorFacts = extractPaymentFacts("", prior);
+  const paperFacts = extractPaymentFacts(paper, "");
+  if (priorFacts.cadence && paperFacts.cadence && priorFacts.cadence !== paperFacts.cadence) return false;
+  if (
+    priorFacts.deadlineDays != null &&
+    paperFacts.deadlineDays != null &&
+    priorFacts.deadlineDays !== paperFacts.deadlineDays
+  ) {
+    return false;
+  }
+  return true;
 }
 
 /** Intake only. Does not return applied answers from another revision. */
@@ -491,21 +588,52 @@ export function registerPaymentClarificationApply(
   handler?: ApplyHandler | null,
 ): void {
   const key = handlerKey(scope);
-  if (!key) return;
-  if (handler) applyHandlers.set(key, handler);
-  else applyHandlers.delete(key);
+  const sessionKey = agreementSessionHandlerKey(scope);
+  if (handler) {
+    if (key) applyHandlers.set(key, handler);
+    if (sessionKey) applyHandlers.set(sessionKey, handler);
+    return;
+  }
+  if (key) applyHandlers.delete(key);
+  if (sessionKey) applyHandlers.delete(sessionKey);
+}
+
+export function paymentApplyRequestedRevisionMatchesLive(
+  requested?: string | null,
+  live?: string | null,
+): boolean {
+  const req = normalizeId(requested);
+  const cur = normalizeId(live);
+  return Boolean(req && cur && req === cur);
 }
 
 export function applyPaymentClarificationAnswer(
   answer: string,
   scope?: PaymentClarificationScope | null,
 ): Promise<void> {
-  const key = handlerKey(scope);
-  const handler = key ? applyHandlers.get(key) : undefined;
-  if (!handler) {
-    return Promise.reject(new Error("payment_clarification_apply_unavailable"));
+  const agreementId = normalizeId(scope?.agreementId);
+  const requested = normalizeId(scope?.revisionId);
+  const liveView = readPaidProLiveRevisionView();
+  const liveFromView =
+    liveView &&
+    liveView.agreementId === agreementId &&
+    liveView.userId === normalizeId(scope?.userId) &&
+    liveView.organizationId === normalizeId(scope?.organizationId)
+      ? normalizeId(liveView.revisionId)
+      : "";
+  const live = liveFromView || resolveLivePaymentClarificationRevision(agreementId);
+  if (requested && live && !paymentApplyRequestedRevisionMatchesLive(requested, live)) {
+    return Promise.reject(new Error("payment_clarification_stale_request"));
   }
-  return handler(answer);
+  const key = handlerKey(scope);
+  const exact = key ? applyHandlers.get(key) : undefined;
+  if (exact) return exact(answer);
+  if (agreementId && paymentApplyRequestedRevisionMatchesLive(requested, live)) {
+    const sessionKey = agreementSessionHandlerKey(scope);
+    const session = sessionKey ? applyHandlers.get(sessionKey) : undefined;
+    if (session) return session(answer);
+  }
+  return Promise.reject(new Error("payment_clarification_apply_unavailable"));
 }
 
 if (typeof window !== "undefined") {

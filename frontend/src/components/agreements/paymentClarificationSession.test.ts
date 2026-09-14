@@ -22,11 +22,12 @@ import {
   queuePaymentClarificationPending,
   readPaymentClarification,
   readPaymentClarificationIntake,
+  readRecoveredPaymentClarificationAnswers,
   registerPaymentClarificationApply,
   resolvePaymentClarificationScope,
   samePaymentApplyOwner,
 } from "./paymentClarificationSession";
-import { beginPaidProRevisionOperation } from "./paidProRevisionOperation";
+import { beginPaidProRevisionOperation, setPaidProLiveRevisionView } from "./paidProRevisionOperation";
 
 const BODY = [
   "3. Fees and Payment",
@@ -349,6 +350,58 @@ describe("revision-aware records and handlers", () => {
     expect(readPaymentClarification(v2)).toBeNull();
   });
 
+  it("rebinds Apply to the live paper after a resume revision identity appears", async () => {
+    const handled: string[] = [];
+    registerPaymentClarificationApply(OWNER_A, async (answer) => {
+      handled.push(answer);
+    });
+    const v2 = { ...OWNER_A, revisionId: "rev-a2" };
+    setPaidProLiveRevisionView({
+      userId: OWNER_A.userId,
+      organizationId: OWNER_A.organizationId,
+      agreementId: OWNER_A.agreementId,
+      revisionId: "rev-a2",
+    });
+    await applyPaymentClarificationAnswer("Payment due net 60", v2);
+    expect(handled).toEqual(["Payment due net 60"]);
+  });
+
+  it("rejects a stale revision request even when the agreement-level handler is reused", async () => {
+    const handled: string[] = [];
+    registerPaymentClarificationApply(OWNER_A, async (answer) => {
+      handled.push(answer);
+    });
+    const v2 = { ...OWNER_A, revisionId: "rev-a2" };
+    setPaidProLiveRevisionView({
+      userId: OWNER_A.userId,
+      organizationId: OWNER_A.organizationId,
+      agreementId: OWNER_A.agreementId,
+      revisionId: "rev-a2",
+    });
+    await applyPaymentClarificationAnswer("Payment due net 60", v2);
+    await expect(applyPaymentClarificationAnswer("Invoice weekly", OWNER_A)).rejects.toThrow(
+      /payment_clarification_stale_request/,
+    );
+    expect(handled).toEqual(["Payment due net 60"]);
+  });
+
+  it("does not rebind Apply onto a different agreement’s live paper", async () => {
+    const handled: string[] = [];
+    registerPaymentClarificationApply(OWNER_A, async (answer) => {
+      handled.push(answer);
+    });
+    setPaidProLiveRevisionView({
+      userId: OWNER_B.userId,
+      organizationId: OWNER_B.organizationId,
+      agreementId: OWNER_B.agreementId,
+      revisionId: OWNER_B.revisionId,
+    });
+    await expect(applyPaymentClarificationAnswer("Payment due net 60", OWNER_B)).rejects.toThrow(
+      /payment_clarification_apply_unavailable/,
+    );
+    expect(handled).toEqual([]);
+  });
+
   it("does not silently carry confirmed status onto a newer revision", () => {
     persistPaymentClarification({
       ...OWNER_A,
@@ -367,6 +420,36 @@ describe("revision-aware records and handlers", () => {
     ).toContain(UNCONFIRMED_PAYMENT_TIMING_QUESTION);
     expect(readPaymentClarificationIntake(v2)).toBe(CORE_PAID_JOURNEY_FILLED_INTAKE);
     expect(readPaymentClarificationIntake(v2)).not.toMatch(/Invoice once on October 1/);
+  });
+
+  it("recovers prior answers after resume only when authorized paper already confirms them", () => {
+    persistPaymentClarification({
+      ...OWNER_A,
+      intake: CORE_PAID_JOURNEY_FILLED_INTAKE,
+      appliedAnswers: "Invoice monthly",
+      applyStatus: "applied",
+    });
+    const v2 = { ...OWNER_A, revisionId: "rev-a2" };
+    expect(readRecoveredPaymentClarificationAnswers(v2, AUTHORIZED_MONTHLY)).toBe("Invoice monthly");
+    expect(readRecoveredPaymentClarificationAnswers(v2, BODY)).toBe("");
+    expect(readRecoveredPaymentClarificationAnswers(v2, "")).toBe("");
+  });
+
+  it("does not recover prior weekly/net-30 answers onto current monthly/net-60 paper", () => {
+    persistPaymentClarification({
+      ...OWNER_A,
+      intake: CORE_PAID_JOURNEY_FILLED_INTAKE,
+      appliedAnswers: "Invoice weekly. Payment due net 30.",
+      applyStatus: "applied",
+    });
+    const v2 = { ...OWNER_A, revisionId: "rev-a2" };
+    const authorizedMonthlyNet60 = [
+      "3. Fees and Payment",
+      "Client will pay Consultant a fixed fee of $48,000. Consultant will invoice the fixed fee monthly. Payment is due net 60.",
+      "4. Term",
+      "Twelve months.",
+    ].join("\n");
+    expect(readRecoveredPaymentClarificationAnswers(v2, authorizedMonthlyNet60)).toBe("");
   });
 });
 
@@ -508,6 +591,17 @@ describe("fresh-context authorized reopen", () => {
         body: wrapped,
       }),
     ).toEqual([]);
+  });
+
+  it("authorized monthly paper still asks the remaining due question without session intake", () => {
+    expect(
+      paymentClarificationQuestions({
+        intake: AUTHORIZED_MONTHLY,
+        appliedAnswers: "",
+        authorizedBody: AUTHORIZED_MONTHLY,
+        body: AUTHORIZED_MONTHLY,
+      }),
+    ).toEqual([UNCONFIRMED_PAYMENT_DUE_QUESTION]);
   });
 
   it("does not treat Term dates as payment-section confirmation", () => {

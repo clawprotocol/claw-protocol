@@ -69,6 +69,10 @@ CONTENT_FP="$(
       frontend/src/components/agreements/paymentClarificationSession.ts \
       frontend/src/components/agreements/paidProRevisionOperation.ts \
       frontend/src/components/agreements/paidProUserApprovedRevisionCommit.ts \
+      frontend/src/components/agreements/paidCreateResumeHydration.ts \
+      frontend/src/components/agreements/paymentClarificationApplyRecovery.ts \
+      frontend/src/components/agreements/paidProSourceOfTruthState.ts \
+      frontend/src/launch/corePaidJourneySnapshotObserve.ts \
       frontend/src/agreement/canonicalReviewSnapshotApi.ts \
       frontend/src/components/agreements/PaymentClarificationAdvisory.tsx \
       frontend/src/components/agreements/paidProVisibleDocumentShell.tsx \

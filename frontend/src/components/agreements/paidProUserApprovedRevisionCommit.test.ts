@@ -13,7 +13,14 @@ import {
   clearPaidProRevisionOperationsForTests,
   setPaidProLiveRevisionView,
 } from "./paidProRevisionOperation";
-import { commitPaidProUserApprovedRevisionCorpus } from "./paidProUserApprovedRevisionCommit";
+import {
+  applyOwnerApprovedRevisionCallerDisplay,
+  commitPaidProUserApprovedRevisionCorpus,
+  resolveOwnerApprovedRevisionCallerOutcome,
+} from "./paidProUserApprovedRevisionCommit";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { clearPaidProSourceOfTruth, getPaidProSourceOfTruthText } from "./paidProSourceOfTruth";
 
 function paddedCorpus(paymentLine: string, marker: string): string {
@@ -156,6 +163,73 @@ describe("production paid revision commit isolation", () => {
     expect(posts.some((url) => url.includes("/agreements/agr-b/"))).toBe(false);
     expect(posts.some((url) => url.includes("/agreements/agr-a/"))).toBe(true);
     expect(result.code).toBe("display_identity_changed");
+  });
+
+  it("production caller must not paint when persist succeeded with displayed:false", () => {
+    const paints: string[] = [];
+    const painted = applyOwnerApprovedRevisionCallerDisplay({
+      result: { ok: true, corpus: CORPUS_A, displayed: false, code: "display_identity_changed" },
+      captured: OP_A,
+      live: OP_A,
+      activeRequestId: OP_A.requestId,
+      paint: (corpus) => paints.push(corpus),
+    });
+    expect(painted).toBe(false);
+    expect(paints).toEqual([]);
+    expect(resolveOwnerApprovedRevisionCallerOutcome({
+      ok: true,
+      corpus: CORPUS_A,
+      displayed: false,
+      code: "display_identity_changed",
+    })).toEqual({
+      applied: true,
+      corpus: CORPUS_A,
+      paint: false,
+      code: "display_identity_changed",
+    });
+  });
+
+  it("production caller paints only when persist displayed and live identity still matches", () => {
+    const paints: string[] = [];
+    expect(
+      applyOwnerApprovedRevisionCallerDisplay({
+        result: { ok: true, corpus: CORPUS_A, displayed: true },
+        captured: OP_A,
+        live: OP_A_V2,
+        activeRequestId: OP_A.requestId,
+        paint: (corpus) => paints.push(corpus),
+      }),
+    ).toBe(false);
+    expect(
+      applyOwnerApprovedRevisionCallerDisplay({
+        result: { ok: true, corpus: CORPUS_A, displayed: true },
+        captured: OP_A,
+        live: OP_A,
+        activeRequestId: "req-other",
+        paint: (corpus) => paints.push(corpus),
+      }),
+    ).toBe(false);
+    expect(
+      applyOwnerApprovedRevisionCallerDisplay({
+        result: { ok: true, corpus: CORPUS_A, displayed: true },
+        captured: OP_A,
+        live: OP_A,
+        activeRequestId: OP_A.requestId,
+        paint: (corpus) => paints.push(corpus),
+      }),
+    ).toBe(true);
+    expect(paints).toEqual([CORPUS_A]);
+  });
+
+  it("AgreementBuilderIntake Apply caller carries the persist/display result and does not override it", () => {
+    const intake = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "AgreementBuilderIntake.tsx"),
+      "utf8",
+    );
+    expect(intake).toContain("resolveOwnerApprovedRevisionCallerOutcome");
+    expect(intake).toContain("applyOwnerApprovedRevisionCallerDisplay");
+    expect(intake).toContain("committed.displayed");
+    expect(intake).not.toMatch(/setAgreementDocumentText\(painted\)/);
   });
 
   it("org switch aborts persist before a write with the wrong org headers", async () => {

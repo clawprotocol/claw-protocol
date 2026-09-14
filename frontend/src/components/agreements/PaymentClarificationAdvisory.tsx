@@ -6,7 +6,12 @@ import {
   resolvePaymentClarificationScope,
   subscribePaymentClarification,
 } from "./paymentClarificationSession";
-import { getPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import {
+  authorizedPaidProRevisionId,
+  getPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
+} from "./paidProSourceOfTruth";
+import { selectVerifiedPaidReviewPaper } from "./paidProVerifiedReviewPaper";
 
 export function PaymentClarificationAdvisory(args: {
   agreementId?: string | null;
@@ -21,7 +26,14 @@ export function PaymentClarificationAdvisory(args: {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => subscribePaymentClarification(() => setTick((n) => n + 1)), []);
 
-  const revisionId = (args.revisionId || getPaidProSourceOfTruth()?.hash || "").trim();
+  const verifiedPlain = args.agreementId
+    ? selectVerifiedPaidReviewPaper({ agreementId: args.agreementId })?.plain || ""
+    : "";
+  const revisionId = (
+    args.revisionId ||
+    getPaidProSourceOfTruth()?.hash ||
+    authorizedPaidProRevisionId(verifiedPlain)
+  ).trim();
   const scope = resolvePaymentClarificationScope({
     agreementId: args.agreementId,
     revisionId: revisionId || undefined,
@@ -35,7 +47,7 @@ export function PaymentClarificationAdvisory(args: {
   const questions = useMemo(
     () =>
       paymentClarificationQuestions({
-        intake,
+        intake: intake || args.body || "",
         appliedAnswers,
         pendingAnswer,
         authorizedBody: args.body,
@@ -51,7 +63,7 @@ export function PaymentClarificationAdvisory(args: {
   }, [applyStatus, pendingAnswer, draft]);
 
   if (args.accepted) return null;
-  if (!intake || questions.length === 0) return null;
+  if (questions.length === 0) return null;
 
   return (
     <section
@@ -100,13 +112,23 @@ export function PaymentClarificationAdvisory(args: {
         onClick={() => {
           const answer = draft.trim();
           if (!answer) return;
-          if (!scope) {
-            setError("Could not apply that payment answer.");
+          const liveRevision = (
+            getPaidProSourceOfTruth()?.hash ||
+            authorizedPaidProRevisionId(getPaidProSourceOfTruthText()) ||
+            authorizedPaidProRevisionId(verifiedPlain) ||
+            revisionId
+          ).trim();
+          const liveScope = resolvePaymentClarificationScope({
+            agreementId: args.agreementId,
+            revisionId: liveRevision || undefined,
+          });
+          if (!liveScope || !liveRevision) {
+            setError("Could not apply that payment answer until this agreement is restored.");
             return;
           }
           setBusy(true);
           setError(null);
-          void applyPaymentClarificationAnswer(answer, scope)
+          void applyPaymentClarificationAnswer(answer, liveScope)
             .then(() => setDraft(""))
             .catch((err) => {
               setError(err instanceof Error ? err.message : "Could not apply that payment answer.");

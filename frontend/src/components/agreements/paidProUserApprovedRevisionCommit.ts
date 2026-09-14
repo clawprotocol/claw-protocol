@@ -15,6 +15,53 @@ export type PaidProUserApprovedRevisionCommitResult = {
   code?: string;
 };
 
+export function resolveOwnerApprovedRevisionCallerOutcome(
+  result: PaidProUserApprovedRevisionCommitResult,
+): { applied: boolean; corpus: string; paint: boolean; code?: string } {
+  if (!result.ok || !result.corpus.trim()) {
+    return { applied: false, corpus: "", paint: false, code: result.code || "commit_failed" };
+  }
+  return {
+    applied: true,
+    corpus: result.corpus,
+    paint: Boolean(result.displayed),
+    code: result.code,
+  };
+}
+
+/**
+ * Production Apply/save callers must not paint when persist succeeded with displayed:false.
+ * Identity (owner, org, agreement, revision, active request) is re-checked here.
+ */
+export function applyOwnerApprovedRevisionCallerDisplay(args: {
+  result: PaidProUserApprovedRevisionCommitResult;
+  captured: Pick<PaidProRevisionOperation, "userId" | "organizationId" | "agreementId" | "revisionId" | "requestId">;
+  live: Partial<Pick<PaidProRevisionOperation, "userId" | "organizationId" | "agreementId" | "revisionId">>;
+  activeRequestId?: string | null;
+  paint: (corpus: string) => void;
+}): boolean {
+  const outcome = resolveOwnerApprovedRevisionCallerOutcome(args.result);
+  if (!outcome.applied || !outcome.paint) return false;
+  const liveUser = String(args.live.userId || "").trim();
+  const liveOrg = String(args.live.organizationId || "").trim();
+  const liveAgreement = String(args.live.agreementId || "").trim();
+  const liveRevision = String(args.live.revisionId || "").trim();
+  if (
+    !args.captured.userId ||
+    !args.captured.organizationId ||
+    !args.captured.agreementId ||
+    args.captured.userId !== liveUser ||
+    args.captured.organizationId !== liveOrg ||
+    args.captured.agreementId !== liveAgreement
+  ) {
+    return false;
+  }
+  if (liveRevision && args.captured.revisionId !== liveRevision) return false;
+  if (args.activeRequestId && args.captured.requestId !== args.activeRequestId) return false;
+  args.paint(outcome.corpus);
+  return true;
+}
+
 export async function commitPaidProUserApprovedRevisionCorpus(args: {
   text: string;
   reason: string;

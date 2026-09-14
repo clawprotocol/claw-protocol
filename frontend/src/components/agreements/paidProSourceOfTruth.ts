@@ -68,6 +68,7 @@ export {
   getPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
   hashPaidProCorpus,
+  authorizedPaidProRevisionId,
   hasPaidProSourceOfTruth,
   type PaidProDocumentSurface,
   type PaidProSourceOfTruth,

@@ -13,7 +13,7 @@ function src(rel: string): string {
 }
 
 export function assertCorePaidJourneyAcceptanceContracts(): void {
-  if (CORE_PAID_JOURNEY_MATRIX.length < 14) {
+  if (CORE_PAID_JOURNEY_MATRIX.length < 16) {
     throw new Error("core paid journey matrix lost required customer rows");
   }
   const ids = CORE_PAID_JOURNEY_MATRIX.map((row) => row.id);
@@ -23,6 +23,8 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
     "A1_review_recipient_reads_correct_version",
     "B1_direct_sign_skips_mandatory_review",
     "C1_refresh_preserves_paper_version_path",
+    "C3_fresh_context_editable_reopen",
+    "C4_resume_apply_after_dashboard_reset",
   ]) {
     if (!ids.includes(required as (typeof ids)[number])) {
       throw new Error(`core paid journey matrix missing ${required}`);
@@ -149,7 +151,55 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
   ) {
     throw new Error("core paid journey live spec no longer delays the production snapshot save or reopens editable paper");
   }
+  if (
+    !spec.includes("fresh-context editable reopen restores persisted clarified paper") ||
+    !spec.includes("resume and apply after dashboard session reset") ||
+    !spec.includes("C3_fresh_context_editable_reopen") ||
+    !spec.includes("C4_resume_apply_after_dashboard_reset") ||
+    !spec.includes("dashboard-create-new-agreement") ||
+    !spec.includes("fresh context must not inherit payment sessionStorage") ||
+    !spec.includes('return "applied"') ||
+    !spec.includes("isCanonicalSnapshotCreatePost") ||
+    !spec.includes("readOptionalRoleAlert") ||
+    !spec.includes("requireEditingAction") ||
+    !spec.includes("simple-pro-edit-agreement-text-toggle") ||
+    !spec.includes("simple-pro-edit-agreement-plain-input") ||
+    !spec.includes("describeOperativeArticleCompare(\"canonical_get\"") ||
+    spec.includes("snapshotRes.json().catch(() => ({}))") ||
+    spec.includes("persisted.corpus || afterApply || postedCorpus") ||
+    spec.includes("locator(\"[role='alert']\").first().textContent()")
+  ) {
+    throw new Error("core paid journey live spec no longer requires an independent C4 snapshot-create/GET/visible evidence chain");
+  }
 
+  const createResume = src("../components/agreements/paidCreateResumeHydration.ts");
+  if (
+    !createResume.includes("shouldAttemptCanonicalSnapshotOnCreateResume") ||
+    !createResume.includes("resolvePaidCreateResumeCorpus") ||
+    createResume.includes("draftPipelineCorpus.length >=")
+  ) {
+    throw new Error("create resume hydration still gates canonical snapshot GET on draft pipeline length");
+  }
+  const applyRecovery = src("../components/agreements/paymentClarificationApplyRecovery.ts");
+  if (
+    !applyRecovery.includes("resolvePaymentClarificationApplyPrerequisites") ||
+    !applyRecovery.includes("authorized_draft") ||
+    !applyRecovery.includes("paymentApplyPrerequisitesReady") ||
+    !applyRecovery.includes("shouldReparseStructuredDraftFromRecoveredIntake")
+  ) {
+    throw new Error("payment Apply recovery no longer restores authorized intake and structured draft");
+  }
+  const applySession = src("../components/agreements/paymentClarificationSession.ts");
+  if (
+    !applySession.includes("resolveLivePaymentClarificationRevision") ||
+    !applySession.includes("session:${agreementId}") ||
+    !applySession.includes("readRecoveredPaymentClarificationAnswers") ||
+    !applySession.includes("recoveredAnswersAgreeWithAuthorizedPaper") ||
+    !applySession.includes("payment_clarification_stale_request") ||
+    !applySession.includes("paymentApplyRequestedRevisionMatchesLive")
+  ) {
+    throw new Error("payment Apply no longer rebinds the live-paper handler after resume");
+  }
   const revisionOp = src("../components/agreements/paidProRevisionOperation.ts");
   if (
     !revisionOp.includes("paidProRevisionOperationAllowsPersist") ||
@@ -162,9 +212,39 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
   if (
     !revisionCommit.includes("prepareCommercialReviewSnapshotAuthority") ||
     !revisionCommit.includes("paidProRevisionOperationAllowsPersist") ||
-    !revisionCommit.includes("paidProRevisionOperationAllowsDisplay")
+    !revisionCommit.includes("paidProRevisionOperationAllowsDisplay") ||
+    !revisionCommit.includes("resolveOwnerApprovedRevisionCallerOutcome") ||
+    !revisionCommit.includes("applyOwnerApprovedRevisionCallerDisplay")
   ) {
     throw new Error("paid revision commit no longer checks the active operation before shared mutations");
+  }
+
+  const intakeCaller = src("../components/agreements/AgreementBuilderIntake.tsx");
+  if (
+    !intakeCaller.includes("authorizedPaidProRevisionId") ||
+    !intakeCaller.includes("resolveOwnerApprovedRevisionCallerOutcome") ||
+    !intakeCaller.includes("applyOwnerApprovedRevisionCallerDisplay") ||
+    !intakeCaller.includes("committed.displayed") ||
+    intakeCaller.includes("setAgreementDocumentText(painted)")
+  ) {
+    throw new Error("production Apply caller no longer carries the persist/display result or still overrides displayed:false");
+  }
+  if (!intakeCaller.includes("authorizedPaidProRevisionId(getPaidProSourceOfTruthText())")) {
+    throw new Error("Apply/resume revision identity still treats hashPaidProCorpus(\"\") as present");
+  }
+
+  const advisory = src("../components/agreements/PaymentClarificationAdvisory.tsx");
+  if (!advisory.includes("authorizedPaidProRevisionId") || advisory.includes("hashPaidProCorpus(getPaidProSourceOfTruthText() || \"\")")) {
+    throw new Error("payment advisory still treats the empty-corpus hash as a live revision");
+  }
+
+  const observe = src("./corePaidJourneySnapshotObserve.ts");
+  if (
+    !observe.includes("isCanonicalSnapshotCreateUrl") ||
+    !observe.includes("parseObservedJsonPayload") ||
+    !observe.includes("readOptionalAlertFromCount")
+  ) {
+    throw new Error("C4 observation helpers no longer distinguish snapshot-create from sibling snapshot operations");
   }
 
   const meta = src("../agreement/recipientReviewAuthorityMeta.ts");
@@ -228,6 +308,19 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
     /namesAndEmailsComplete:\s*[\s\S]{0,180}emailsReady/.test(intake)
   ) {
     throw new Error("direct signing still treats emailsReady as namesAndEmailsComplete");
+  }
+  if (intake.includes("if (productionResumeCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN)")) {
+    throw new Error("create resume still skips canonical snapshot hydrate when draft pipeline fields are short");
+  }
+  if (
+    !intake.includes("resolvePaidCreateResumeCorpus") ||
+    !intake.includes("resolvePaymentClarificationApplyPrerequisites") ||
+    !intake.includes("shouldReparseStructuredDraftFromRecoveredIntake") ||
+    !intake.includes("readRecoveredPaymentClarificationAnswers") ||
+    !intake.includes("setPaidProLiveRevisionView({") ||
+    !intake.includes("hydrateCommercialReviewFromServerSnapshot({ agreementId: hid })")
+  ) {
+    throw new Error("create resume / Apply no longer recover from authorized GET snapshot and draft");
   }
 
   const routerApi = src("../../../backend/routers/agreements_v2_api.py");

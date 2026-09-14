@@ -8,6 +8,7 @@ import {
   getPaidProDocumentForSurface,
   getPaidProSourceOfTruth,
   hashPaidProCorpus,
+  authorizedPaidProRevisionId,
 } from "./paidProSourceOfTruth";
 
 const sourceText = [
@@ -119,6 +120,17 @@ describe("paidProSourceOfTruth", () => {
       const longer = `${sourceText}\n\n5. Additional commercial clause that extends the body. ${"x".repeat(200)}`;
       const result = establishPaidProSourceOfTruth({ text: longer, source: "server_full_draft" });
       expect(result.text.length).toBeGreaterThanOrEqual(accepted.text.length);
+    });
+
+    it("does not treat the truthy empty-corpus hash as a revision identity", () => {
+      expect(hashPaidProCorpus("")).toBe("empty");
+      expect(authorizedPaidProRevisionId("")).toBe("");
+      expect(authorizedPaidProRevisionId("   ")).toBe("");
+      expect(authorizedPaidProRevisionId(sourceText)).toBe(hashPaidProCorpus(sourceText));
+      expect(authorizedPaidProRevisionId(sourceText) || authorizedPaidProRevisionId("verified paper")).toBe(
+        hashPaidProCorpus(sourceText),
+      );
+      expect(hashPaidProCorpus("") || "fallback-never-reached").toBe("empty");
     });
 
     it("an explicit user-approved revision may legitimately shorten the body", () => {

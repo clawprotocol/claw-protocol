@@ -696,17 +696,35 @@ import {
   queuePaymentClarificationPending,
   readPaymentClarification,
   readPaymentClarificationIntake,
+  readRecoveredPaymentClarificationAnswers,
   registerPaymentClarificationApply,
   resolvePaymentClarificationScope,
   samePaymentApplyOwner,
   type PaymentApplyTarget,
 } from "./paymentClarificationSession";
 import {
+  authorizedDraftMatchesAgreement,
+  intakeFromAuthorizedDraft,
+  paymentApplyPrerequisitesReady,
+  resolvePaymentClarificationApplyPrerequisites,
+  shouldReparseStructuredDraftFromRecoveredIntake,
+} from "./paymentClarificationApplyRecovery";
+import {
+  longestDraftPipelineCorpus,
+  resolvePaidCreateResumeCorpus,
+} from "./paidCreateResumeHydration";
+import {
   beginPaidProRevisionOperation,
   endPaidProRevisionOperation,
+  readActivePaidProRevisionOperation,
   setPaidProLiveRevisionView,
 } from "./paidProRevisionOperation";
-import { commitPaidProUserApprovedRevisionCorpus } from "./paidProUserApprovedRevisionCommit";
+import {
+  applyOwnerApprovedRevisionCallerDisplay,
+  commitPaidProUserApprovedRevisionCorpus,
+  resolveOwnerApprovedRevisionCallerOutcome,
+  type PaidProUserApprovedRevisionCommitResult,
+} from "./paidProUserApprovedRevisionCommit";
 import {
   hasCanonicalReviewCorpusForRender,
   PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN,
@@ -773,6 +791,7 @@ import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
   hashPaidProCorpus,
+  authorizedPaidProRevisionId,
   hydratePaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import {
@@ -4004,9 +4023,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       readCreateReviewAgreementResumeId() ||
       ""
     ).trim();
+    const verifiedResumePlain = agreementId
+      ? selectVerifiedPaidReviewPaper({ agreementId })?.plain || ""
+      : "";
     const revisionId =
       getPaidProSourceOfTruth()?.hash?.trim() ||
-      hashPaidProCorpus(getPaidProSourceOfTruthText() || "");
+      authorizedPaidProRevisionId(getPaidProSourceOfTruthText()) ||
+      authorizedPaidProRevisionId(verifiedResumePlain);
     if (user.isAuthenticated && organizationId) {
       if (agreementId) {
         bindPaymentClarificationDraftToAgreement({
@@ -4036,13 +4059,46 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     registerPaymentClarificationApply(scope, async (answer) => {
       const liveUser = resolveCurrentUser();
       const liveOrg = (getOrgId() || "").trim();
-      const liveAgreementId = (reviewAgreementIdRef.current || "").trim();
-      if (!liveUser.isAuthenticated || !liveOrg || !liveAgreementId) {
+      const liveAgreementId = (
+        reviewAgreementIdRef.current ||
+        readCreateReviewAgreementResumeId() ||
+        parseCreateAgreementIdFromSearch() ||
+        ""
+      ).trim();
+      if (liveAgreementId && reviewAgreementIdRef.current !== liveAgreementId) {
+        reviewAgreementIdRef.current = liveAgreementId;
+      }
+      let liveRevision =
+        getPaidProSourceOfTruth()?.hash?.trim() ||
+        authorizedPaidProRevisionId(getPaidProSourceOfTruthText()) ||
+        authorizedPaidProRevisionId(selectVerifiedPaidReviewPaper({ agreementId: liveAgreementId })?.plain);
+      if (!liveRevision && liveAgreementId) {
+        try {
+          const recovered = await hydrateCommercialReviewFromServerSnapshot({ agreementId: liveAgreementId });
+          if (recovered.ok) {
+            const recoveredPlain = String(recovered.snapshot.corpus_plain || "").trim();
+            if (recoveredPlain) {
+              try {
+                establishPaidProSourceOfTruth({
+                  text: recoveredPlain,
+                  source: "server_full_draft",
+                  allowShorterOverwrite: true,
+                  generationOutcome: "ok",
+                });
+              } catch {
+                /* verified GET bytes remain the revision identity */
+              }
+              liveRevision =
+                getPaidProSourceOfTruth()?.hash?.trim() || authorizedPaidProRevisionId(recoveredPlain);
+            }
+          }
+        } catch {
+          /* fail closed below if revision identity is still missing */
+        }
+      }
+      if (!liveUser.isAuthenticated || !liveOrg || !liveAgreementId || !liveRevision) {
         throw new Error("payment_clarification_apply_unavailable");
       }
-      const liveRevision =
-        getPaidProSourceOfTruth()?.hash?.trim() ||
-        hashPaidProCorpus(getPaidProSourceOfTruthText() || "");
       const requestId = createPaymentApplyRequestId();
       const applyScope = {
         userId: liveUser.id,
@@ -4051,19 +4107,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         revisionId: liveRevision,
       };
       const captured = capturePaymentApplyTarget({ ...applyScope, requestId });
+      setPaidProLiveRevisionView({
+        userId: liveUser.id,
+        organizationId: liveOrg,
+        agreementId: liveAgreementId,
+        revisionId: liveRevision,
+      });
       beginPaidProRevisionOperation(captured);
       const intake = (premiumGapBaseIntakeRef.current || intakeCombinedRef.current || "").trim();
-      const priorApplied = readPaymentClarification(applyScope)?.appliedAnswers || "";
+      const authorizedPlain =
+        getPaidProSourceOfTruthText().trim() ||
+        selectVerifiedPaidReviewPaper({ agreementId: liveAgreementId })?.plain ||
+        "";
+      const priorApplied = readRecoveredPaymentClarificationAnswers(applyScope, authorizedPlain);
       const next = [priorApplied, answer.trim()].filter(Boolean).join("\n");
       queuePaymentClarificationPending(applyScope, answer, intake);
       markPaymentClarificationApplying(applyScope, requestId);
       const currentTarget = () => ({
         userId: resolveCurrentUser().id,
         organizationId: (getOrgId() || "").trim(),
-        agreementId: (reviewAgreementIdRef.current || "").trim(),
+        agreementId: (
+          reviewAgreementIdRef.current ||
+          readCreateReviewAgreementResumeId() ||
+          parseCreateAgreementIdFromSearch() ||
+          ""
+        ).trim(),
         revisionId:
           getPaidProSourceOfTruth()?.hash?.trim() ||
-          hashPaidProCorpus(getPaidProSourceOfTruthText() || ""),
+          authorizedPaidProRevisionId(getPaidProSourceOfTruthText()) ||
+          authorizedPaidProRevisionId(selectVerifiedPaidReviewPaper({ agreementId: liveAgreementId })?.plain),
       });
       try {
         const revise = runPaymentClarificationRevisionRef.current;
@@ -4097,7 +4169,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ).trim();
       const revisionId =
         getPaidProSourceOfTruth()?.hash?.trim() ||
-        hashPaidProCorpus(getPaidProSourceOfTruthText() || "");
+        authorizedPaidProRevisionId(getPaidProSourceOfTruthText());
       if (user.isAuthenticated && organizationId && agreementId && revisionId) {
         setPaidProLiveRevisionView({
           userId: user.id,
@@ -17946,9 +18018,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const commitPaidProUserApprovedRevision = React.useCallback(
-    async (text: string, reason: string, operation?: PaymentApplyTarget): Promise<string> => {
+    async (
+      text: string,
+      reason: string,
+      operation?: PaymentApplyTarget,
+    ): Promise<PaidProUserApprovedRevisionCommitResult> => {
       const raw = text.trim();
-      if (!raw) return "";
+      if (!raw) return { ok: false, corpus: "", displayed: false, code: "empty_revision_text" };
       const liveUser = resolveCurrentUser();
       const liveOrg = (getOrgId() || "").trim();
       const agreementIdForRevision = (
@@ -17961,12 +18037,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setProFullDraftCustomGateMessage(
           "Server review snapshot requires an agreement id before saving revisions. Reload or contact support@lawdog.me.",
         );
-        return "";
+        return { ok: false, corpus: "", displayed: false, code: "missing_agreement_identity" };
       }
       const liveRevision =
         operation?.revisionId ||
         getPaidProSourceOfTruth()?.hash?.trim() ||
-        hashPaidProCorpus(getPaidProSourceOfTruthText() || "");
+        authorizedPaidProRevisionId(getPaidProSourceOfTruthText());
       const commitOperation = beginPaidProRevisionOperation(
         operation || {
           userId: liveUser.id,
@@ -18039,9 +18115,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             // eslint-disable-next-line no-console
             console.warn("[canonical-review-snapshot] revision prepare failed", committed.code);
           }
-          return "";
+          return committed;
         }
-        return committed.corpus;
+        return committed;
       } finally {
         endPaidProRevisionOperation(commitOperation.requestId);
       }
@@ -18068,21 +18144,51 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         agreementId: captured.agreementId,
         revisionId: captured.revisionId,
       });
-      const intakeText = (
-        premiumGapBaseIntakeRef.current ||
-        intakeCombinedRef.current ||
-        storedIntake ||
-        ""
-      ).trim();
+      let authorizedDraftIntake = "";
+      let authorizedStructured: ParsedDraftShape | null = null;
+      const liveIntake = (premiumGapBaseIntakeRef.current || intakeCombinedRef.current || "").trim();
+      const liveStructured =
+        draftSnapshotRef.current || readPremiumCompletionSnapshot()?.premiumDraft || null;
+      if (!liveIntake || !liveStructured) {
+        try {
+          const fetched = await fetchAgreementDraft(captured.agreementId);
+          const ad = fetched.ok ? fetched.draft : null;
+          if (ad && authorizedDraftMatchesAgreement(ad, captured.agreementId)) {
+            authorizedDraftIntake = intakeFromAuthorizedDraft(ad);
+            const payment = extractIntakePayment(authorizedDraftIntake);
+            authorizedStructured = mergePaidProAuthoritativeDraftFieldsFromApi(
+              coerceDraftFromApiPayload(ad as unknown, authorizedDraftIntake, payment),
+              ad,
+            );
+          }
+        } catch {
+          /* fail closed below if no durable intake/draft remains */
+        }
+      }
+      const recovered = resolvePaymentClarificationApplyPrerequisites({
+        liveIntake,
+        storedPaymentIntake: storedIntake,
+        authorizedDraftIntake,
+        liveStructuredDraft: draftSnapshotRef.current,
+        premiumCompletionDraft: readPremiumCompletionSnapshot()?.premiumDraft ?? null,
+        authorizedStructuredDraft: authorizedStructured,
+      });
+      const intakeText = recovered.intakeText;
       if (intakeText && !premiumGapBaseIntakeRef.current.trim()) {
         premiumGapBaseIntakeRef.current = intakeText;
       }
-      let structured =
-        draftSnapshotRef.current || readPremiumCompletionSnapshot()?.premiumDraft || null;
+      let structured = recovered.structured;
       if (!structured && intakeText) {
         structured = await parseDraft(intakeText, { aiModelClass: "premium", checkoutCompletion: true });
+      } else if (shouldReparseStructuredDraftFromRecoveredIntake({ intakeText, structured })) {
+        try {
+          const parsed = await parseDraft(intakeText, { aiModelClass: "premium", checkoutCompletion: true });
+          if (parsed) structured = parsed;
+        } catch {
+          /* keep recovered structured; fail closed below if unusable */
+        }
       }
-      if (!intakeText || !structured) {
+      if (!paymentApplyPrerequisitesReady({ intakeText, structured }) || !structured) {
         throw new Error("payment_clarification_apply_unavailable");
       }
       const currentTarget = () => ({
@@ -18091,7 +18197,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         agreementId: (reviewAgreementIdRef.current || "").trim(),
         revisionId:
           getPaidProSourceOfTruth()?.hash?.trim() ||
-          hashPaidProCorpus(getPaidProSourceOfTruthText() || ""),
+          authorizedPaidProRevisionId(getPaidProSourceOfTruthText()) ||
+          authorizedPaidProRevisionId(
+            selectVerifiedPaidReviewPaper({ agreementId: reviewAgreementIdRef.current || captured.agreementId })
+              ?.plain,
+          ),
       });
       const sessionGenForPass = getOrInitSessionAgreementGenerationId();
       const result = await ensurePremiumCompletion({
@@ -18125,15 +18235,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (!result || result.staleIntakeOrGeneration || !body) {
         throw new Error("payment_clarification_apply_unavailable");
       }
-      const painted = await commitPaidProUserApprovedRevision(
+      const committed = await commitPaidProUserApprovedRevision(
         body,
         "payment_clarification_answer",
         captured,
       );
-      if (!painted.trim()) {
+      const outcome = resolveOwnerApprovedRevisionCallerOutcome(committed);
+      if (!outcome.applied) {
         throw new Error("payment_clarification_apply_unavailable");
       }
-      const newRevision = hashPaidProCorpus(painted);
+      const painted = outcome.corpus;
+      if (committed.ok && !committed.displayed) {
+        // Persist succeeded; the helper withheld display. Do not override that decision.
+      }
+      applyOwnerApprovedRevisionCallerDisplay({
+        result: committed,
+        captured,
+        live: {
+          userId: resolveCurrentUser().id,
+          organizationId: (getOrgId() || "").trim(),
+          agreementId: reviewAgreementIdRef.current || captured.agreementId,
+          revisionId: currentTarget().revisionId,
+        },
+        activeRequestId: readActivePaidProRevisionOperation(captured.agreementId)?.requestId,
+        paint: (corpus) => {
+          setAgreementDocumentText(corpus);
+          setReviewDocRefreshTick((n) => n + 1);
+        },
+      });
+      const newRevision = authorizedPaidProRevisionId(painted) || hashPaidProCorpus(painted);
       markPaymentClarificationApplied(
         {
           userId: captured.userId,
@@ -18287,12 +18417,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         finalText,
         "paid_pro_post_finalize_clause_edit_revision",
       );
-      if (!stable) {
+      if (!stable.ok || !stable.corpus.trim()) {
         failSave();
         return;
       }
       const saved = commitPaidProPostFinalizeClauseEditRevision({
-        editedPlain: stable,
+        editedPlain: stable.corpus,
       });
       if (!saved.ok) {
         logPaidProPostFinalizeEditSaveBlocked({
@@ -18315,11 +18445,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     if (hasPaidProSourceOfTruth()) {
       const stable = await commitPaidProUserApprovedRevision(finalText, "paid_pro_card_edit_revision");
-      if (!stable) {
+      if (!stable.ok || !stable.corpus.trim()) {
         failSave();
         return;
       }
-      finishSave(stable);
+      finishSave(stable.corpus);
       return;
     }
     agreementDocumentDirtyRef.current = true;
@@ -19094,7 +19224,65 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (readFullDraftUpgradeMarkerAgreementId() === hid && !draftHasFullDraftExpansion(next)) {
           next = { ...next, additional_terms: FULL_DRAFT_EXPANSION_MARKER };
         }
+        const productionResumeCorpus = !signerSetupResume
+          ? longestDraftPipelineCorpus([
+              (adForHydrate as { premium_full_document_text?: string }).premium_full_document_text,
+              (adForHydrate as { premium_server_full_document_text?: string }).premium_server_full_document_text,
+              (adForHydrate as { server_full_document_text?: string }).server_full_document_text,
+              (next as { server_full_document_text?: string }).server_full_document_text,
+            ])
+          : "";
+        const resumeResolved = !signerSetupResume
+          ? await resolvePaidCreateResumeCorpus({
+              agreementId: hid,
+              draftPipelineCorpus: productionResumeCorpus,
+              hydrateSnapshot: () => hydrateCommercialReviewFromServerSnapshot({ agreementId: hid }),
+            })
+          : { corpus: "", source: "none" as const, hydrateAttempted: false };
+        if (!signerSetupResume && resumeResolved.corpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          try {
+            establishPaidProSourceOfTruth({
+              text: resumeResolved.corpus,
+              source: "server_full_draft",
+              draft: next,
+              intakeText: rawIntake,
+              allowShorterOverwrite: true,
+              generationOutcome: "ok",
+            });
+          } catch {
+            /* SoT is a wipe-guard; document text still paints from refs */
+          }
+        }
+        const resumeRevision =
+          getPaidProSourceOfTruth()?.hash?.trim() ||
+          authorizedPaidProRevisionId(resumeResolved.corpus) ||
+          authorizedPaidProRevisionId(selectVerifiedPaidReviewPaper({ agreementId: hid })?.plain);
+        const storedResumeIntake = readPaymentClarificationIntake(
+          resolvePaymentClarificationScope({
+            agreementId: hid,
+            revisionId: resumeRevision || undefined,
+          }),
+        );
+        const resumeIntake = (storedResumeIntake || rawIntake || "").trim();
+        if (resumeIntake) {
+          premiumGapBaseIntakeRef.current = resumeIntake;
+        }
+        writeCreateReviewAgreementResumeId(hid);
+        reviewAgreementIdRef.current = hid;
         setReviewAgreementId(hid);
+        if (resumeRevision) {
+          const resumeUser = resolveCurrentUser();
+          const resumeOrg = (getOrgId() || "").trim();
+          if (resumeUser.isAuthenticated && resumeOrg) {
+            setPaidProLiveRevisionView({
+              userId: resumeUser.id,
+              organizationId: resumeOrg,
+              agreementId: hid,
+              revisionId: resumeRevision,
+            });
+          }
+        }
+        setReviewDocRefreshTick((n) => n + 1);
         setDraft(next);
         setMissing([]);
         setFollowUpDetailTotal(0);
@@ -19147,30 +19335,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setDisplayPhase(nextDisplay);
         }
         if (!signerSetupResume) {
-          const productionResumeCorpus = [
-            String((adForHydrate as { premium_full_document_text?: string }).premium_full_document_text ?? "").trim(),
-            String(
-              (adForHydrate as { premium_server_full_document_text?: string }).premium_server_full_document_text ?? "",
-            ).trim(),
-            String((adForHydrate as { server_full_document_text?: string }).server_full_document_text ?? "").trim(),
-            String((next as { server_full_document_text?: string }).server_full_document_text ?? "").trim(),
-          ].reduce((best, t) => (t.length > best.length ? t : best), "");
-          if (productionResumeCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          const resumeCorpus = resumeResolved.corpus;
+          if (resumeCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
             markCurrentSessionProIntent();
             markCurrentSessionProEntitlementComplete({ source: "entitled_rewrite" });
-            let verifiedResumeCorpus = "";
-            try {
-              const snapHydrated = await hydrateCommercialReviewFromServerSnapshot({ agreementId: hid });
-              if (snapHydrated.ok) {
-                verifiedResumeCorpus = String(snapHydrated.snapshot.corpus_plain || "").trim();
-              }
-            } catch {
-              /* GET draft paper remains the resume authority if snapshot hydrate misses. */
-            }
-            const resumeCorpus =
-              verifiedResumeCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN
-                ? verifiedResumeCorpus
-                : productionResumeCorpus;
             hydratedPremiumBodyRef.current = resumeCorpus;
             lastPremiumWinningCorpusRef.current = resumeCorpus;
             premiumPipelineOutputBodyRef.current = resumeCorpus;
@@ -19186,18 +19354,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               });
             } catch {
               /* preview still paints from refs */
-            }
-            try {
-              establishPaidProSourceOfTruth({
-                text: resumeCorpus,
-                source: "server_full_draft",
-                draft: next,
-                intakeText: rawIntake,
-                allowShorterOverwrite: true,
-                generationOutcome: "ok",
-              });
-            } catch {
-              /* SoT is a wipe-guard; document text still paints from refs */
             }
             bumpPremiumSurfaceGateTick();
           } else {
@@ -30714,7 +30870,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     if (hasPaidProSourceOfTruth()) {
       const stable = await commitPaidProUserApprovedRevision(raw, "pro_final_review_plain_edit_revision");
-      if (!stable) {
+      if (!stable.ok || !stable.corpus.trim()) {
         setProFinalReviewSaveBusy(false);
         setJourneyActionFeedback(
           feedbackFailed("direct_save", "Save did not complete", feedbackAfterDirectSaveFailed(), {
@@ -30724,9 +30880,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
       clearPaidProSignerStagingDisplayCorpus();
-      syncConsumedAuthoritySignerTitlesFromCorpus(stable);
-      setPaidProPinnedSignerAppliedCorpus(stable);
-      setProFinalReviewEditPlain(stable);
+      syncConsumedAuthoritySignerTitlesFromCorpus(stable.corpus);
+      setPaidProPinnedSignerAppliedCorpus(stable.corpus);
+      setProFinalReviewEditPlain(stable.corpus);
       proFinalReviewUserEditedRef.current = true;
       setProFinalReviewSaveBusy(false);
       setProFinalReviewSaveAck(true);

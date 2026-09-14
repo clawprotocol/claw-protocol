@@ -75,7 +75,9 @@ export type CorePaidJourneyRowId =
   | "B2_signer_reads_locked_version_and_completes"
   | "B3_owner_final_record_after_direct_sign"
   | "C1_refresh_preserves_paper_version_path"
-  | "C2_dashboard_reopen_same_agreement";
+  | "C2_dashboard_reopen_same_agreement"
+  | "C3_fresh_context_editable_reopen"
+  | "C4_resume_apply_after_dashboard_reset";
 
 export type CorePaidJourneyRow = {
   id: CorePaidJourneyRowId;
@@ -167,6 +169,18 @@ export const CORE_PAID_JOURNEY_MATRIX: readonly CorePaidJourneyRow[] = [
     id: "C2_dashboard_reopen_same_agreement",
     area: "continuity",
     title: "Dashboard reopen keeps the same server-issued agreement; no Free Starter reset",
+    proof: "workflow",
+  },
+  {
+    id: "C3_fresh_context_editable_reopen",
+    area: "continuity",
+    title: "Fresh authenticated context opens /app/create?agreementId= onto the latest persisted editable paper",
+    proof: "workflow",
+  },
+  {
+    id: "C4_resume_apply_after_dashboard_reset",
+    area: "continuity",
+    title: "After dashboard session reset, resume the existing agreement and Apply the remaining payment due",
     proof: "workflow",
   },
 ] as const;

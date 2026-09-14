@@ -48,6 +48,7 @@ export function assertPhase4b51SuccessLandingContracts(): void {
   const intake = readFileSync(join(HERE, "../components/agreements/AgreementBuilderIntake.tsx"), "utf8");
   if (
     !intake.includes("productionResumeCorpus") ||
+    !intake.includes("resolvePaidCreateResumeCorpus") ||
     !intake.includes("hydrateCommercialReviewFromServerSnapshot({ agreementId: hid })") ||
     !intake.includes("setAgreementDocumentText(resumeCorpus)")
   ) {

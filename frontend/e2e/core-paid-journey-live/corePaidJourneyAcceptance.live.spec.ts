@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Locator, type Page, type Response } from "@playwright/test";
 import {
   assertCorePaidJourneyAcceptanceContracts,
 } from "../../src/launch/corePaidJourneyAcceptanceCoverage";
@@ -18,6 +18,13 @@ import {
   UNCONFIRMED_PAYMENT_DUE_QUESTION,
   UNCONFIRMED_PAYMENT_TIMING_QUESTION,
 } from "../../src/components/agreements/proAgreementCompleteness";
+import {
+  formatObservedJsonFailure,
+  isCanonicalSnapshotCreatePost,
+  parseObservedJsonPayload,
+  readOptionalAlertFromCount,
+  snapshotFieldsFromObservedPayload,
+} from "../../src/launch/corePaidJourneySnapshotObserve";
 import {
   persistCorePaidJourneyArticle,
   persistCorePaidJourneyArticleCompare,
@@ -64,16 +71,239 @@ async function articleText(page: Page): Promise<string> {
       const text = readable(node);
       if (text.includes("Harbor Peak Analytics LLC") && text.length > best.length) best = text;
     }
+    if (best) return best;
     const heading = Array.from(document.querySelectorAll("h1, h2")).find((el) =>
       /CONSULTING SERVICES AGREEMENT/i.test(el.textContent || ""),
     );
-    const root =
-      heading?.closest(
-        '[data-testid="paid-pro-visible-document-shell"], [data-testid="simple-pro-final-review-document"], article',
-      ) || heading?.parentElement;
-    const fromHeading = readable(root);
-    return fromHeading.length > best.length ? fromHeading : best;
+    const root = heading?.closest(
+      '[data-testid="paid-pro-visible-document-shell"], [data-testid="simple-pro-final-review-document"]',
+    );
+    return readable(root);
   });
+}
+
+function feesClause(article: string): string {
+  return article.split(/4\.\s+/i)[0] || article;
+}
+
+function hasCompleteClarifiedFees(article: string): boolean {
+  const fees = feesClause(article);
+  return (
+    /October 1, 2026/.test(fees) &&
+    /net\s*60|net sixty/i.test(fees) &&
+    /\$48,000/.test(article) &&
+    !/monthly/i.test(fees) &&
+    !/weekly/i.test(fees)
+  );
+}
+
+function hasMonthlyUnresolvedFees(article: string): boolean {
+  const fees = feesClause(article);
+  return /monthly/i.test(fees) && /\$48,000/.test(article) && !/net\s*60|net sixty/i.test(fees);
+}
+
+async function readCreateSessionState(page: Page): Promise<{
+  resume: string | null;
+  premium: string | null;
+  complexity: string | null;
+  payment: string | null;
+}> {
+  return page.evaluate(() => ({
+    resume: sessionStorage.getItem("claw_agreement_create_review_resume_v1"),
+    premium: sessionStorage.getItem("claw_premium_completion_snapshot_v1"),
+    complexity: sessionStorage.getItem("claw_create_complexity_resume_v1"),
+    payment: sessionStorage.getItem("claw_payment_clarification_v1"),
+  }));
+}
+
+async function readOptionalRoleAlert(root: Locator): Promise<string> {
+  const alert = root.locator("[role='alert']");
+  const count = await alert.count();
+  if (count <= 0) return readOptionalAlertFromCount(count, "");
+  const text = await alert.first().textContent({ timeout: 1_000 }).catch(() => "");
+  return readOptionalAlertFromCount(count, text);
+}
+
+async function readObservedJson(
+  res: Response,
+  stage: string,
+  startedAt: number,
+): Promise<unknown> {
+  const raw = await res.text();
+  const parsed = parseObservedJsonPayload({
+    raw,
+    endpoint: res.url(),
+    method: res.request().method(),
+    status: res.status(),
+    stage,
+    elapsedMs: Date.now() - startedAt,
+  });
+  if (!parsed.ok) {
+    throw new Error(formatObservedJsonFailure(parsed.error));
+  }
+  return parsed.value;
+}
+
+async function fetchOwnerCanonicalSnapshot(
+  page: Page,
+  agreementId: string,
+): Promise<{ ok: boolean; snapshotId: string; digest: string; corpus: string; agreementId: string; length: number }> {
+  const api = configuredLiveApiBase();
+  const runtime = loadCorePaidJourneyRuntime();
+  const startedAt = Date.now();
+  const endpoint = `${api}/api/agreements/${encodeURIComponent(agreementId)}/canonical-review-snapshot`;
+  const res = await page.request.get(endpoint, {
+    timeout: 20_000,
+    headers: {
+      Authorization: `Bearer ${runtime.access_token}`,
+      "X-Claw-Org-Id": runtime.org_id,
+    },
+  });
+  const raw = await res.text();
+  const parsed = parseObservedJsonPayload({
+    raw,
+    endpoint,
+    method: "GET",
+    status: res.status(),
+    stage: `canonical_get+${Date.now() - startedAt}ms`,
+    elapsedMs: Date.now() - startedAt,
+  });
+  if (!parsed.ok) {
+    throw new Error(formatObservedJsonFailure(parsed.error));
+  }
+  if (!res.ok()) {
+    throw new Error(
+      formatObservedJsonFailure({
+        kind: "http_failed",
+        endpoint,
+        method: "GET",
+        status: res.status(),
+        stage: `canonical_get+${Date.now() - startedAt}ms`,
+        elapsedMs: Date.now() - startedAt,
+        message: "authorized canonical GET failed",
+      }),
+    );
+  }
+  const fields = snapshotFieldsFromObservedPayload(parsed.value);
+  return {
+    ok: true,
+    snapshotId: fields.snapshotId,
+    digest: fields.digest,
+    corpus: fields.corpus,
+    agreementId: fields.agreementId || agreementId,
+    length: fields.length,
+  };
+}
+
+function captureNewAgreementPosts(page: Page): string[] {
+  const minted: string[] = [];
+  page.on("response", (res) => {
+    if (res.request().method() !== "POST") return;
+    let path = "";
+    try {
+      path = new URL(res.url()).pathname.replace(/\/$/, "");
+    } catch {
+      return;
+    }
+    if (path === "/api/agreements" || path === "/v1/agreements") {
+      minted.push(res.url());
+    }
+  });
+  return minted;
+}
+
+async function proveSupportedEditingAction(page: Page): Promise<string> {
+  const editToggle = page
+    .getByTestId("simple-pro-edit-agreement-text-toggle")
+    .or(page.getByTestId("simple-pro-edit-wording"))
+    .or(page.getByRole("button", { name: /Edit agreement text|Edit wording/i }));
+  if ((await editToggle.count()) > 0) {
+    await editToggle.first().click();
+  }
+  const editor = page
+    .getByTestId("simple-pro-edit-agreement-plain-input")
+    .or(page.getByTestId("simple-pro-suggest-edits-input"))
+    .or(page.getByTestId("pro-review-suggest-edits-input"));
+  await expect(editor.first(), "a supported edit control must be usable after restoration").toBeVisible({
+    timeout: 20_000,
+  });
+  const before = (await editor.first().inputValue().catch(() => "")) || "";
+  await editor.first().fill(`${before}\nClarify the consulting term start date.`);
+  await expect(editor.first()).toHaveValue(/Clarify the consulting term start date/);
+  const cancel = page.getByTestId("simple-pro-cancel-agreement-edits");
+  if ((await cancel.count()) > 0) {
+    await cancel.first().click();
+  }
+  return "edit-agreement-text";
+}
+
+async function assertFreshEditableCreateReopen(
+  browser: Browser,
+  page: Page,
+  agreementId: string,
+  expected: { snapshotId: string; digest: string; corpus?: string },
+  paperReady: (article: string) => boolean = hasCompleteClarifiedFees,
+  opts?: { requireEditingAction?: boolean },
+): Promise<{ article: string; reopenId: string; mintedNew: string[] }> {
+  const freshContext = await browser.newContext({
+    viewport: page.viewportSize() ?? { width: 1280, height: 720 },
+  });
+  const freshPage = await freshContext.newPage();
+  const mintedNew = captureNewAgreementPosts(freshPage);
+  await seedCorePaidJourneyOwner(freshPage);
+  await freshPage.goto(`/app/create?agreementId=${agreementId}`, { waitUntil: "domcontentloaded" });
+  const leaked = await readCreateSessionState(freshPage);
+  expect(leaked.payment, "fresh context must not inherit payment sessionStorage").toBeNull();
+  expect(leaked.premium, "fresh context must not inherit premium completion snapshot").toBeNull();
+  let article = "";
+  await expect
+    .poll(
+      async () => {
+        article = await articleText(freshPage);
+        return paperReady(article) ? article.length : 0;
+      },
+      { timeout: 90_000 },
+    )
+    .toBeGreaterThan(400);
+  const reopenId = await durableAgreementId(freshPage);
+  expect(reopenId, "fresh editable reopen must stay on the saved agreement").toBe(agreementId);
+  await expect(freshPage).toHaveURL(
+    new RegExp(`/app/create\\?agreementId=${agreementId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+  );
+  await expect(
+    freshPage.getByTestId("payment-clarification-panel"),
+    "complete authorized paper on editable reopen must not reopen payment questions",
+  ).toHaveCount(0, { timeout: 20_000 });
+  const editableActions = freshPage
+    .getByTestId("simple-pro-send-for-review")
+    .or(freshPage.getByTestId("simple-pro-send-for-signature"));
+  await expect(
+    editableActions.first(),
+    "editing must remain usable after fresh-context restoration",
+  ).toBeVisible({ timeout: 20_000 });
+  expect(
+    await editableActions.count(),
+    "fresh editable reopen must keep create-review actions mounted",
+  ).toBeGreaterThan(0);
+  const server = await fetchOwnerCanonicalSnapshot(freshPage, agreementId);
+  expect(server.ok, "fresh editable reopen must read the persisted snapshot").toBeTruthy();
+  expect(server.agreementId || agreementId).toBe(agreementId);
+  expect(server.snapshotId, "fresh editable reopen must keep the same snapshot identity").toBe(expected.snapshotId);
+  expect(server.digest, "fresh editable reopen must keep the same snapshot digest").toBe(expected.digest);
+  expect(server.corpus.length, "fresh-context GET must return operative paper").toBeGreaterThan(400);
+  expect(paperReady(server.corpus), "fresh-context GET corpus must be the authorized paper").toBeTruthy();
+  const visibleVsGet = describeOperativeArticleCompare("fresh_visible", article, "fresh_get", server.corpus);
+  expect(visibleVsGet.sameOperative, visibleVsGet.diff).toBe(true);
+  if (expected.corpus) {
+    const expectedVsGet = describeOperativeArticleCompare("origin_get", expected.corpus, "fresh_get", server.corpus);
+    expect(expectedVsGet.sameOperative, expectedVsGet.diff).toBe(true);
+  }
+  if (opts?.requireEditingAction) {
+    await proveSupportedEditingAction(freshPage);
+  }
+  expect(mintedNew, "opening the saved agreement must not mint a replacement").toEqual([]);
+  await freshContext.close();
+  return { article, reopenId, mintedNew };
 }
 
 async function waitForPaintedArticle(page: Page): Promise<string> {
@@ -1570,5 +1800,247 @@ test.describe("Core paid journey acceptance", () => {
     expect(freshReopen).toMatch(/net\s*60|net sixty/i);
     await expect(freshPage.getByTestId("payment-clarification-panel")).toHaveCount(0);
     await freshContext.close();
+  });
+
+  test("fresh-context editable reopen restores persisted clarified paper", async ({ page, browser }) => {
+    let status: "pass" | "fail" = "fail";
+    let detail = "unfinished";
+    try {
+      expect(CORE_PAID_JOURNEY_FILLED_INTAKE).not.toMatch(/net\s*[- ]?30|installment|invoice monthly/i);
+      const originContext = await browser.newContext({
+        viewport: page.viewportSize() ?? { width: 1280, height: 720 },
+      });
+      const ownerPage = await originContext.newPage();
+      await seedCorePaidJourneyOwner(ownerPage);
+      const drafted = await draftThroughVisiblePaper(ownerPage, { skipSparse: true, skipSignerSetup: true });
+      const panel = ownerPage.getByTestId("payment-clarification-panel");
+      await expect(panel, "payment question must be visible after the production draft").toBeVisible({
+        timeout: 20_000,
+      });
+      await ownerPage.getByTestId("payment-clarification-answer").fill(
+        "Invoice once on October 1, 2026. Payment due net 60.",
+      );
+      const snapshotPostDone = ownerPage.waitForResponse(
+        (res) =>
+          res.url().includes("/canonical-review-snapshot") &&
+          res.request().method() === "POST" &&
+          res.ok(),
+        { timeout: 90_000 },
+      );
+      await ownerPage.getByTestId("payment-clarification-apply").click();
+      await snapshotPostDone;
+      let savedArticle = "";
+      await expect
+        .poll(async () => {
+          savedArticle = await articleText(ownerPage);
+          return hasCompleteClarifiedFees(savedArticle) ? savedArticle.length : 0;
+        }, { timeout: 90_000 })
+        .toBeGreaterThan(400);
+      await expect(ownerPage.getByTestId("payment-clarification-panel")).toHaveCount(0, { timeout: 20_000 });
+      const persisted = await fetchOwnerCanonicalSnapshot(ownerPage, drafted.agreementId);
+      expect(persisted.ok, "complete clarification must persist a canonical snapshot").toBeTruthy();
+      expect(persisted.snapshotId.length, "persisted snapshot id").toBeGreaterThan(4);
+      expect(persisted.digest).toMatch(/^[0-9a-f]{64}$/);
+      expect(hasCompleteClarifiedFees(persisted.corpus || savedArticle)).toBeTruthy();
+      await originContext.close();
+
+      const reopened = await assertFreshEditableCreateReopen(browser, page, drafted.agreementId, {
+        snapshotId: persisted.snapshotId,
+        digest: persisted.digest,
+      });
+      persistCorePaidJourneyArticle({
+        ...ctx(),
+        agreementId: drafted.agreementId,
+        article: reopened.article,
+      });
+      status = "pass";
+      detail = `agreement=${drafted.agreementId} snapshot=${persisted.snapshotId} digest=${persisted.digest} reopenId=${reopened.reopenId}`;
+    } catch (error) {
+      detail = error instanceof Error ? error.message : String(error);
+      throw error;
+    } finally {
+      record("C3_fresh_context_editable_reopen", status, detail);
+    }
+  });
+
+  test("resume and apply after dashboard session reset", async ({ page, browser }) => {
+    let status: "pass" | "fail" = "fail";
+    let detail = "unfinished";
+    try {
+      expect(CORE_PAID_JOURNEY_FILLED_INTAKE).not.toMatch(/net\s*[- ]?30|installment|invoice monthly/i);
+      await seedCorePaidJourneyOwner(page);
+      const drafted = await draftThroughVisiblePaper(page, { skipSparse: true, skipSignerSetup: true });
+      const panel = page.getByTestId("payment-clarification-panel");
+      await expect(panel, "payment question must be visible after the production draft").toBeVisible({
+        timeout: 20_000,
+      });
+      await page.getByTestId("payment-clarification-answer").fill("Invoice monthly");
+      await page.getByTestId("payment-clarification-apply").click();
+      await expect(panel.getByTestId("payment-clarification-question")).toContainText(
+        UNCONFIRMED_PAYMENT_DUE_QUESTION,
+        { timeout: 90_000 },
+      );
+      let afterMonthly = "";
+      await expect
+        .poll(async () => {
+          afterMonthly = await articleText(page);
+          return hasMonthlyUnresolvedFees(afterMonthly) ? afterMonthly.length : 0;
+        }, { timeout: 90_000 })
+        .toBeGreaterThan(400);
+      const monthly = await fetchOwnerCanonicalSnapshot(page, drafted.agreementId);
+      expect(monthly.ok, "monthly-only paper must persist before reset").toBeTruthy();
+      expect(monthly.snapshotId.length, "monthly snapshot id").toBeGreaterThan(4);
+      expect(monthly.digest).toMatch(/^[0-9a-f]{64}$/);
+      expect(monthly.corpus.length, "monthly GET corpus").toBeGreaterThan(400);
+      expect(hasMonthlyUnresolvedFees(monthly.corpus)).toBeTruthy();
+      expect(monthly.corpus).toMatch(/monthly/i);
+      expect(monthly.corpus).not.toMatch(/net\s*60|net sixty/i);
+
+      await page.getByRole("button", { name: "LawDog home" }).click();
+      await expect(page).toHaveURL(/\/app\/?$/);
+      await expect(page.locator("body")).toContainText(/Consulting|Harbor Peak|Ironvale/i, { timeout: 20_000 });
+      await expect(page.getByTestId("dashboard-create-new-agreement")).toBeVisible({ timeout: 20_000 });
+      await page.getByTestId("dashboard-create-new-agreement").click();
+      await expect(page).toHaveURL(/\/app\/create\/?$/);
+      const resetState = await readCreateSessionState(page);
+      expect(resetState.resume, "dashboard reset must clear create resume id").toBeNull();
+      expect(resetState.premium, "dashboard reset must clear premium completion snapshot").toBeNull();
+      expect(resetState.complexity, "dashboard reset must clear structured create resume").toBeNull();
+      await expect(page.getByTestId("simple-pro-final-review-document")).toHaveCount(0);
+      await expect(page.getByTestId("paid-pro-visible-document-shell")).toHaveCount(0);
+      expect(await page.locator("body").innerText()).not.toMatch(/Payment is due net 60/i);
+
+      await page.goto(`/app/create?agreementId=${drafted.agreementId}`, { waitUntil: "domcontentloaded" });
+      await expect(page).toHaveURL(
+        new RegExp(`/app/create\\?agreementId=${drafted.agreementId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+      );
+      const resumePanel = page.getByTestId("payment-clarification-panel");
+      await expect(resumePanel, "remaining due question must be usable after reset reopen").toBeVisible({
+        timeout: 90_000,
+      });
+      await expect(resumePanel.getByTestId("payment-clarification-question")).toContainText(
+        UNCONFIRMED_PAYMENT_DUE_QUESTION,
+      );
+      await expect(resumePanel.getByTestId("payment-clarification-question")).not.toContainText(
+        UNCONFIRMED_PAYMENT_TIMING_QUESTION,
+      );
+      let afterReopen = "";
+      await expect
+        .poll(async () => {
+          afterReopen = await articleText(page);
+          return hasMonthlyUnresolvedFees(afterReopen) ? afterReopen.length : 0;
+        }, { timeout: 90_000 })
+        .toBeGreaterThan(400);
+
+      await page.getByTestId("payment-clarification-answer").fill("Payment due net 60");
+      const applyStartedAt = Date.now();
+      const snapshotPostDone = page.waitForResponse(
+        (res) =>
+          isCanonicalSnapshotCreatePost({
+            url: res.url(),
+            method: res.request().method(),
+            agreementId: drafted.agreementId,
+          }),
+        { timeout: 90_000 },
+      );
+      await page.getByTestId("payment-clarification-apply").click();
+      const err = await readOptionalRoleAlert(resumePanel);
+      expect(err, "Apply after reset must not fail closed").not.toMatch(
+        /payment_clarification_apply_unavailable|Could not apply/i,
+      );
+      const snapshotRes = await snapshotPostDone;
+      const requestRaw = snapshotRes.request().postData() || "";
+      const requestParsed = parseObservedJsonPayload({
+        raw: requestRaw,
+        endpoint: snapshotRes.url(),
+        method: snapshotRes.request().method(),
+        status: 0,
+        stage: `request_payload+${Date.now() - applyStartedAt}ms`,
+        elapsedMs: Date.now() - applyStartedAt,
+      });
+      if (!requestParsed.ok) {
+        throw new Error(formatObservedJsonFailure(requestParsed.error));
+      }
+      if (!snapshotRes.ok()) {
+        throw new Error(
+          formatObservedJsonFailure({
+            kind: "http_failed",
+            endpoint: snapshotRes.url(),
+            method: snapshotRes.request().method(),
+            status: snapshotRes.status(),
+            stage: `snapshot_create_response+${Date.now() - applyStartedAt}ms`,
+            elapsedMs: Date.now() - applyStartedAt,
+            message: "snapshot-create POST failed",
+          }),
+        );
+      }
+      const postedValue = await readObservedJson(
+        snapshotRes,
+        `response_payload+${Date.now() - applyStartedAt}ms`,
+        applyStartedAt,
+      );
+      const posted = snapshotFieldsFromObservedPayload(postedValue);
+      expect(posted.snapshotId.length, "Apply after reset must return a snapshot id").toBeGreaterThan(4);
+      expect(posted.snapshotId, "Apply must mint a new snapshot after net-60").not.toBe(monthly.snapshotId);
+      let afterApply = "";
+      await expect
+        .poll(async () => {
+          const applyErr = await readOptionalRoleAlert(resumePanel);
+          if (/payment_clarification_apply_unavailable|Could not apply/i.test(applyErr)) {
+            return `apply_error:${applyErr}`;
+          }
+          afterApply = await articleText(page);
+          const fees = feesClause(afterApply);
+          if (/monthly/i.test(fees) && /net\s*60|net sixty/i.test(fees) && /\$48,000/.test(afterApply)) {
+            return "applied";
+          }
+          return "pending";
+        }, { timeout: 90_000 })
+        .toBe("applied");
+      await expect(resumePanel.getByTestId("payment-clarification-question")).toHaveCount(0, { timeout: 90_000 });
+      const appliedId = await durableAgreementId(page);
+      expect(appliedId).toBe(drafted.agreementId);
+      const persisted = await fetchOwnerCanonicalSnapshot(page, drafted.agreementId);
+      expect(persisted.ok, "authorized canonical GET must succeed independently of the POST").toBeTruthy();
+      expect(persisted.snapshotId, "GET snapshot id must match the Apply create response").toBe(posted.snapshotId);
+      expect(persisted.digest, "GET digest must match the Apply create response").toBe(posted.digest);
+      expect(persisted.length, "GET length must match the Apply create response").toBe(posted.length || persisted.corpus.length);
+      expect(persisted.digest).toMatch(/^[0-9a-f]{64}$/);
+      expect(persisted.corpus.length, "GET corpus must be complete operative paper").toBeGreaterThan(400);
+      const getVsPost = describeOperativeArticleCompare("canonical_get", persisted.corpus, "snapshot_create_post", posted.corpus);
+      expect(getVsPost.sameOperative, getVsPost.diff).toBe(true);
+      const visibleVsGet = describeOperativeArticleCompare("visible_document", afterApply, "canonical_get", persisted.corpus);
+      expect(visibleVsGet.sameOperative, visibleVsGet.diff).toBe(true);
+      expect(persisted.corpus).toMatch(/monthly/i);
+      expect(persisted.corpus).toMatch(/net\s*60|net sixty/i);
+      expect(persisted.corpus).toMatch(/\$48,000/);
+
+      const reopened = await assertFreshEditableCreateReopen(
+        browser,
+        page,
+        drafted.agreementId,
+        {
+          snapshotId: persisted.snapshotId,
+          digest: persisted.digest,
+          corpus: persisted.corpus,
+        },
+        (article) => {
+          const fees = feesClause(article);
+          return (
+            /monthly/i.test(fees) &&
+            /net\s*60|net sixty/i.test(fees) &&
+            /\$48,000/.test(article)
+          );
+        },
+        { requireEditingAction: true },
+      );
+      status = "pass";
+      detail = `agreement=${drafted.agreementId} monthly_snapshot=${monthly.snapshotId} monthly_digest=${monthly.digest} monthly_len=${monthly.length} due_question=${UNCONFIRMED_PAYMENT_DUE_QUESTION} apply_snapshot=${persisted.snapshotId} digest=${persisted.digest} len=${persisted.length} monthly+net60 applied after reset reopenId=${reopened.reopenId}`;
+    } catch (error) {
+      detail = error instanceof Error ? error.message : String(error);
+      throw error;
+    } finally {
+      record("C4_resume_apply_after_dashboard_reset", status, detail);
+    }
   });
 });

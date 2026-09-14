@@ -28,6 +28,18 @@ export function hashPaidProCorpus(text: string): string {
   return fingerprintAgreementBody(text || "");
 }
 
+/**
+ * Revision identity for authorized paper. The hash algorithm itself is unchanged:
+ * `hashPaidProCorpus("")` is the truthy string `"empty"`, which must not be treated
+ * as a present revision or used to short-circuit verified-paper fallbacks.
+ */
+export function authorizedPaidProRevisionId(text?: string | null): string {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  const hash = hashPaidProCorpus(raw);
+  return hash && hash !== "empty" ? hash : "";
+}
+
 export function getPaidProSourceOfTruth(): PaidProSourceOfTruth | null {
   return paidProSourceOfTruth;
 }
