@@ -7,7 +7,7 @@ This evaluation does not authorize launch. Official stub gate on this source is 
 
 - Branch: `stabilize/phase3b-paid-entry`
 - Base HEAD before this checkpoint: `6ebace85109fda42065fd653ff9fab6dec2a3a73`
-- Candidate: the local commit that records this customer-meaning correction (same working tree that produced the identities below)
+- Candidate commit: `d6a6b539e7c82dc7dcca8ee180e0664e3f3aae01`
 - Offline proof: `evals/commercial-readiness/results/quality-eval-offline-journey/20260914T204736Z-13517` (`OFFLINE_JOURNEY_PASS`, `model_calls=0`)
 - Official stub gate: `6ebace85109fda42065fd653ff9fab6dec2a3a73+src-33b6422e9e5d04aa7df3ff3823e640de4d456b6b+run-20260914T205116Z-13943` — **14/18**, C4 and payment-reload failed desktop+mobile. Preserve that dir.
 - Artifacts: production frontend build from `frontend/` (`npm run build`) and backend `uvicorn backend.main:app` as in `Dockerfile`

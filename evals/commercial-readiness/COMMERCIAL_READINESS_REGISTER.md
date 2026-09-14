@@ -9,7 +9,8 @@ Date/completion official identity: `96cd7248d803a8bdf2d8072ab409d242e6a255f5+src
 Official verified fingerprint (C5 close, unchanged): `ba7dbe25691bf522da2a95a9b68db31fbacc694b`  
 Customer-meaning offline identity: `quality-eval-offline-journey/20260914T204736Z-13517` (`OFFLINE_JOURNEY_PASS`, Harbor live-replay + SaaS stub)  
 Official stub gate on this source: `6ebace85109fda42065fd653ff9fab6dec2a3a73+src-33b6422e9e5d04aa7df3ff3823e640de4d456b6b+run-20260914T205116Z-13943` — **not green** (14/18; C4 and payment-reload failed desktop+mobile). Preserve that dir.  
-Base HEAD before this checkpoint: `6ebace85109fda42065fd653ff9fab6dec2a3a73`
+Base HEAD before this checkpoint: `6ebace85109fda42065fd653ff9fab6dec2a3a73`  
+Customer-meaning commit: `d6a6b539e7c82dc7dcca8ee180e0664e3f3aae01`
 
 This register is **not** a launch authorization. This batch cannot establish launch readiness. Status labels are reconciled against the latest official evidence; older pass/fail marks are not carried forward when the candidate or proof surface changed.
 
