@@ -9,7 +9,10 @@ import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { extractLineSeparatedLegalEntityParties } from "./partySlotIdentityNormalize";
 import { shortFormsFromLegalName } from "./paidProPartyNamePreserve";
-import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
+import {
+  isolateLegalEntityFromContaminatedName,
+  isStackedPartyIdentityContamination,
+} from "./starterPartyIdentityIsolation";
 import { isSignerTitleLikeRole } from "./starterRoleLabelGuard";
 import {
   resolveCanonicalPartyRoleLabel,
@@ -127,6 +130,14 @@ function preferStarterPreviewPartyDisplayName(draftName: string, candidate: stri
   const cand = String(candidate || "").replace(/\s+/g, " ").trim();
   if (!draft) return cand;
   if (!cand) return draft;
+  const isolatedDraft = isolateLegalEntityFromContaminatedName(draft);
+  const isolatedCand = isolateLegalEntityFromContaminatedName(cand);
+  if (isStackedPartyIdentityContamination(draft)) {
+    return isolatedDraft || isolatedCand || cand;
+  }
+  if (isStackedPartyIdentityContamination(cand)) {
+    return isolatedCand || isolatedDraft || draft;
+  }
   const draftNorm = normalizeCompare(draft);
   const candNorm = normalizeCompare(cand);
   if (draftNorm === candNorm) {

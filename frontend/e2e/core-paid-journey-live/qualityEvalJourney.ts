@@ -10,7 +10,6 @@ import {
   CORE_PAID_JOURNEY_SPARSE_INTAKE,
   describeOperativeArticleCompare,
 } from "../../src/launch/corePaidJourneyAcceptanceMatrix";
-import { PHASE4C1_SPARSE_SAAS } from "../../src/launch/phase4c1QuickIntakeCoverage";
 import {
   formatObservedJsonFailure,
   isCanonicalSnapshotCreatePost,
@@ -25,19 +24,31 @@ import { loadCorePaidJourneyRuntime, seedCorePaidJourneyOwner } from "./corePaid
 import {
   applyChangesExplainedByAnswers,
   assertCheck,
+  checkFourPartyCustomerMeaning,
   checkHarborAppliedMeaning,
   checkHarborFirstDraftMeaning,
   checkSaasCustomerMeaning,
+  checkThreePartyCustomerMeaning,
   consultingPaperReady as consultingPaperReadyCheck,
+  fourPartyPaperReady as fourPartyPaperReadyCheck,
   saasPaperReady as saasPaperReadyCheck,
+  threePartyPaperReady as threePartyPaperReadyCheck,
 } from "../../src/launch/qualityEvalCustomerPaper";
+import {
+  RELEASE_SCOPE_FOUR_PARTY_FILLED_INTAKE,
+  RELEASE_SCOPE_SAAS_FILLED_INTAKE,
+  RELEASE_SCOPE_SAAS_SPARSE_INTAKE,
+  RELEASE_SCOPE_THREE_PARTY_FILLED_INTAKE,
+  releaseScopeSample,
+  selectReleaseScopeCaseIds,
+  type ReleaseScopeCaseId,
+} from "../../src/launch/releaseScopeQualificationCampaign";
 
-export const QUALITY_EVAL_SAAS_SPARSE_INTAKE = PHASE4C1_SPARSE_SAAS;
+export const QUALITY_EVAL_SAAS_SPARSE_INTAKE = RELEASE_SCOPE_SAAS_SPARSE_INTAKE;
 
-export const QUALITY_EVAL_SAAS_FILLED_INTAKE =
-  "Draft a 12-month SaaS subscription agreement between Orion Harbor LLC (Provider) and Northwind Retail Inc. (Customer). Scope: hosted platform access and standard onboarding, hosted platform only, no professional services. Fee $48,000 annually, net 30. Governing law New York. Provider signer Avery Cole, avery@orionharbor.test. Customer signer Casey Reed, casey@northwind.test.";
+export const QUALITY_EVAL_SAAS_FILLED_INTAKE = RELEASE_SCOPE_SAAS_FILLED_INTAKE;
 
-export type QualityEvalCaseId = "consulting" | "saas";
+export type QualityEvalCaseId = ReleaseScopeCaseId;
 
 export type QualityEvalCase = {
   id: QualityEvalCaseId;
@@ -69,6 +80,37 @@ export const QUALITY_EVAL_CASES: readonly QualityEvalCase[] = [
     track: "signature",
   },
 ];
+
+export const QUALITY_EVAL_MULTIPARTY_CASES: readonly QualityEvalCase[] = [
+  {
+    id: "three_party",
+    sparse: RELEASE_SCOPE_THREE_PARTY_FILLED_INTAKE,
+    filled: RELEASE_SCOPE_THREE_PARTY_FILLED_INTAKE,
+    parties: releaseScopeSample("three_party").parties.map((party) => party.legalEntity),
+    terms: ["45%", "Oklahoma"],
+    partyCue: "Stonebridge Wellness LLC",
+    track: "review",
+  },
+  {
+    id: "four_party",
+    sparse: RELEASE_SCOPE_FOUR_PARTY_FILLED_INTAKE,
+    filled: RELEASE_SCOPE_FOUR_PARTY_FILLED_INTAKE,
+    parties: releaseScopeSample("four_party").parties.map((party) => party.legalEntity),
+    terms: ["$250,000", "Massachusetts"],
+    partyCue: "Lumen Bioinformatics Inc.",
+    track: "review",
+  },
+];
+
+export const QUALITY_EVAL_ALL_CASES: readonly QualityEvalCase[] = [
+  ...QUALITY_EVAL_CASES,
+  ...QUALITY_EVAL_MULTIPARTY_CASES,
+];
+
+export function selectQualityEvalCases(caseId: string | undefined): QualityEvalCase[] {
+  const selected = new Set(selectReleaseScopeCaseIds(caseId));
+  return QUALITY_EVAL_ALL_CASES.filter((row) => selected.has(row.id));
+}
 
 export const HARBOR_DATE_QUESTION = unconfirmedEffectiveDateQuestion("October 1, 2026");
 export const HARBOR_COMPLETION_QUESTION = unconfirmedCompletionCriteriaQuestion(
@@ -427,6 +469,21 @@ export function saasPaperReady(article: string): boolean {
   return saasPaperReadyCheck(article);
 }
 
+export function threePartyPaperReady(article: string): boolean {
+  return threePartyPaperReadyCheck(article);
+}
+
+export function fourPartyPaperReady(article: string): boolean {
+  return fourPartyPaperReadyCheck(article);
+}
+
+export function paperReadyForCase(id: QualityEvalCaseId): (article: string) => boolean {
+  if (id === "consulting") return consultingPaperReady;
+  if (id === "saas") return saasPaperReady;
+  if (id === "three_party") return threePartyPaperReady;
+  return fourPartyPaperReady;
+}
+
 export function assertHarborCustomerMeaning(article: string): void {
   assertCheck(checkHarborAppliedMeaning(article), "harbor_applied_meaning");
 }
@@ -437,6 +494,31 @@ export function assertHarborFirstDraftMeaning(article: string): void {
 
 export function assertSaasCustomerMeaning(article: string): void {
   assertCheck(checkSaasCustomerMeaning(article), "saas_customer_meaning");
+}
+
+export function assertThreePartyCustomerMeaning(article: string): void {
+  assertCheck(checkThreePartyCustomerMeaning(article), "three_party_customer_meaning");
+}
+
+export function assertFourPartyCustomerMeaning(article: string): void {
+  assertCheck(checkFourPartyCustomerMeaning(article), "four_party_customer_meaning");
+}
+
+export function assertReleaseScopePaper(id: QualityEvalCaseId, article: string, stage: "first" | "applied"): void {
+  if (id === "consulting") {
+    if (stage === "first") assertHarborFirstDraftMeaning(article);
+    else assertHarborCustomerMeaning(article);
+    return;
+  }
+  if (id === "saas") {
+    assertSaasCustomerMeaning(article);
+    return;
+  }
+  if (id === "three_party") {
+    assertThreePartyCustomerMeaning(article);
+    return;
+  }
+  assertFourPartyCustomerMeaning(article);
 }
 
 export function assertApplyExplainedByAnswers(before: string, after: string, answers: string): void {

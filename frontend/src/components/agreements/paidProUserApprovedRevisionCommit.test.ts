@@ -230,6 +230,12 @@ describe("production paid revision commit isolation", () => {
     expect(intake).toContain("applyOwnerApprovedRevisionCallerDisplay");
     expect(intake).toContain("committed.displayed");
     expect(intake).not.toMatch(/setAgreementDocumentText\(painted\)/);
+    expect(intake).toMatch(
+      /applyOwnerApprovedRevisionCallerDisplay\(\{[\s\S]*?revisionId:\s*captured\.revisionId,[\s\S]*?applyOwnerApprovedRevisionCallerDisplay\(\{[\s\S]*?revisionId:\s*captured\.revisionId,/,
+    );
+    expect(intake).not.toMatch(
+      /applyOwnerApprovedRevisionCallerDisplay\([\s\S]{0,400}authorizedPaidProRevisionId\(patched\)/,
+    );
   });
 
   it("org switch aborts persist before a write with the wrong org headers", async () => {

@@ -2,6 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { CORE_PAID_JOURNEY_FILLED_INTAKE } from "../../launch/corePaidJourneyAcceptanceMatrix";
 import {
+  applySuppliedContentFactsToAuthorizedPaper,
+  applySuppliedPaymentFactsToAuthorizedPaper,
   authorizedDraftMatchesAgreement,
   intakeFromAuthorizedDraft,
   paymentApplyPrerequisitesReady,
@@ -107,5 +109,104 @@ describe("payment clarification apply recovery", () => {
     expect(resolved.intakeSource).toBe("live");
     expect(resolved.structuredSource).toBe("live");
     expect(resolved.structured).toBe(live);
+  });
+
+  it("keeps net-60 in Fees when monthly is glued to 4. TERM", () => {
+    const glued = [
+      "3. FEES AND PAYMENT Client shall pay a fixed fee of $48,000 for the services. The fee is not a subscription and is not an estimate. Consultant will invoice the fixed fee monthly.4. TERM AND DURATION",
+      "The initial term is twelve months beginning October 1, 2026.",
+    ].join("\n");
+    const out = applySuppliedPaymentFactsToAuthorizedPaper(
+      glued,
+      CORE_PAID_JOURNEY_FILLED_INTAKE,
+      "Payment due net 60",
+    );
+    const fees = out.split(/4\.\s+/i)[0] || out;
+    expect(fees).toMatch(/invoice the fixed fee monthly/i);
+    expect(fees).toMatch(/Payment is due net 60/i);
+    expect(fees).toMatch(/\$48,000/);
+    expect(out).toMatch(/4\.\s+TERM AND DURATION/i);
+    expect(out.indexOf("Payment is due net 60")).toBeLessThan(out.search(/4\.\s+TERM AND DURATION/i));
+  });
+
+  it("labels the confirmed Effective Date and completion on authorized first-draft paper", () => {
+    const firstDraft = [
+      "CONSULTING SERVICES AGREEMENT",
+      "",
+      'This Consulting Services Agreement (this "Agreement") is entered into by and between Harbor Peak Analytics LLC ("Consultant") and Ironvale Manufacturing Inc. ("Client").',
+      "",
+      "1. PARTIES AND ROLES",
+      "",
+      "Consultant is an independent professional services firm.",
+      "",
+      "2. SCOPE OF SERVICES",
+      "",
+      "Consultant shall perform AI workflow implementation for Client, including discovery, implementation planning, configuration, and knowledge transfer. Consultant shall not invent additional counterparties or change the commercial bargain without a written amendment.",
+      "",
+      "3. FEES AND PAYMENT",
+      "",
+      "Client shall pay a fixed fee of $48,000 for the services.",
+      "",
+      "4. TERM AND DURATION",
+      "",
+      "The initial term is twelve months beginning October 1, 2026.",
+    ].join("\n");
+    const answers = [
+      "The agreement effective date is the same as the October 1, 2026 service start.",
+      "Completion is Client's written confirmation that the implemented AI workflow is in operational use.",
+    ].join("\n");
+    const out = applySuppliedContentFactsToAuthorizedPaper(
+      firstDraft,
+      CORE_PAID_JOURNEY_FILLED_INTAKE,
+      answers,
+    );
+    const opening = out.split(/\n\s*1[.)]\s+/)[0] || out.slice(0, 700);
+    expect(opening).toMatch(/October 1, 2026 \(the ["']Effective Date["']\)/i);
+    expect(opening).not.toMatch(/as of the Effective Date by and between/i);
+    expect(out).toMatch(/written confirmation that the implemented AI workflow is in operational use/i);
+    expect(out).toMatch(/AI workflow implementation/i);
+    expect(out).toMatch(/\$48,000/);
+    expect(
+      applySuppliedContentFactsToAuthorizedPaper(firstDraft, CORE_PAID_JOURNEY_FILLED_INTAKE, ""),
+    ).toBe(firstDraft);
+  });
+
+  it("adds net-60 onto authorized monthly paper without dropping monthly", () => {
+    const monthly = [
+      "CONSULTING SERVICES AGREEMENT",
+      "",
+      "3. FEES AND PAYMENT",
+      "",
+      "Client shall pay a fixed fee of $48,000 for the services. The fee is not a subscription and is not an estimate. Consultant will invoice the fixed fee monthly.",
+      "",
+      "4. TERM AND DURATION",
+      "",
+      "The initial term is twelve months beginning October 1, 2026.",
+    ].join("\n");
+    const out = applySuppliedPaymentFactsToAuthorizedPaper(
+      monthly,
+      CORE_PAID_JOURNEY_FILLED_INTAKE,
+      "Invoice monthly\nPayment due net 60",
+    );
+    expect(out).toMatch(/invoice the fixed fee monthly/i);
+    expect(out).toMatch(/Payment is due net 60/i);
+    expect(out).toMatch(/\$48,000/);
+  });
+
+  it("replaces monthly with the October 1 invoice and net-60 when that is the confirmed answer", () => {
+    const monthly = [
+      "3. FEES AND PAYMENT",
+      "Client shall pay a fixed fee of $48,000 for the services. Consultant will invoice the fixed fee monthly.",
+      "4. TERM AND DURATION",
+      "The initial term is twelve months beginning October 1, 2026.",
+    ].join("\n");
+    const out = applySuppliedPaymentFactsToAuthorizedPaper(
+      monthly,
+      CORE_PAID_JOURNEY_FILLED_INTAKE,
+      "Invoice once on October 1, 2026. Payment due net 60.",
+    );
+    expect(out).toMatch(/once on October 1, 2026/i);
+    expect(out).toMatch(/Payment is due net 60/i);
+    expect(out).not.toMatch(/invoice the fixed fee monthly/i);
   });
 });

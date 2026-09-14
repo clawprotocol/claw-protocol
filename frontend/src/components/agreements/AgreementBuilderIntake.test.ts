@@ -54,7 +54,15 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const p = join(__dirname, "AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");
     expect(s).toContain("mergePaidProAuthoritativeDraftFieldsFromApi");
+    expect(s).toContain("retainAuthorizedApiPartiesAfterIntakeDefaults");
+    expect(s).toContain("applySuppliedContentFactsToAuthorizedPaper");
     expect(s).toMatch(/coerceDraftFromApiPayload\([\s\S]{0,220}mergePaidProAuthoritativeDraftFieldsFromApi/m);
+    expect(s).toMatch(
+      /runIntakeDefaultsAndRoles[\s\S]{0,400}retainAuthorizedApiPartiesAfterIntakeDefaults/,
+    );
+    expect(s).toMatch(
+      /verifiedResumePaper && \(draft != null \|\| productionResumeHydratedRef\.current\)/,
+    );
   });
 
   it("hydrate shape: server_full_document_text length + render source keeps review (not intake)", () => {

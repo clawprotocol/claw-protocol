@@ -7,6 +7,10 @@ import {
   describeOperativeArticleCompare,
   normalizeArticleWhitespace,
 } from "./corePaidJourneyAcceptanceMatrix";
+import {
+  RELEASE_SCOPE_SAMPLES,
+  type ReleaseScopeCaseId,
+} from "./releaseScopeQualificationCampaign";
 
 export type PaperCheck = { ok: boolean; reasons: string[] };
 
@@ -205,3 +209,113 @@ export function assertCheck(check: PaperCheck, label: string): void {
     throw new Error(`${label}: ${check.reasons.join(",")}`);
   }
 }
+
+const THREE_PARTY_SPLIT = [/\b45\s*%|\bforty[ -]?five\s+percent/i, /\b35\s*%|\bthirty[ -]?five\s+percent/i, /\b20\s*%|\btwenty\s+percent/i];
+const FOUR_PARTY_LUMEN = [/\$250,000/, /\$400,000/, /\$350,000/];
+const FOUR_PARTY_THALASSA = [/\$180,000/, /\$220,000/];
+const FOUR_PARTY_COASTAL = [/\$150,000/, /\$175,000/];
+const FOUR_PARTY_VANGUARD = [/\$95,000/, /\$105,000/];
+const TWENTY_FOUR_MONTHS = /\b(?:24(?:\s*\(\s*24\s*\))?\s*months?|twenty[ -]?four\s+months)\b/i;
+
+function missingParty(text: string, name: string): boolean {
+  return !text.includes(name);
+}
+
+function substitutedGoverningLaw(text: string, expected: string, forbidden: readonly string[]): boolean {
+  if (!new RegExp(expected, "i").test(text)) return true;
+  for (const other of forbidden) {
+    const governed = new RegExp(
+      `(?:govern(?:ed|ing)(?:\\s+law)?(?:\\s+by(?:\\s+the\\s+laws\\s+of(?:\\s+the\\s+State\\s+of)?)?)?|laws?\\s+of(?:\\s+the\\s+State\\s+of)?)\\s+${other}`,
+      "i",
+    );
+    const governs = new RegExp(`${other}\\s+law\\s+governs`, "i");
+    if (governed.test(text) || governs.test(text)) return true;
+  }
+  return false;
+}
+
+export function checkThreePartyCustomerMeaning(article: string): PaperCheck {
+  const text = normalizeArticleWhitespace(article || "");
+  const sample = RELEASE_SCOPE_SAMPLES.find((row) => row.id === "three_party");
+  const reasons: string[] = [];
+  if (!sample) return fail(["missing_three_party_sample"]);
+  for (const party of sample.parties) {
+    if (missingParty(text, party.legalEntity)) reasons.push(`missing_party_${party.legalEntity}`);
+  }
+  if (!/Oklahoma/i.test(text) || substitutedGoverningLaw(text, "Oklahoma", sample.forbiddenJurisdictions)) {
+    reasons.push("missing_or_substituted_governing_law");
+  }
+  THREE_PARTY_SPLIT.forEach((pattern, index) => {
+    if (!pattern.test(text)) reasons.push(`missing_revenue_share_${["45", "35", "20"][index]}`);
+  });
+  if (!/original (?:content|materials)|wellness training/i.test(text)) {
+    reasons.push("missing_stonebridge_content_ownership");
+  }
+  if (!/platform code|online training platform/i.test(text)) {
+    reasons.push("missing_novapath_platform_responsibility");
+  }
+  if (!/\b(?:billing|account management|market(?:s|ing)|sell(?:s|ing) subscriptions)\b/i.test(text)) {
+    reasons.push("missing_clearspring_distribution_responsibility");
+  }
+  if (/\bI am only coordinating|Jane Coordinator\b/i.test(text)) {
+    reasons.push("invented_coordinator_party");
+  }
+  for (const name of sample.forbiddenParties) {
+    if (text.includes(name)) reasons.push(`forbidden_party_${name}`);
+  }
+  if (PLACEHOLDER.test(text)) reasons.push("placeholder_or_forbidden_party");
+  return fail(reasons);
+}
+
+export function checkFourPartyCustomerMeaning(article: string): PaperCheck {
+  const text = normalizeArticleWhitespace(article || "");
+  const sample = RELEASE_SCOPE_SAMPLES.find((row) => row.id === "four_party");
+  const reasons: string[] = [];
+  if (!sample) return fail(["missing_four_party_sample"]);
+  for (const party of sample.parties) {
+    if (missingParty(text, party.legalEntity)) reasons.push(`missing_party_${party.legalEntity}`);
+  }
+  if (
+    !/Massachusetts/i.test(text) ||
+    substitutedGoverningLaw(text, "Massachusetts", sample.forbiddenJurisdictions)
+  ) {
+    reasons.push("missing_or_substituted_governing_law");
+  }
+  if (!TWENTY_FOUR_MONTHS.test(text)) reasons.push("missing_twenty_four_month_term");
+  const milestoneGroups = [
+    ["lumen", FOUR_PARTY_LUMEN],
+    ["thalassa", FOUR_PARTY_THALASSA],
+    ["coastal", FOUR_PARTY_COASTAL],
+    ["vanguard", FOUR_PARTY_VANGUARD],
+  ] as const;
+  for (const [label, patterns] of milestoneGroups) {
+    for (const pattern of patterns) {
+      if (!pattern.test(text)) reasons.push(`missing_${label}_milestone_${pattern.source}`);
+    }
+  }
+  if (!/Platform Developer/i.test(text)) reasons.push("missing_lumen_role");
+  if (!/Data Infrastructure Provider/i.test(text)) reasons.push("missing_thalassa_role");
+  if (!/Analytics Integrator/i.test(text)) reasons.push("missing_coastal_role");
+  if (!/Regulatory Compliance Advisor/i.test(text)) reasons.push("missing_vanguard_role");
+  for (const name of sample.forbiddenParties) {
+    if (text.includes(name)) reasons.push(`forbidden_party_${name}`);
+  }
+  if (PLACEHOLDER.test(text)) reasons.push("placeholder_or_forbidden_party");
+  return fail(reasons);
+}
+
+export function threePartyPaperReady(article: string): boolean {
+  return checkThreePartyCustomerMeaning(article).ok;
+}
+
+export function fourPartyPaperReady(article: string): boolean {
+  return checkFourPartyCustomerMeaning(article).ok;
+}
+
+export function paperReadyForReleaseScopeCase(id: ReleaseScopeCaseId, article: string): boolean {
+  if (id === "consulting") return consultingPaperReady(article);
+  if (id === "saas") return saasPaperReady(article);
+  if (id === "three_party") return threePartyPaperReady(article);
+  return fourPartyPaperReady(article);
+}
+

@@ -53,3 +53,42 @@ export function mergePaidProAuthoritativeDraftFieldsFromApi(
   });
   return { ...coerced, ...extras, parties: outParties as ParsedDraftShape["parties"] } as ParsedDraftShape;
 }
+
+/**
+ * Intake defaults on a short GET shell can drop counterparty rows or emails.
+ * Restore authorized GET parties after those defaults so review-link mint keeps
+ * the Ironvale/Jordan recipient identity.
+ */
+export function retainAuthorizedApiPartiesAfterIntakeDefaults(
+  next: ParsedDraftShape,
+  apiDraft: AgreementDraft | null,
+): ParsedDraftShape {
+  if (!apiDraft) return next;
+  const apiParties = Array.isArray(apiDraft.parties) ? (apiDraft.parties as AgreementParty[]) : [];
+  if (apiParties.length === 0) return next;
+  const local = Array.isArray(next.parties) ? [...next.parties] : [];
+  const byId = new Map<string, AgreementParty>();
+  const byName = new Map<string, AgreementParty>();
+  for (const raw of local) {
+    const p = raw as AgreementParty;
+    const id = String(p.id || "").trim();
+    const name = String(p.name || "").trim().toLowerCase();
+    if (id) byId.set(id, p);
+    if (name && !byName.has(name)) byName.set(name, p);
+  }
+  const parties = apiParties.map((ap) => {
+    const id = String(ap.id || "").trim();
+    const name = String(ap.name || "").trim().toLowerCase();
+    const prev = (id && byId.get(id)) || (name && byName.get(name)) || ({} as AgreementParty);
+    const email = String(ap.email || prev.email || "").trim();
+    return {
+      ...prev,
+      ...ap,
+      ...(id ? { id } : {}),
+      name: String(ap.name || prev.name || "").trim(),
+      role: ap.role || prev.role || "party",
+      ...(email ? { email } : {}),
+    };
+  });
+  return { ...next, parties: parties as ParsedDraftShape["parties"] };
+}

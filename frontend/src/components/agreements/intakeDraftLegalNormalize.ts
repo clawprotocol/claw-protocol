@@ -119,6 +119,10 @@ export function extractServiceStartFromRawIntake(raw: string): string | null {
       const mo = MONTH_MAP[hit.month.toLowerCase()];
       if (mo) return formatCalendarDate(hit.year, mo, hit.day) || null;
     }
+    const iso = slice.match(/^(20\d{2})-(\d{1,2})-(\d{1,2})\b/);
+    if (iso) return formatCalendarDate(Number(iso[1]), Number(iso[2]), Number(iso[3])) || null;
+    const slash = slice.match(/^(\d{1,2})\/(\d{1,2})\/(20\d{2})\b/);
+    if (slash) return formatCalendarDate(Number(slash[3]), Number(slash[1]), Number(slash[2])) || null;
   }
   return null;
 }
@@ -162,7 +166,31 @@ export type LegalNormalizeOptions = {
   applyStarterTerminationDefault?: boolean;
 };
 
+/** Normalize a calendar date to YYYY-MM-DD so equivalent writings compare equal. */
+export function calendarDateKey(value: string | null | undefined): string | null {
+  const t = collapseWs(value || "");
+  if (!t) return null;
+  const named = matchMonthDate(t);
+  if (named) {
+    const mo = MONTH_MAP[named.month.toLowerCase()];
+    if (!mo) return null;
+    return `${named.year}-${String(mo).padStart(2, "0")}-${String(named.day).padStart(2, "0")}`;
+  }
+  const iso = t.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/);
+  if (iso) {
+    return `${iso[1]}-${String(Number(iso[2])).padStart(2, "0")}-${String(Number(iso[3])).padStart(2, "0")}`;
+  }
+  const slash = t.match(/\b(\d{1,2})\/(\d{1,2})\/(20\d{2})\b/);
+  if (slash) {
+    return `${slash[3]}-${String(Number(slash[1])).padStart(2, "0")}-${String(Number(slash[2])).padStart(2, "0")}`;
+  }
+  return null;
+}
+
 function sameCalendarDate(a: string | null | undefined, b: string | null | undefined): boolean {
+  const leftKey = calendarDateKey(a);
+  const rightKey = calendarDateKey(b);
+  if (leftKey && rightKey) return leftKey === rightKey;
   const left = collapseWs(a || "").toLowerCase();
   const right = collapseWs(b || "").toLowerCase();
   return Boolean(left && right && left === right);

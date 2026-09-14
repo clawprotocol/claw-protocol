@@ -554,7 +554,10 @@ import {
   paidProEditReturnHasRecoverableBody,
   readPaidProEditReturnHandoff,
 } from "../../launch/simpleProduct/paidProEditReturnHandoff";
-import { mergePaidProAuthoritativeDraftFieldsFromApi } from "../../launch/simpleProduct/paidProResumeDraftMerge";
+import {
+  mergePaidProAuthoritativeDraftFieldsFromApi,
+  retainAuthorizedApiPartiesAfterIntakeDefaults,
+} from "../../launch/simpleProduct/paidProResumeDraftMerge";
 import { mergeLiveDraftWithRecipientSetupForReviewLinks } from "../../launch/simpleProduct/reviewLinkRecipientEmailMerge";
 import {
   draftAuditHasRecipientRecordedApproval,
@@ -703,6 +706,8 @@ import {
   type PaymentApplyTarget,
 } from "./paymentClarificationSession";
 import {
+  applySuppliedContentFactsToAuthorizedPaper,
+  applySuppliedPaymentFactsToAuthorizedPaper,
   authorizedDraftMatchesAgreement,
   intakeFromAuthorizedDraft,
   paymentApplyPrerequisitesReady,
@@ -4060,9 +4065,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const liveUser = resolveCurrentUser();
       const liveOrg = (getOrgId() || "").trim();
       const liveAgreementId = (
+        parseCreateAgreementIdFromSearch() ||
         reviewAgreementIdRef.current ||
         readCreateReviewAgreementResumeId() ||
-        parseCreateAgreementIdFromSearch() ||
         ""
       ).trim();
       if (liveAgreementId && reviewAgreementIdRef.current !== liveAgreementId) {
@@ -4127,9 +4132,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         userId: resolveCurrentUser().id,
         organizationId: (getOrgId() || "").trim(),
         agreementId: (
+          parseCreateAgreementIdFromSearch() ||
           reviewAgreementIdRef.current ||
           readCreateReviewAgreementResumeId() ||
-          parseCreateAgreementIdFromSearch() ||
           ""
         ).trim(),
         revisionId:
@@ -6963,6 +6968,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const agreementId = (
       reviewAgreementIdRef.current ||
       readCreateReviewAgreementResumeId() ||
+      parseCreateAgreementIdFromSearch() ||
       ""
     ).trim();
     if (!agreementId) {
@@ -8498,6 +8504,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const agreementIdForReload = (
           reviewAgreementIdRef.current ||
           readCreateReviewAgreementResumeId() ||
+          parseCreateAgreementIdFromSearch() ||
           ""
         ).trim();
         if (!agreementIdForReload) {
@@ -18191,6 +18198,74 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (!paymentApplyPrerequisitesReady({ intakeText, structured }) || !structured) {
         throw new Error("payment_clarification_apply_unavailable");
       }
+      const authorizedPaper = (
+        getPaidProSourceOfTruthText().trim() ||
+        selectVerifiedPaidReviewPaper({ agreementId: captured.agreementId })?.plain ||
+        ""
+      ).trim();
+      if (authorizedPaper.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+        const afterPayment = applySuppliedPaymentFactsToAuthorizedPaper(
+          authorizedPaper,
+          intakeText,
+          userGapAnswers,
+        );
+        const patched = applySuppliedContentFactsToAuthorizedPaper(
+          afterPayment,
+          intakeText,
+          userGapAnswers,
+        ).trim();
+        if (patched.length >= PAID_PRO_AUTHORITY_MIN_LEN && patched !== authorizedPaper) {
+          const committed = await commitPaidProUserApprovedRevision(
+            patched,
+            "payment_clarification_answer",
+            captured,
+          );
+          const outcome = resolveOwnerApprovedRevisionCallerOutcome(committed);
+          if (!outcome.applied) {
+            throw new Error("payment_clarification_apply_unavailable");
+          }
+          applyOwnerApprovedRevisionCallerDisplay({
+            result: committed,
+            captured,
+            live: {
+              userId: resolveCurrentUser().id,
+              organizationId: (getOrgId() || "").trim(),
+              agreementId:
+                parseCreateAgreementIdFromSearch() ||
+                reviewAgreementIdRef.current ||
+                captured.agreementId,
+              revisionId: captured.revisionId,
+            },
+            activeRequestId: readActivePaidProRevisionOperation(captured.agreementId)?.requestId,
+            paint: (corpus) => {
+              setAgreementDocumentText(corpus);
+              setReviewDocRefreshTick((n) => n + 1);
+            },
+          });
+          const newRevision = authorizedPaidProRevisionId(outcome.corpus) || hashPaidProCorpus(outcome.corpus);
+          markPaymentClarificationApplied(
+            {
+              userId: captured.userId,
+              organizationId: captured.organizationId,
+              agreementId: captured.agreementId,
+              revisionId: captured.revisionId,
+            },
+            userGapAnswers,
+            newRevision,
+            captured.requestId,
+          );
+          if (
+            samePaymentApplyOwner(captured, {
+              userId: resolveCurrentUser().id,
+              organizationId: getOrgId(),
+              agreementId: reviewAgreementIdRef.current || undefined,
+            })
+          ) {
+            premiumLastGapAnswersRef.current = userGapAnswers;
+          }
+          return;
+        }
+      }
       const currentTarget = () => ({
         userId: resolveCurrentUser().id,
         organizationId: (getOrgId() || "").trim(),
@@ -18254,8 +18329,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         live: {
           userId: resolveCurrentUser().id,
           organizationId: (getOrgId() || "").trim(),
-          agreementId: reviewAgreementIdRef.current || captured.agreementId,
-          revisionId: currentTarget().revisionId,
+          agreementId:
+            parseCreateAgreementIdFromSearch() ||
+            reviewAgreementIdRef.current ||
+            captured.agreementId,
+          revisionId: captured.revisionId,
         },
         activeRequestId: readActivePaidProRevisionOperation(captured.agreementId)?.requestId,
         paint: (corpus) => {
@@ -19094,15 +19172,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     if (!createProductionTwoPane || !simpleProductFlow || !liveWorkspaceTwoPane) return;
     if (checkoutBackRestoreActive) return;
-    if (draft != null) return;
-    if (productionResumeHydratedRef.current) return;
-    if (!shouldHydrateStoredAgreementResumeId()) return;
     const hid =
       (resumeSignerSetupAgreementId || "").trim() ||
       readCreateReviewAgreementResumeId() ||
       parseCreateAgreementIdFromSearch() ||
       (peekCreatorDashboardSignerSetupResume() || "").trim();
     if (!hid) return;
+    const verifiedResumePaper = selectVerifiedPaidReviewPaper({ agreementId: hid });
+    // First-create already has verified paper after persist. Do not GET/reparse
+    // parties from the short workspace shell. Reload/reset still hydrates when
+    // verified paper is gone.
+    if (verifiedResumePaper && (draft != null || productionResumeHydratedRef.current)) {
+      return;
+    }
+    if (productionResumeHydratedRef.current && verifiedResumePaper) return;
+    if (!hid && !shouldHydrateStoredAgreementResumeId()) return;
     const signerSetupResume =
       openSignerSetupOnResume ||
       isCreatorDashboardSignerSetupResumeActive() ||
@@ -19199,6 +19283,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           next = runIntakeDefaultsAndRoles(next, rawIntake, simpleProductFlow, intakePartyRoleLabels);
           next = alignParsedWithCanonicalType(next, rawIntake);
           next = normalizeParsedDraftLegalConcepts(next, rawIntake);
+          next = retainAuthorizedApiPartiesAfterIntakeDefaults(next, adForHydrate);
         } else {
           // Prefer API parties as-is; only fill empty legal names from draft.party slots.
           const apiParties = Array.isArray(adForHydrate.parties) ? adForHydrate.parties : [];

@@ -19,7 +19,14 @@ import {
 } from "../components/agreements/intakeDraftLegalNormalize";
 import { parseIntakeToStructuredAgreement } from "../components/agreements/intakeStructuredAgreementModel";
 import { dateMeaningMaterialItem } from "../components/agreements/paidProDateMeaning";
-import { sanitizePaidProDomainScopeContamination } from "../components/agreements/paidProDomainScopeGuard";
+import { applyPaidProReviewRenderSanitizer } from "../components/agreements/paidProReviewRenderCorpus";
+import { buildLivePaidProSignerMetadataAuthority } from "../components/agreements/paidProSignerMetadataAuthority";
+import { preparePaidProServerDocumentForAcceptance } from "../components/agreements/paidProConciseServicesQuality";
+import { buildPremiumFullDraftContext } from "../components/agreements/premiumFullDraftApi";
+import {
+  detectUnsupportedDomainContamination,
+  sanitizePaidProDomainScopeContamination,
+} from "../components/agreements/paidProDomainScopeGuard";
 import { preserveFullLegalPartyNames } from "../components/agreements/paidProPartyNamePreserve";
 import {
   detectPremiumCommercialSignals,
@@ -111,6 +118,17 @@ describe("customer-meaning production path from preserved live Harbor evidence",
     expect(draft.effective_date).toBeNull();
     expect(draft.termination_summary || "").not.toMatch(/for convenience/i);
     expect(detectPremiumCommercialSignals(HARBOR_INTAKE).contractorServices).toBe(false);
+    const isoDraft = clearUnconfirmedServiceStartEffectiveDate(
+      { ...draft, effective_date: "2026-10-01" },
+      HARBOR_INTAKE,
+    );
+    const slashDraft = clearUnconfirmedServiceStartEffectiveDate(
+      { ...draft, effective_date: "10/1/2026" },
+      HARBOR_INTAKE,
+    );
+    expect(buildPremiumFullDraftContext(isoDraft).effective_date).toBeNull();
+    expect(buildPremiumFullDraftContext(slashDraft).effective_date).toBeNull();
+    expect(buildPremiumFullDraftContext(draft).effective_date).toBeNull();
   });
 
   it("paints the captured server paper without deleting supplied scope", () => {
@@ -190,10 +208,39 @@ describe("customer-meaning production path from preserved live Harbor evidence",
       "2. Term",
       "The term is twelve (12) months.",
     ].join("\n");
-    const { text } = sanitizePaidProDomainScopeContamination(mixed, HARBOR_INTAKE);
+    const { text, repairs } = sanitizePaidProDomainScopeContamination(mixed, HARBOR_INTAKE);
     expect(text).toMatch(/AI workflow implementation/i);
+    expect(text).not.toMatch(/CRM campaigns/i);
+    expect(text).not.toMatch(/sales outreach/i);
     expect(text).not.toMatch(/configuration support/i);
+    expect(text).not.toMatch(/\bplanning\b/i);
     expect(text).not.toMatch(/Service Provider will perform professional consulting/i);
+    expect(repairs).toContain("stripped_unsupported_scope_additions");
+    expect(detectUnsupportedDomainContamination(text, HARBOR_INTAKE).ruleIds).not.toEqual(
+      expect.arrayContaining(["crm_campaigns", "sales_outreach", "configuration_support"]),
+    );
+
+    const parties = buildLivePaidProSignerMetadataAuthority({
+      partyCount: 2,
+      recipient1Name: "Harbor Peak Analytics LLC",
+      recipient2Name: "Ironvale Manufacturing Inc.",
+      recipient1Email: "maya.chen@harborpeak.test",
+      recipient2Email: "jordan.hale@ironvale.test",
+      extraPartyReviewEmails: [],
+      partySignerNames: ["Maya Chen", "Jordan Hale"],
+      partySignerTitles: ["", ""],
+      partyAddresses: ["", ""],
+    }).parties;
+    const rendered = applyPaidProReviewRenderSanitizer(mixed, parties, { intakeText: HARBOR_INTAKE }).text;
+    expect(rendered).toMatch(/AI workflow implementation/i);
+    expect(rendered).not.toMatch(/CRM campaigns/i);
+    expect(rendered).not.toMatch(/sales outreach/i);
+    expect(rendered).not.toMatch(/configuration support/i);
+    const saved = preparePaidProServerDocumentForAcceptance(mixed, null, HARBOR_INTAKE);
+    expect(saved.text).toMatch(/AI workflow implementation/i);
+    expect(saved.text).not.toMatch(/CRM campaigns/i);
+    expect(saved.text).not.toMatch(/sales outreach/i);
+    expect(saved.text).not.toMatch(/configuration support/i);
   });
 
   it("keeps hosted SaaS free of consulting/project obligations", () => {

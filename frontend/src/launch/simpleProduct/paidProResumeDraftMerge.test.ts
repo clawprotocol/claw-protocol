@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import type { ParsedDraftShape } from "../../components/agreements/intakeSmartDefaults";
-import { mergePaidProAuthoritativeDraftFieldsFromApi } from "./paidProResumeDraftMerge";
+import {
+  mergePaidProAuthoritativeDraftFieldsFromApi,
+  retainAuthorizedApiPartiesAfterIntakeDefaults,
+} from "./paidProResumeDraftMerge";
 
 describe("mergePaidProAuthoritativeDraftFieldsFromApi", () => {
   it("copies authoritative corpus and party contacts from API draft onto coerced shape", () => {
@@ -48,6 +51,44 @@ describe("mergePaidProAuthoritativeDraftFieldsFromApi", () => {
     expect(p0.id).toBe("p1");
     expect(p1.email).toBe("bob@example.com");
     expect(p1.id).toBe("p2");
+  });
+
+  it("restores GET counterparties dropped by intake defaults on a short shell", () => {
+    const afterDefaults: ParsedDraftShape = {
+      title: "Consulting Services Agreement",
+      jurisdiction: "DE",
+      parties: [{ name: "Harbor Peak Analytics LLC", role: "Client" }],
+      purpose: "Short GET shell",
+      payment_terms: "",
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      payment: { amount: null, cadence: null, valid: false },
+    };
+    const apiDraft = {
+      parties: [
+        {
+          id: "63488645-6996-49fb-84f3-888cf0ec9993",
+          name: "Harbor Peak Analytics LLC",
+          role: "owner",
+          email: "maya.chen@harborpeak.test",
+        },
+        {
+          id: "8f01efd1-e0fb-472d-b9cd-95c87607965c",
+          name: "Ironvale Manufacturing Inc.",
+          role: "reviewer",
+          email: "jordan.hale@ironvale.test",
+        },
+      ],
+    } as AgreementDraft;
+    const retained = retainAuthorizedApiPartiesAfterIntakeDefaults(afterDefaults, apiDraft);
+    expect(retained.parties).toHaveLength(2);
+    expect(retained.parties[1]).toMatchObject({
+      id: "8f01efd1-e0fb-472d-b9cd-95c87607965c",
+      name: "Ironvale Manufacturing Inc.",
+      email: "jordan.hale@ironvale.test",
+      role: "reviewer",
+    });
   });
 
   it("is a no-op when api draft is null", () => {

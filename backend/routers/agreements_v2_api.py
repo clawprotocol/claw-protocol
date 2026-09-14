@@ -12086,7 +12086,9 @@ def _recipient_proposal_closed_from_index(audit: List[Any], proposal_id: str, pe
     for j in range(pending_index + 1, len(audit)):
         d = _audit_event_dict(audit[j])
         et = str(d.get("event_type") or "")
-        val = d.get("value") or {}
+        val = d.get("value")
+        if not isinstance(val, dict):
+            continue
         if str(val.get("proposal_id") or "").strip() != pid:
             continue
         if et in (

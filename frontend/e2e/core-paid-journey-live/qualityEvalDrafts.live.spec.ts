@@ -3,22 +3,21 @@ import { authorizedPaidProRevisionId } from "../../src/components/agreements/pai
 import { describeOperativeArticleCompare, normalizeArticleWhitespace } from "../../src/launch/corePaidJourneyAcceptanceMatrix";
 import {
   HARBOR_CONTENT_ANSWERS,
-  QUALITY_EVAL_CASES,
+  QUALITY_EVAL_ALL_CASES,
   applyHarborContentAnswers,
   articleText,
   assertApplyExplainedByAnswers,
   assertFreshEditableReopen,
   assertHarborCustomerMeaning,
-  assertHarborFirstDraftMeaning,
-  assertSaasCustomerMeaning,
+  assertReleaseScopePaper,
   captureCanonicalSnapshotCreates,
   captureServerAgreementIds,
-  consultingPaperReady,
   fetchOwnerCanonicalSnapshot,
   installQualityEvalPageGuards,
+  paperReadyForCase,
   qualityEvalViewportName,
   readQualityEvalSamples,
-  saasPaperReady,
+  selectQualityEvalCases,
   submitIntake,
   waitForCapturedSnapshotCreate,
   waitForPaintedArticle,
@@ -34,10 +33,7 @@ const filledOnly =
   process.env.QUALITY_EVAL_FILLED_ONLY === "1" || process.env.CLAW_QUALITY_EVAL_LIVE === "1";
 const reopenOnly = process.env.QUALITY_EVAL_REOPEN_ONLY === "1";
 
-const selected = QUALITY_EVAL_CASES.filter((scenario) => {
-  const only = process.env.QUALITY_EVAL_CASE;
-  return !only || only === "all" || only === scenario.id;
-});
+const selected = selectQualityEvalCases(process.env.QUALITY_EVAL_CASE);
 
 for (const scenario of selected) {
   test(`real drafting: ${scenario.id}`, async ({ page, browser }) => {
@@ -145,10 +141,8 @@ for (const scenario of selected) {
       expect(firstPaper).not.toMatch(/\[insert[^\]]*\]|lorem ipsum|\bTBD\b|Orion Labs|Contoso Retail/);
       if (scenario.id === "consulting") {
         expect(normalizeArticleWhitespace(firstPaper)).toMatch(/October 1, 2026/);
-        assertHarborFirstDraftMeaning(firstPaper);
-      } else {
-        assertSaasCustomerMeaning(firstPaper);
       }
+      assertReleaseScopePaper(scenario.id, firstPaper, "first");
 
       const agreementId = await waitForServerAgreementId(page, capturedIds);
       expect(agreementId.length, "server agreement id must be durable").toBeGreaterThan(8);
@@ -161,14 +155,16 @@ for (const scenario of selected) {
         scriptedActions.push("apply_date_completion");
         posted = await applyHarborContentAnswers(page, agreementId);
       } else {
-        await expect(page.getByTestId("paid-draft-content-clarification-panel")).toHaveCount(0);
-        await expect(page.getByTestId("date-meaning-clarification-question")).toHaveCount(0);
-        await expect(page.getByTestId("completion-criteria-clarification-question")).toHaveCount(0);
+        if (scenario.id === "saas") {
+          await expect(page.getByTestId("paid-draft-content-clarification-panel")).toHaveCount(0);
+          await expect(page.getByTestId("date-meaning-clarification-question")).toHaveCount(0);
+          await expect(page.getByTestId("completion-criteria-clarification-question")).toHaveCount(0);
+        }
         posted = await waitForCapturedSnapshotCreate(snapshotPosts, agreementId);
       }
 
       let afterApply = "";
-      const paperReady = scenario.id === "consulting" ? consultingPaperReady : saasPaperReady;
+      const paperReady = paperReadyForCase(scenario.id);
       await expect
         .poll(async () => {
           afterApply = await articleText(page, scenario.partyCue);
@@ -183,7 +179,7 @@ for (const scenario of selected) {
         assertHarborCustomerMeaning(afterApply);
         assertApplyExplainedByAnswers(firstPaper, afterApply, HARBOR_CONTENT_ANSWERS);
       } else {
-        assertSaasCustomerMeaning(afterApply);
+        assertReleaseScopePaper(scenario.id, afterApply, "applied");
         const applyVsFirst = describeOperativeArticleCompare("first_draft", firstPaper, "after_apply", afterApply);
         expect(applyVsFirst.sameOperative, applyVsFirst.diff).toBe(true);
       }
@@ -198,11 +194,7 @@ for (const scenario of selected) {
         posted.length || persisted.corpus.length,
       );
       expect(paperReady(persisted.corpus)).toBeTruthy();
-      if (scenario.id === "consulting") {
-        assertHarborCustomerMeaning(persisted.corpus);
-      } else {
-        assertSaasCustomerMeaning(persisted.corpus);
-      }
+      assertReleaseScopePaper(scenario.id, persisted.corpus, scenario.id === "consulting" ? "applied" : "first");
       const getVsPost = describeOperativeArticleCompare(
         "canonical_get",
         persisted.corpus,
@@ -238,10 +230,8 @@ for (const scenario of selected) {
       );
       if (scenario.id === "consulting") {
         await expect(page.getByTestId("date-meaning-clarification-question")).toHaveCount(0);
-        assertHarborCustomerMeaning(reopened.article);
-      } else {
-        assertSaasCustomerMeaning(reopened.article);
       }
+      assertReleaseScopePaper(scenario.id, reopened.article, scenario.id === "consulting" ? "applied" : "first");
       writeQualityEvalArtifact("fresh-reopen.txt", reopened.article, scenario.id);
       writeQualityEvalSample({
         caseId: scenario.id,
@@ -293,7 +283,10 @@ for (const scenario of selected) {
             },
             quality: process.env.CLAW_QUALITY_EVAL_LIVE === "1" ? "human_review_required" : "offline_stub_workflow",
             live_quality: "not_claimed",
-            sample_limitation: "two filled cases only; not arbitrary-input proof",
+            sample_limitation:
+              selected.length === 4
+                ? "four filled release-scope cases; not arbitrary-input proof"
+                : "two filled cases only; not arbitrary-input proof",
             complete_paper_review: "required_for_live_quality",
             recipient_path: "not_yet_exercised",
             manual_edit_recovery: "unverified",
@@ -321,11 +314,11 @@ test("reopen saved samples without regeneration", async ({ page, browser }) => {
   const samples = Object.values(readQualityEvalSamples());
   expect(samples.length, "reopen-only requires previously generated independent samples").toBeGreaterThan(0);
   for (const sample of samples) {
-    const scenario = QUALITY_EVAL_CASES.find((row) => row.id === sample.caseId);
+    const scenario = QUALITY_EVAL_ALL_CASES.find((row) => row.id === sample.caseId);
     expect(scenario, `unknown sample case ${sample.caseId}`).toBeTruthy();
     if (!scenario) continue;
     await installQualityEvalPageGuards(page);
-    const paperReady = scenario.id === "consulting" ? consultingPaperReady : saasPaperReady;
+    const paperReady = paperReadyForCase(scenario.id);
     const reopened = await assertFreshEditableReopen(
       browser,
       page,
@@ -334,8 +327,7 @@ test("reopen saved samples without regeneration", async ({ page, browser }) => {
       scenario.partyCue,
       paperReady,
     );
-    if (scenario.id === "consulting") assertHarborCustomerMeaning(reopened.article);
-    else assertSaasCustomerMeaning(reopened.article);
+    assertReleaseScopePaper(scenario.id, reopened.article, scenario.id === "consulting" ? "applied" : "first");
     writeQualityEvalArtifact("reopen-only.txt", reopened.article, scenario.id);
   }
 });

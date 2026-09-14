@@ -4,11 +4,15 @@ import { join } from "node:path";
 import { normalizeArticleWhitespace } from "./corePaidJourneyAcceptanceMatrix";
 import {
   applyChangesExplainedByAnswers,
+  checkFourPartyCustomerMeaning,
   checkHarborAppliedMeaning,
   checkHarborFirstDraftMeaning,
   checkSaasCustomerMeaning,
+  checkThreePartyCustomerMeaning,
   consultingPaperReady,
+  fourPartyPaperReady,
   saasPaperReady,
+  threePartyPaperReady,
 } from "./qualityEvalCustomerPaper";
 
 /** The weak keyword checks that previously accepted a mutated SaaS paper. */
@@ -374,3 +378,54 @@ describe("quality-eval Harbor meaning and Apply explainability", () => {
     );
   });
 });
+
+const VALID_THREE_PARTY = [
+  "INTELLECTUAL PROPERTY LICENSE AND ROYALTY AGREEMENT",
+  'This Agreement is entered into by and among Stonebridge Wellness LLC ("Licensor"), NovaPath Learning Inc. ("Platform Provider"), and ClearSpring Distribution LLC ("Distributor").',
+  "Stonebridge Wellness LLC owns the original wellness training videos and written course materials and keeps ownership of the original content.",
+  "NovaPath Learning Inc. will adapt and host the materials on its online training platform and owns the platform code and improvements it creates.",
+  "ClearSpring Distribution LLC will market and sell subscriptions, and handle customer contracts, billing, and account management.",
+  "Subscription revenue is split 45% to Stonebridge Wellness LLC, 35% to NovaPath Learning Inc., and 20% to ClearSpring Distribution LLC.",
+  "This Agreement is governed by the laws of the State of Oklahoma.",
+].join("\n");
+
+const VALID_FOUR_PARTY = [
+  "PRECISION MEDICINE DATA PLATFORM AGREEMENT",
+  "The parties are Lumen Bioinformatics Inc. (Platform Developer), Thalassa Data Systems LLC (Data Infrastructure Provider), Coastal Meridian Analytics LLC (Analytics Integrator), and Vanguard Regulatory Sciences Ltd. (Regulatory Compliance Advisor).",
+  "Lumen Bioinformatics Inc. receives $250,000 upon execution, $400,000 upon platform alpha delivery, and $350,000 upon validation report acceptance.",
+  "Thalassa Data Systems LLC receives $180,000 upon data pipeline readiness and $220,000 upon production cutover.",
+  "Coastal Meridian Analytics LLC receives $150,000 upon analytics module delivery and $175,000 upon user acceptance testing completion.",
+  "Vanguard Regulatory Sciences Ltd. receives $95,000 upon regulatory gap assessment and $105,000 upon audit readiness certification.",
+  "The initial term is 24 months with two optional 12-month renewals.",
+  "Massachusetts law governs without regard to conflict-of-law rules.",
+].join("\n");
+
+describe("release-scope three- and four-party customer-meaning checks", () => {
+  it("accepts papers that keep party-specific responsibilities and the selected U.S. law", () => {
+    expect(checkThreePartyCustomerMeaning(VALID_THREE_PARTY)).toEqual({ ok: true, reasons: [] });
+    expect(threePartyPaperReady(VALID_THREE_PARTY)).toBe(true);
+    expect(checkFourPartyCustomerMeaning(VALID_FOUR_PARTY)).toEqual({ ok: true, reasons: [] });
+    expect(fourPartyPaperReady(VALID_FOUR_PARTY)).toBe(true);
+  });
+
+  it("rejects omitted parties, omitted splits, and substituted governing law", () => {
+    const droppedParty = VALID_THREE_PARTY.replace(/ClearSpring Distribution LLC/g, "Western Outlet LLC");
+    expect(checkThreePartyCustomerMeaning(droppedParty).reasons).toEqual(
+      expect.arrayContaining([expect.stringContaining("missing_party_ClearSpring")]),
+    );
+    const wrongLaw = VALID_THREE_PARTY.replace("Oklahoma", "Delaware");
+    expect(checkThreePartyCustomerMeaning(wrongLaw).reasons).toContain("missing_or_substituted_governing_law");
+    const droppedShare = VALID_THREE_PARTY.replace("45%", "50%");
+    expect(checkThreePartyCustomerMeaning(droppedShare).reasons).toContain("missing_revenue_share_45");
+  });
+
+  it("rejects omitted four-party milestones and a substituted state", () => {
+    const droppedFee = VALID_FOUR_PARTY.replace("$250,000", "$200,000");
+    expect(checkFourPartyCustomerMeaning(droppedFee).reasons).toEqual(
+      expect.arrayContaining([expect.stringContaining("missing_lumen_milestone")]),
+    );
+    const wrongLaw = VALID_FOUR_PARTY.replace("Massachusetts law governs", "Oklahoma law governs");
+    expect(checkFourPartyCustomerMeaning(wrongLaw).reasons).toContain("missing_or_substituted_governing_law");
+  });
+});
+

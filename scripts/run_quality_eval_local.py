@@ -43,12 +43,19 @@ def main() -> int:
     parser.add_argument('--authorize-increment', action='store_true',
                         help='Required with an active authorized policy copy. Does not flip the committed sidecar.')
     parser.add_argument('--audit-paid-entry', action='store_true')
-    parser.add_argument('--case', choices=['all', 'consulting', 'saas'], default='all')
+    parser.add_argument(
+        '--case',
+        choices=['all', 'consulting', 'saas', 'three_party', 'four_party', 'release_scope'],
+        default='all',
+        help='all keeps the Harbor+SaaS pair. release_scope is the four-sample campaign.',
+    )
     args = parser.parse_args()
     if args.live and args.audit_paid_entry:
         raise RuntimeError('routing_audit_is_no_spend_only')
     if args.offline_journey and (args.live or args.audit_paid_entry):
         raise RuntimeError('offline_journey_is_no_spend_only')
+    if args.offline_journey and args.case in {'three_party', 'four_party', 'release_scope'}:
+        raise RuntimeError('offline_journey_is_harbor_saas_only')
     if args.replay_live_evidence and args.live:
         raise RuntimeError('live_replay_is_no_spend_only')
     from backend.quality_eval_live_prepare import (
@@ -186,14 +193,26 @@ def main() -> int:
                 'increment_active': increment_selection['active'],
                 'increment_authorized': increment_selection['authorized'],
                 'increment_reason': increment_selection['reason'],
-                'independent_model_samples': 2 if args.live and args.case == 'all' else (1 if args.live else 0),
+                'independent_model_samples': (
+                    4 if args.live and args.case == 'release_scope' else
+                    2 if args.live and args.case == 'all' else
+                    (1 if args.live else 0)
+                ),
                 'mode': 'live' if args.live else 'offline-journey' if args.offline_journey else 'audit' if args.audit_paid_entry else 'preflight'}
-    identity['selected_cases'] = ['consulting', 'saas'] if args.case == 'all' else [args.case]
+    identity['selected_cases'] = (
+        ['consulting', 'saas', 'three_party', 'four_party'] if args.case == 'release_scope' else
+        ['consulting', 'saas'] if args.case == 'all' else
+        [args.case]
+    )
     identity['source_files_sha256'] = source_hashes
     if args.live:
         identity['viewports'] = ['desktop']
         identity['reopen_viewports'] = ['desktop', 'mobile']
-        identity['sample_limitation'] = 'two filled cases only; not arbitrary-input proof'
+        identity['sample_limitation'] = (
+            'four filled release-scope cases; not arbitrary-input proof'
+            if args.case == 'release_scope' else
+            'two filled cases only; not arbitrary-input proof'
+        )
     (out/'identity.json').write_text(json.dumps(identity, indent=2)+'\n')
     processes: list[subprocess.Popen] = []
     logs = []
@@ -233,21 +252,26 @@ def main() -> int:
         frontend = start('preview', ['node_modules/.bin/vite','preview','--host','127.0.0.1','--port','4191','--strictPort'], ROOT/'frontend')
         ready(origin, frontend)
         if args.live:
-            case_filter = [] if args.case == 'all' else ['--grep', f'real drafting: {args.case}$']
+            case_filter = [] if args.case in {'all', 'release_scope'} else ['--grep', f'real drafting: {args.case}$']
             run('browser-samples', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',
                 'qualityEvalDrafts.live.spec.ts','--project=desktop','--workers=1','--retries=0','--max-failures=1','--reporter=line', *case_filter],
-                ROOT/'frontend', timeout=900)
+                ROOT/'frontend', timeout=1800 if args.case == 'release_scope' else 900)
             env['QUALITY_EVAL_REOPEN_ONLY'] = '1'
             run('browser-reopen', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',
                 'qualityEvalDrafts.live.spec.ts','--grep','reopen saved samples','--workers=1','--retries=0','--max-failures=1','--reporter=line'],
-                ROOT/'frontend', timeout=600)
-            print('live_browser=PASS; two samples only; independent human document review still required', flush=True)
+                ROOT/'frontend', timeout=900 if args.case == 'release_scope' else 600)
+            print(
+                'live_browser=PASS; selected_cases='
+                + ','.join(identity['selected_cases'])
+                + '; independent human document review still required',
+                flush=True,
+            )
             (out/'status.json').write_text(json.dumps({'status':'DRAFT_BROWSER_PASS',
                 'cases': identity['selected_cases'],
                 'independent_model_samples': identity['independent_model_samples'],
                 'quality_review':'pending','recipient_paths':'not_yet_exercised',
                 'live_quality':'not_claimed',
-                'sample_limitation':'two filled cases only; not arbitrary-input proof'})+'\n')
+                'sample_limitation': identity['sample_limitation']})+'\n')
         elif args.offline_journey:
             case_filter = [] if args.case == 'all' else ['--grep', f'real drafting: {args.case}$']
             run('browser', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',

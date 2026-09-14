@@ -178,8 +178,49 @@ describe("paidProDomainScopeGuard", () => {
       "2. Term",
       "The term is twelve (12) months.",
     ].join("\n");
-    const { text } = sanitizePaidProDomainScopeContamination(mixed, HARBOR_INTAKE);
+    const { text, repairs } = sanitizePaidProDomainScopeContamination(mixed, HARBOR_INTAKE);
     expect(text).toMatch(/AI workflow implementation/i);
+    expect(text).not.toMatch(/CRM campaigns/i);
+    expect(text).not.toMatch(/sales outreach/i);
+    expect(text).not.toMatch(/configuration support/i);
+    expect(text).not.toMatch(/\bplanning\b/i);
+    expect(text).not.toMatch(/Service Provider will perform professional consulting/i);
+    expect(repairs).toContain("stripped_unsupported_scope_additions");
+    const leftover = detectUnsupportedDomainContamination(text, HARBOR_INTAKE);
+    expect(leftover.ruleIds).not.toEqual(expect.arrayContaining(["crm_campaigns", "sales_outreach", "configuration_support"]));
+  });
+
+  it("does not record a cleanup when AI workflow setup early-return leaves configuration support", () => {
+    const corpus = [
+      "1. Services",
+      "Consultant will perform AI workflow setup and configuration support.",
+      "",
+      "2. Term",
+      "The term is twelve (12) months.",
+    ].join("\n");
+    const { text, repairs } = sanitizePaidProDomainScopeContamination(corpus, AI_WORKFLOW_INTAKE);
+    expect(text).toMatch(/AI workflow setup/i);
+    expect(text).not.toMatch(/configuration support/i);
+    expect(text).not.toMatch(/\bplanning\b/i);
+    expect(repairs.length).toBeGreaterThan(0);
+    expect(detectUnsupportedDomainContamination(text, AI_WORKFLOW_INTAKE).ruleIds).not.toContain(
+      "configuration_support",
+    );
+  });
+
+  it("keeps CRM and campaign work when the customer actually requested it", () => {
+    const crmIntake = `${HARBOR_INTAKE} Client also asks Consultant to manage CRM campaigns and sales outreach.`;
+    const mixed = [
+      "1. Services",
+      "Consultant will perform AI workflow implementation and also manage CRM campaigns, sales outreach, and configuration support.",
+      "",
+      "2. Term",
+      "The term is twelve (12) months.",
+    ].join("\n");
+    const { text } = sanitizePaidProDomainScopeContamination(mixed, crmIntake);
+    expect(text).toMatch(/AI workflow implementation/i);
+    expect(text).toMatch(/CRM campaigns/i);
+    expect(text).toMatch(/sales outreach/i);
     expect(text).not.toMatch(/configuration support/i);
   });
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  calendarDateKey,
   clearUnconfirmedServiceStartEffectiveDate,
   extractEffectiveDateFromRawIntake,
   extractServiceStartFromRawIntake,
@@ -21,6 +22,14 @@ const baseDraft = (): ParsedDraftShape => ({
   due_date: null,
   effective_date: "Upon full execution by all parties",
   payment: { amount: null, cadence: "monthly", valid: true },
+});
+
+describe("calendarDateKey", () => {
+  it("treats long, ISO, and slash writings as the same calendar day", () => {
+    expect(calendarDateKey("October 1, 2026")).toBe("2026-10-01");
+    expect(calendarDateKey("2026-10-01")).toBe("2026-10-01");
+    expect(calendarDateKey("10/1/2026")).toBe("2026-10-01");
+  });
 });
 
 describe("extractEffectiveDateFromRawIntake", () => {
@@ -55,6 +64,37 @@ describe("normalizeParsedDraftLegalConcepts", () => {
       "Scope is AI workflow implementation. Term twelve months starting October 1, 2026.";
     const out = clearUnconfirmedServiceStartEffectiveDate(d, raw);
     expect(out.effective_date).toBeNull();
+  });
+
+  it("clears equivalent unconfirmed service-start writings of the same calendar day", () => {
+    const raw =
+      "Scope is AI workflow implementation. Term twelve months starting October 1, 2026.";
+    expect(clearUnconfirmedServiceStartEffectiveDate({ ...baseDraft(), effective_date: "2026-10-01" }, raw).effective_date).toBeNull();
+    expect(clearUnconfirmedServiceStartEffectiveDate({ ...baseDraft(), effective_date: "10/1/2026" }, raw).effective_date).toBeNull();
+    expect(clearUnconfirmedServiceStartEffectiveDate({ ...baseDraft(), effective_date: "10/01/2026" }, raw).effective_date).toBeNull();
+  });
+
+  it("keeps an explicitly supplied agreement effective date", () => {
+    const raw =
+      "Effective date is May 1, 2026. Term twelve months starting October 1, 2026.";
+    const out = clearUnconfirmedServiceStartEffectiveDate(
+      { ...baseDraft(), effective_date: "May 1, 2026" },
+      raw,
+    );
+    expect(out.effective_date).toBe("May 1, 2026");
+  });
+
+  it("does not treat an invoice or signature date as the agreement effective date", () => {
+    const raw =
+      "Invoice on October 1, 2026. Signed on October 1, 2026. Term twelve months starting October 1, 2026.";
+    expect(extractEffectiveDateFromRawIntake(raw)).toBeNull();
+    const out = normalizeParsedDraftLegalConcepts(
+      { ...baseDraft(), effective_date: "Upon full execution by all parties" },
+      raw,
+      { applyStarterTerminationDefault: false },
+    );
+    expect(out.effective_date).not.toBe("October 1, 2026");
+    expect(out.effective_date).not.toBe("2026-10-01");
   });
 
   it("does not apply the starter termination default on the premium path", () => {
