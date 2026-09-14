@@ -17,6 +17,7 @@ export {
   buildMaterialMissingItems,
   extractPaymentFacts,
   formatMaterialItemsForRevisePanel,
+  paymentSectionText,
   materialItemsToClarificationStrings,
 } from "./revisionQuestionEngine";
 export { isCatastrophicStructuralFailure } from "./proStructuralDetection";

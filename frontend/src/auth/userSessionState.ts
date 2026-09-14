@@ -10,6 +10,7 @@ import { setOrgId } from "../launch/orgContext";
 import { clearPaidCheckoutOrgId } from "../launch/paidCheckoutOrgContext";
 import { clearCachedAccessToken } from "./authAccessTokenCache";
 import { clearImmutableFrozenLegalCorpus } from "../components/agreements/paidProFrozenLegalCorpus";
+import { clearPaymentClarificationClientCache } from "../components/agreements/paymentClarificationSession";
 
 /** Remove account and paid-access authority that must never cross a sign-out boundary. */
 export function clearLawdogUserSessionState(): void {
@@ -22,5 +23,6 @@ export function clearLawdogUserSessionState(): void {
   invalidateWorkspaceProEntitlementCache();
   clearPersistedWorkspaceUsageTierCache();
   clearImmutableFrozenLegalCorpus();
+  clearPaymentClarificationClientCache();
   setOrgId("");
 }

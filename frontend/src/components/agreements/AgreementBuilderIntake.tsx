@@ -682,11 +682,23 @@ import {
   PaidProVisibleDocumentShell,
   PAID_PRO_FALLBACK_REBUILD_MIN_LEN,
 } from "./paidProVisibleDocumentShell";
+import { resolveCurrentUser } from "../../account/currentUser";
 import {
-  appendPaymentClarificationAnswer,
+  bindPaymentClarificationDraftToAgreement,
+  capturePaymentApplyTarget,
+  createPaymentApplyRequestId,
+  createPaymentClarificationDraftSessionId,
+  markPaymentClarificationApplied,
+  markPaymentClarificationApplying,
+  markPaymentClarificationFailed,
+  paymentApplyTargetMatches,
   persistPaymentClarification,
+  queuePaymentClarificationPending,
   readPaymentClarification,
   registerPaymentClarificationApply,
+  resolvePaymentClarificationScope,
+  samePaymentApplyOwner,
+  type PaymentApplyTarget,
 } from "./paymentClarificationSession";
 import {
   hasCanonicalReviewCorpusForRender,
@@ -3972,34 +3984,91 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     | null
   >(null);
   const premiumLastGapAnswersRef = useRef<string>("");
-  const runPaymentClarificationRevisionRef = useRef<((userGapAnswers: string) => Promise<void>) | null>(
-    null,
-  );
+  const runPaymentClarificationRevisionRef = useRef<
+    ((userGapAnswers: string, target: PaymentApplyTarget) => Promise<void>) | null
+  >(null);
+  const paymentDraftSessionIdRef = useRef(createPaymentClarificationDraftSessionId());
   useEffect(() => {
-    const stored = readPaymentClarification(reviewAgreementIdRef.current);
-    if (stored?.answers) premiumLastGapAnswersRef.current = stored.answers;
-    registerPaymentClarificationApply(async (answer) => {
-      const intake = (premiumGapBaseIntakeRef.current || intakeCombinedRef.current || "").trim();
-      const agreementId = (reviewAgreementIdRef.current || "pending").trim();
-      const next = appendPaymentClarificationAnswer(agreementId, intake, answer);
-      premiumLastGapAnswersRef.current = next;
-      const revise = runPaymentClarificationRevisionRef.current;
-      const run = runPremiumModelPassRef.current;
-      if (revise) {
-        await revise(next);
-        return;
+    const user = resolveCurrentUser();
+    const organizationId = (getOrgId() || "").trim();
+    const agreementId = (
+      reviewAgreementId ||
+      reviewAgreementIdRef.current ||
+      readCreateReviewAgreementResumeId() ||
+      ""
+    ).trim();
+    if (user.isAuthenticated && organizationId) {
+      if (agreementId) {
+        bindPaymentClarificationDraftToAgreement({
+          userId: user.id,
+          organizationId,
+          draftSessionId: paymentDraftSessionIdRef.current,
+          agreementId,
+        });
       }
-      if (!run) throw new Error("payment_clarification_apply_unavailable");
-      await run({
-        intakeText: intake,
-        userGapAnswers: next,
-        gapResolverSkippedWithDefaults: false,
-        premiumGenerationCallReason: "post_generate_tenet_recall",
-        postGenerateTenetRecall: true,
-      });
+      const stored = readPaymentClarification(
+        resolvePaymentClarificationScope({
+          agreementId: agreementId || undefined,
+          draftSessionId: paymentDraftSessionIdRef.current,
+        }),
+      );
+      if (stored?.appliedAnswers) premiumLastGapAnswersRef.current = stored.appliedAnswers;
+    }
+    const scope = resolvePaymentClarificationScope({
+      agreementId: agreementId || undefined,
+      draftSessionId: paymentDraftSessionIdRef.current,
+      revisionId: getPaidProSourceOfTruth()?.hash || null,
     });
-    return () => registerPaymentClarificationApply(null);
-  }, []);
+    registerPaymentClarificationApply(scope, async (answer) => {
+      const liveUser = resolveCurrentUser();
+      const liveOrg = (getOrgId() || "").trim();
+      const liveAgreementId = (reviewAgreementIdRef.current || "").trim();
+      if (!liveUser.isAuthenticated || !liveOrg || !liveAgreementId) {
+        throw new Error("payment_clarification_apply_unavailable");
+      }
+      const revisionId =
+        getPaidProSourceOfTruth()?.hash?.trim() ||
+        hashPaidProCorpus(getPaidProSourceOfTruthText() || "");
+      const requestId = createPaymentApplyRequestId();
+      const applyScope = {
+        userId: liveUser.id,
+        organizationId: liveOrg,
+        agreementId: liveAgreementId,
+        revisionId,
+      };
+      const captured = capturePaymentApplyTarget({ ...applyScope, requestId });
+      const intake = (premiumGapBaseIntakeRef.current || intakeCombinedRef.current || "").trim();
+      const priorApplied = readPaymentClarification(applyScope)?.appliedAnswers || "";
+      const next = [priorApplied, answer.trim()].filter(Boolean).join("\n");
+      queuePaymentClarificationPending(applyScope, answer, intake);
+      markPaymentClarificationApplying(applyScope, requestId);
+      const currentTarget = (): PaymentApplyTarget => ({
+        userId: resolveCurrentUser().id,
+        organizationId: (getOrgId() || "").trim(),
+        agreementId: (reviewAgreementIdRef.current || "").trim(),
+        revisionId:
+          getPaidProSourceOfTruth()?.hash?.trim() ||
+          hashPaidProCorpus(getPaidProSourceOfTruthText() || ""),
+        requestId,
+      });
+      try {
+        const revise = runPaymentClarificationRevisionRef.current;
+        if (!revise) throw new Error("payment_clarification_apply_unavailable");
+        if (!paymentApplyTargetMatches(captured, currentTarget())) {
+          throw new Error("payment_clarification_stale_request");
+        }
+        await revise(next, captured);
+      } catch (err) {
+        markPaymentClarificationFailed(
+          applyScope,
+          err instanceof Error ? err.message : "payment_clarification_apply_unavailable",
+          requestId,
+        );
+        throw err;
+      }
+    });
+    return () => registerPaymentClarificationApply(scope, null);
+  }, [reviewAgreementId]);
   const premiumPostGenerateTenetAskedRef = useRef(false);
   const premiumPostGenerateGapsActiveRef = useRef(false);
   const premiumGapBaseIntakeRef = useRef<string>("");
@@ -11007,13 +11076,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           const paymentAgreementId = (
             reviewAgreementIdRef.current ||
             readCreateReviewAgreementResumeId() ||
-            "pending"
+            ""
           ).trim();
-          if (mergedIntake.trim()) {
+          const paymentScope = resolvePaymentClarificationScope({
+            agreementId: paymentAgreementId || undefined,
+            draftSessionId: paymentDraftSessionIdRef.current,
+          });
+          if (paymentScope && mergedIntake.trim()) {
+            if (paymentAgreementId) {
+              bindPaymentClarificationDraftToAgreement({
+                ...paymentScope,
+                draftSessionId: paymentDraftSessionIdRef.current,
+                agreementId: paymentAgreementId,
+              });
+            }
             persistPaymentClarification({
-              agreementId: paymentAgreementId,
+              ...paymentScope,
+              agreementId: paymentAgreementId || paymentScope.agreementId,
+              draftSessionId: paymentDraftSessionIdRef.current,
               intake: mergedIntake,
-              answers: premiumLastGapAnswersRef.current || readPaymentClarification(paymentAgreementId)?.answers || "",
             });
           }
         }
@@ -12327,15 +12408,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         runPremiumModelPassRef.current = runModelPass;
         premiumGapBaseIntakeRef.current = mergedIntake;
         if (mergedIntake.trim()) {
-          persistPaymentClarification({
-            agreementId: (
-              reviewAgreementIdRef.current ||
-              readCreateReviewAgreementResumeId() ||
-              "pending"
-            ).trim(),
-            intake: mergedIntake,
-            answers: premiumLastGapAnswersRef.current || "",
+          const paymentAgreementId = (
+            reviewAgreementIdRef.current ||
+            readCreateReviewAgreementResumeId() ||
+            ""
+          ).trim();
+          const paymentScope = resolvePaymentClarificationScope({
+            agreementId: paymentAgreementId || undefined,
+            draftSessionId: paymentDraftSessionIdRef.current,
           });
+          if (paymentScope) {
+            if (paymentAgreementId) {
+              bindPaymentClarificationDraftToAgreement({
+                ...paymentScope,
+                draftSessionId: paymentDraftSessionIdRef.current,
+                agreementId: paymentAgreementId,
+              });
+            }
+            persistPaymentClarification({
+              ...paymentScope,
+              agreementId: paymentAgreementId || paymentScope.agreementId,
+              draftSessionId: paymentDraftSessionIdRef.current,
+              intake: mergedIntake,
+            });
+          }
         }
         premiumPostGenerateTenetAskedRef.current = false;
         premiumPostGenerateGapsActiveRef.current = false;
@@ -17892,13 +17988,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   useEffect(() => {
-    runPaymentClarificationRevisionRef.current = async (userGapAnswers: string) => {
+    runPaymentClarificationRevisionRef.current = async (
+      userGapAnswers: string,
+      captured: PaymentApplyTarget,
+    ) => {
       const intakeText = (premiumGapBaseIntakeRef.current || intakeCombinedRef.current || "").trim();
       const structured =
         draftSnapshotRef.current || readPremiumCompletionSnapshot()?.premiumDraft || null;
       if (!intakeText || !structured) {
         throw new Error("payment_clarification_apply_unavailable");
       }
+      const currentTarget = (): PaymentApplyTarget => ({
+        userId: resolveCurrentUser().id,
+        organizationId: (getOrgId() || "").trim(),
+        agreementId: (reviewAgreementIdRef.current || "").trim(),
+        revisionId:
+          getPaidProSourceOfTruth()?.hash?.trim() ||
+          hashPaidProCorpus(getPaidProSourceOfTruthText() || ""),
+        requestId: captured.requestId,
+      });
       const sessionGenForPass = getOrInitSessionAgreementGenerationId();
       const result = await ensurePremiumCompletion({
         intakeText,
@@ -17918,21 +18026,49 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         gapResolverSkippedWithDefaults: false,
         postGenerateTenetRecall: true,
         agreementGenerationId: sessionGenForPass,
-        agreementId:
-          (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+        agreementId: captured.agreementId,
         premiumRequestIntakeFingerprint: shortIntakeFingerprint(intakeText),
-        isPremiumRequestStillValid: () => true,
+        isPremiumRequestStillValid: () => paymentApplyTargetMatches(captured, currentTarget()),
         premiumGenerationCallReason: "post_generate_tenet_recall",
         deferWaterfallFinish: true,
       });
+      if (!paymentApplyTargetMatches(captured, currentTarget())) {
+        throw new Error("payment_clarification_stale_request");
+      }
       const body = (result?.winningPremiumBodyText || "").trim();
       if (!result || result.staleIntakeOrGeneration || !body) {
         throw new Error("payment_clarification_apply_unavailable");
+      }
+      if (!paymentApplyTargetMatches(captured, currentTarget())) {
+        throw new Error("payment_clarification_stale_request");
       }
       const painted = await commitPaidProUserApprovedRevision(body, "payment_clarification_answer");
       if (!painted.trim()) {
         throw new Error("payment_clarification_apply_unavailable");
       }
+      if (
+        !samePaymentApplyOwner(captured, {
+          userId: resolveCurrentUser().id,
+          organizationId: getOrgId(),
+          agreementId: reviewAgreementIdRef.current || undefined,
+        })
+      ) {
+        throw new Error("payment_clarification_stale_request");
+      }
+      const newRevision =
+        getPaidProSourceOfTruth()?.hash?.trim() || hashPaidProCorpus(painted);
+      markPaymentClarificationApplied(
+        {
+          userId: captured.userId,
+          organizationId: captured.organizationId,
+          agreementId: captured.agreementId,
+          revisionId: captured.revisionId,
+        },
+        userGapAnswers,
+        newRevision,
+        captured.requestId,
+      );
+      premiumLastGapAnswersRef.current = userGapAnswers;
     };
   }, [commitPaidProUserApprovedRevision, simpleProductFlow, intakePartyRoleLabels]);
 
@@ -37581,6 +37717,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               ? stickyBottomScrollInsetPx
                                               : 0
                                           }
+                                          agreementId={
+                                            reviewAgreementId ||
+                                            readCreateReviewAgreementResumeId() ||
+                                            null
+                                          }
+                                          intakeText={(
+                                            currentPremiumMergedIntakeKey ||
+                                            intakeCombined ||
+                                            ""
+                                          ).trim()}
                                           agreementHtml={simpleProFinalReviewHtml}
                                           paidReviewPlain={
                                             simpleProFinalReviewDisplayPlain.trim() ||

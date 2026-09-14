@@ -137,6 +137,8 @@ export type SimpleProFinalReviewScreenProps = {
   visibleProPaperTrace?: VisibleProPaperDiagnosticsTrace;
   selectedTrack?: string | null;
   signaturePreparationRequested?: boolean;
+  agreementId?: string | null;
+  intakeText?: string | null;
 };
 
 export function SimpleProFinalReviewScreen({
@@ -204,6 +206,8 @@ export function SimpleProFinalReviewScreen({
   visibleProPaperTrace,
   selectedTrack = null,
   signaturePreparationRequested = false,
+  agreementId = null,
+  intakeText = null,
 }: SimpleProFinalReviewScreenProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const reviewFirstErrorRef = useRef<HTMLDivElement>(null);
@@ -766,7 +770,11 @@ export function SimpleProFinalReviewScreen({
 
       {documentFirst ? (
         <>
-          <PaymentClarificationAdvisory body={canonicalPlainForRender || paidReviewPlain} />
+          <PaymentClarificationAdvisory
+            agreementId={agreementId}
+            intakeText={intakeText}
+            body={canonicalPlainForRender || paidReviewPlain}
+          />
           {documentBlock}
           {postDocumentGuidance}
           {!suppressPostDocumentScrollSpacer && stickyBottomScrollInsetPx > 0 ? (
@@ -776,7 +784,11 @@ export function SimpleProFinalReviewScreen({
       ) : (
         <>
           {postDocumentGuidance}
-          <PaymentClarificationAdvisory body={canonicalPlainForRender || paidReviewPlain} />
+          <PaymentClarificationAdvisory
+            agreementId={agreementId}
+            intakeText={intakeText}
+            body={canonicalPlainForRender || paidReviewPlain}
+          />
           {documentBlock}
           {!suppressPostDocumentScrollSpacer && stickyBottomScrollInsetPx > 0 ? (
             <PaidProReviewStickyScrollSpacer heightPx={stickyBottomScrollInsetPx} />

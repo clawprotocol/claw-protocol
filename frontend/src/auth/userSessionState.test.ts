@@ -7,6 +7,7 @@ import { createDemoSessionUser, hasDemoSessionUser } from "../launch/guestChecko
 import { getOrgId, setOrgId } from "../launch/orgContext";
 import { readPaidCheckoutOrgId, writePaidCheckoutOrgId } from "../launch/paidCheckoutOrgContext";
 import { getCachedAccessToken, setCachedAccessToken } from "./authAccessTokenCache";
+import { persistPaymentClarification, readPaymentClarification } from "../components/agreements/paymentClarificationSession";
 import { clearLawdogUserSessionState } from "./userSessionState";
 
 describe("user sign-out state", () => {
@@ -27,6 +28,14 @@ describe("user sign-out state", () => {
     markCurrentSessionProIntent();
     markCurrentSessionProEntitlementComplete();
     createDemoSessionUser({ displayName: "Demo", settlementReceiptId: "receipt-one" });
+    persistPaymentClarification({
+      userId: "owner-paid-one",
+      organizationId: "user-paid-one",
+      agreementId: "agr-paid-one",
+      intake: "Harbor Peak Analytics LLC fixed fee $48,000",
+      pendingAnswer: "Invoice monthly",
+      appliedAnswers: "Invoice monthly",
+    });
 
     clearLawdogUserSessionState();
 
@@ -37,5 +46,13 @@ describe("user sign-out state", () => {
     expect(hasCurrentSessionProEntitlement()).toBe(false);
     expect(hasDemoSessionUser()).toBe(false);
     expect(getOrgId()).toBe("local-org");
+    expect(
+      readPaymentClarification({
+        userId: "owner-paid-one",
+        organizationId: "user-paid-one",
+        agreementId: "agr-paid-one",
+      }),
+    ).toBeNull();
+    expect(sessionStorage.getItem("claw_payment_clarification_v1")).toBeNull();
   });
 });

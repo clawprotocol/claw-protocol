@@ -1501,5 +1501,36 @@ test.describe("Core paid journey acceptance", () => {
     expect(reopened).toMatch(/October 1, 2026/);
     expect(reopened).toMatch(/net\s*60|net sixty/i);
     await expect(page.getByTestId("payment-clarification-panel")).toHaveCount(0);
+
+    const browser = page.context().browser();
+    expect(browser, "browser must be available for a fresh authorized context").toBeTruthy();
+    const freshContext = await browser!.newContext({
+      viewport: page.viewportSize() ?? { width: 1280, height: 720 },
+    });
+    const freshPage = await freshContext.newPage();
+    await seedCorePaidJourneyOwner(freshPage);
+    await freshPage.goto(`/app/agreements/${drafted.agreementId}/view`, { waitUntil: "domcontentloaded" });
+    await expect(freshPage).toHaveURL(new RegExp(drafted.agreementId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    const leakedSession = await freshPage.evaluate(() => sessionStorage.getItem("claw_payment_clarification_v1"));
+    expect(leakedSession, "fresh context must not inherit payment sessionStorage").toBeNull();
+    let freshReopen = "";
+    await expect
+      .poll(
+        async () => {
+          freshReopen = await freshPage.locator("body").innerText();
+          return (
+            freshReopen.includes(FACTS.parties[0].name) &&
+            /October 1, 2026/.test(freshReopen) &&
+            /net\s*60|net sixty/i.test(freshReopen)
+          );
+        },
+        { timeout: 90_000 },
+      )
+      .toBeTruthy();
+    expect(freshReopen).toContain(FACTS.parties[0].name);
+    expect(freshReopen).toMatch(/October 1, 2026/);
+    expect(freshReopen).toMatch(/net\s*60|net sixty/i);
+    await expect(freshPage.getByTestId("payment-clarification-panel")).toHaveCount(0);
+    await freshContext.close();
   });
 });

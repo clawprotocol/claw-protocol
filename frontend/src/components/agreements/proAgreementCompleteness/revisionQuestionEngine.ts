@@ -17,17 +17,35 @@ const UNRESOLVED_PAYMENT_RE =
   /\b(?:tbd|to be (?:agreed|confirmed|determined)|unknown|undecided|not sure|later)\b/i;
 const NET_DEADLINE_RE = /\bnet\s*[- ]?(\d{1,3}|thirty|sixty|fifteen|ninety|ten|seven|fourteen)\b/i;
 const CADENCE_ONCE_RE =
-  /\b(?:invoice(?:d)?\s+(?:once|in\s+one\s+installment)|one\s+installment|lump[\s-]?sum|single\s+invoice)\b/i;
+  /\b(?:invoice(?:d)?(?:\s+the\s+fixed\s+fee)?\s+(?:once|in\s+one\s+installment)|one\s+installment|lump[\s-]?sum|single\s+invoice)\b/i;
 const CADENCE_ON_DATE_RE =
-  /\b(?:invoice(?:d)?\s+(?:once\s+)?on|one\s+installment\s+on)\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})\b/i;
-const CADENCE_MONTHLY_RE = /\binvoice(?:d|s)?\s+monthly\b|\bmonthly\s+invoic/i;
-const CADENCE_WEEKLY_RE = /\binvoice(?:d|s)?\s+weekly\b|\bweekly\s+invoic/i;
+  /\b(?:invoice(?:d)?(?:\s+the\s+fixed\s+fee)?\s+(?:once\s+)?on|one\s+installment\s+on)\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})\b/i;
+const CADENCE_MONTHLY_RE =
+  /\binvoice(?:d|s)?(?:\s+the\s+fixed\s+fee)?\s+monthly\b|\bmonthly\s+invoic/i;
+const CADENCE_WEEKLY_RE =
+  /\binvoice(?:d|s)?(?:\s+the\s+fixed\s+fee)?\s+weekly\b|\bweekly\s+invoic/i;
 const CADENCE_UPON_RE = /\b(?:invoice(?:d)?\s+)?upon\s+(signing|execution|completion)\b/i;
 
 export const UNCONFIRMED_PAYMENT_TIMING_QUESTION =
   "How should the fixed fee be invoiced, and when is payment due?";
 export const UNCONFIRMED_INVOICE_CADENCE_QUESTION = "How should the fixed fee be invoiced?";
 export const UNCONFIRMED_PAYMENT_DUE_QUESTION = "When is payment due?";
+
+const PAYMENT_SECTION_HEADING_RE =
+  /^(\d+)\.\s+(?:Fees?(?:\s+and\s+Payment)?|Payment|Compensation|Invoicing)\b\.?/im;
+const NEXT_TOP_LEVEL_SECTION_RE = /^\d+\.(?!\d)\s+\S/m;
+
+/** Fees/Payment clause only — Term or recital dates are not payment confirmation. */
+export function paymentSectionText(doc: string): string {
+  const heading = PAYMENT_SECTION_HEADING_RE.exec(doc || "");
+  if (!heading || heading.index == null) return "";
+  const start = heading.index;
+  const afterHeading = start + heading[0].length;
+  const rest = (doc || "").slice(afterHeading);
+  const nxt = NEXT_TOP_LEVEL_SECTION_RE.exec(rest);
+  const end = afterHeading + (nxt && nxt.index != null ? nxt.index : rest.length);
+  return (doc || "").slice(start, end);
+}
 
 function paymentClauseIsUnresolved(text: string): boolean {
   return statementsOf(text).some(

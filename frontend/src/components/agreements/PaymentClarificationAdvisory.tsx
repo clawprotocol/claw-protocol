@@ -3,6 +3,7 @@ import {
   applyPaymentClarificationAnswer,
   paymentClarificationQuestions,
   readPaymentClarification,
+  resolvePaymentClarificationScope,
   subscribePaymentClarification,
 } from "./paymentClarificationSession";
 
@@ -18,18 +19,29 @@ export function PaymentClarificationAdvisory(args: {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => subscribePaymentClarification(() => setTick((n) => n + 1)), []);
 
-  const stored = readPaymentClarification(args.agreementId);
+  const scope = resolvePaymentClarificationScope({ agreementId: args.agreementId });
+  const stored = readPaymentClarification(scope);
   const intake = (stored?.intake || args.intakeText || "").trim();
-  const answers = (stored?.answers || "").trim();
+  const appliedAnswers = (stored?.appliedAnswers || "").trim();
+  const pendingAnswer = (stored?.pendingAnswer || "").trim();
+  const applyStatus = stored?.applyStatus || "idle";
   const questions = useMemo(
     () =>
       paymentClarificationQuestions({
         intake,
-        answers,
+        appliedAnswers,
+        pendingAnswer,
+        authorizedBody: args.body,
         body: args.body,
       }),
-    [intake, answers, args.body],
+    [intake, appliedAnswers, pendingAnswer, args.body],
   );
+
+  useEffect(() => {
+    if (applyStatus === "failed" && pendingAnswer && !draft.trim()) {
+      setDraft(pendingAnswer);
+    }
+  }, [applyStatus, pendingAnswer, draft]);
 
   if (args.accepted) return null;
   if (!intake || questions.length === 0) return null;
@@ -38,12 +50,16 @@ export function PaymentClarificationAdvisory(args: {
     <section
       className="mb-4 rounded-xl border border-amber-300/80 bg-amber-50/90 px-4 py-3 text-stone-900 shadow-sm"
       data-testid="payment-clarification-panel"
+      data-apply-status={applyStatus}
       aria-label="Payment clarification"
     >
       <p className="text-sm font-semibold tracking-tight">Recommended payment details</p>
       <p className="mt-1 text-xs leading-relaxed text-stone-700">
         Optional — you can review or sign without answering. Confirmed facts update the Fees and Payment
         clause.
+      </p>
+      <p className="sr-only" data-testid="payment-clarification-status">
+        {applyStatus}
       </p>
       <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
         {questions.map((question) => (
@@ -52,6 +68,11 @@ export function PaymentClarificationAdvisory(args: {
           </li>
         ))}
       </ul>
+      {applyStatus === "failed" && pendingAnswer ? (
+        <p className="mt-2 text-xs text-stone-700" data-testid="payment-clarification-pending">
+          Saved answer ready to retry: {pendingAnswer}
+        </p>
+      ) : null}
       <label className="mt-3 block text-xs font-medium text-stone-600">
         Your answer
         <textarea
@@ -72,9 +93,13 @@ export function PaymentClarificationAdvisory(args: {
         onClick={() => {
           const answer = draft.trim();
           if (!answer) return;
+          if (!scope) {
+            setError("Could not apply that payment answer.");
+            return;
+          }
           setBusy(true);
           setError(null);
-          void applyPaymentClarificationAnswer(answer)
+          void applyPaymentClarificationAnswer(answer, scope)
             .then(() => setDraft(""))
             .catch((err) => {
               setError(err instanceof Error ? err.message : "Could not apply that payment answer.");
@@ -82,11 +107,11 @@ export function PaymentClarificationAdvisory(args: {
             .finally(() => setBusy(false));
         }}
       >
-        {busy ? "Updating…" : "Apply payment answer"}
+        {busy ? "Updating…" : applyStatus === "failed" ? "Retry payment answer" : "Apply payment answer"}
       </button>
-      {error ? (
+      {error || stored?.applyError ? (
         <p className="mt-2 text-xs text-red-700" role="alert">
-          {error}
+          {error || stored?.applyError}
         </p>
       ) : null}
     </section>
