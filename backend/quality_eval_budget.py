@@ -115,10 +115,17 @@ class QualityEvalBudget:
             bucket_count = db.execute("SELECT COUNT(*) FROM attempts WHERE bucket=?", (bucket,)).fetchone()[0]
             if halted or ceiling > MAX_USD * USD_UNITS:
                 raise QualityEvalBlocked("approval_halted")
-            if count >= 16 or bucket_count >= LIMITS[bucket]:
-                raise QualityEvalBlocked("call_limit")
-            if reserved + reservation > ceiling:
-                raise QualityEvalBlocked("dollar_limit")
+            from backend.quality_eval_increment import increment_reservation_gate, load_increment_policy
+            increment_reservation_gate(
+                purpose=purpose,
+                bucket=bucket,
+                count=count,
+                bucket_count=bucket_count,
+                reserved=reserved,
+                reservation=reservation,
+                ceiling=ceiling,
+                policy=load_increment_policy(),
+            )
             db.execute("INSERT INTO attempts (id,bucket,model,purpose,reserved,state) VALUES (?,?,?,?,?,?)",
                        (attempt_id, bucket, model, purpose, reservation, "reserved"))
         return attempt_id
@@ -162,8 +169,11 @@ class QualityEvalBudget:
 
 def configured_budget() -> QualityEvalBudget | None:
     path = os.getenv(ENV_PATH, "").strip()
-    if not path:
+    increment = os.getenv("CLAW_QUALITY_EVAL_INCREMENT_PATH", "").strip()
+    if not path and not increment:
         return None
     if os.getenv("CLAW_ENVIRONMENT", "").strip().lower() not in {"test", "local"}:
         raise QualityEvalBlocked("evaluation_is_local_only")
+    if not path:
+        return None
     return QualityEvalBudget(path)

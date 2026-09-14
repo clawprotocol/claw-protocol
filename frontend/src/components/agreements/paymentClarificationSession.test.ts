@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { bindResolvedAuthLifecycle } from "../../account/currentUser";
 import { clearLawdogUserSessionState } from "../../auth/userSessionState";
 import { CORE_PAID_JOURNEY_FILLED_INTAKE } from "../../launch/corePaidJourneyAcceptanceMatrix";
 import { setOrgId } from "../../launch/orgContext";
@@ -73,6 +74,7 @@ const OTHER_ORG = {
 
 afterEach(() => {
   clearPaymentClarificationForTests();
+  bindResolvedAuthLifecycle(null);
   vi.restoreAllMocks();
 });
 
@@ -620,6 +622,32 @@ describe("resolvePaymentClarificationScope", () => {
   it("fails closed without authenticated user, org, and agreement or draft identity", () => {
     expect(resolvePaymentClarificationScope({ agreementId: "agr-a" })).toBeNull();
     setOrgId("org-a");
+    expect(resolvePaymentClarificationScope({ agreementId: "agr-a" })).toBeNull();
+  });
+
+  it("binds Apply to the active session user and drops stale stored identity", () => {
+    setOrgId("org-a");
+    bindResolvedAuthLifecycle({ status: "signed_out" });
+    expect(resolvePaymentClarificationScope({ agreementId: "agr-a" })).toBeNull();
+
+    bindResolvedAuthLifecycle({
+      status: "authenticated",
+      accessToken: "aaa.bbb.ccc",
+      userId: "owner-a",
+    });
+    expect(resolvePaymentClarificationScope({ agreementId: "agr-a" })?.userId).toBe("owner-a");
+
+    bindResolvedAuthLifecycle({
+      status: "authenticated",
+      accessToken: "ddd.eee.fff",
+      userId: "owner-b",
+    });
+    expect(resolvePaymentClarificationScope({ agreementId: "agr-a" })?.userId).toBe("owner-b");
+    expect(samePaymentApplyOwner({ ...OWNER_A, userId: "owner-a" }, { ...OWNER_A, userId: "owner-b" })).toBe(
+      false,
+    );
+
+    bindResolvedAuthLifecycle({ status: "signed_out" });
     expect(resolvePaymentClarificationScope({ agreementId: "agr-a" })).toBeNull();
   });
 });

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Isolated production-build checks; real drafting requires --live + passed preflight.
 
+--offline-journey exercises Harbor + SaaS through production draft/Apply/GET/reopen
+with the acceptance stub. It is not a live-quality pass.
+
 Only live mode reads the explicitly scoped Railway drafting credential. It never
 deploys, changes hosted state, or passes that credential to the frontend.
 """
@@ -25,23 +28,58 @@ sys.path.insert(0, str(ROOT))
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('--live', action='store_true')
+    parser.add_argument('--offline-journey', action='store_true')
     parser.add_argument('--preflight', type=Path)
+    parser.add_argument('--offline-journey-evidence', type=Path)
+    parser.add_argument('--filled-only', action='store_true')
+    parser.add_argument('--increment-policy', type=Path,
+                        help='Increment sidecar to select. Defaults to the committed inactive policy.')
+    parser.add_argument('--authorize-increment', action='store_true',
+                        help='Required with an active authorized policy copy. Does not flip the committed sidecar.')
     parser.add_argument('--audit-paid-entry', action='store_true')
     parser.add_argument('--case', choices=['all', 'consulting', 'saas'], default='all')
     args = parser.parse_args()
     if args.live and args.audit_paid_entry:
         raise RuntimeError('routing_audit_is_no_spend_only')
-    files = subprocess.check_output(['git','ls-files','--cached','--others','--exclude-standard'], cwd=ROOT, text=True).splitlines()
-    source_hashes = {name: hashlib.sha256((ROOT/name).read_bytes()).hexdigest()
-        for name in files if not name.startswith('evals/commercial-readiness/results/') and (ROOT/name).is_file()}
+    if args.offline_journey and (args.live or args.audit_paid_entry):
+        raise RuntimeError('offline_journey_is_no_spend_only')
+    from backend.quality_eval_live_prepare import (
+        DEFAULT_INACTIVE_POLICY,
+        assert_live_provider_may_be_contacted,
+        prepare_authorized_live_boundary,
+        product_source_hashes,
+        resolve_increment_selection,
+        retrieve_live_drafting_credentials,
+    )
+    source_hashes = product_source_hashes(ROOT)
+    increment_selection = resolve_increment_selection(
+        args.increment_policy or DEFAULT_INACTIVE_POLICY,
+        authorize=bool(args.authorize_increment),
+    )
     if args.live:
         if not args.preflight or json.loads((args.preflight/'status.json').read_text()).get('status') != 'PASS':
             raise RuntimeError('passing_no_spend_preflight_required')
         if json.loads((args.preflight/'identity.json').read_text()).get('source_files_sha256') != source_hashes:
             raise RuntimeError('source_changed_since_preflight')
+        if not args.offline_journey_evidence:
+            raise RuntimeError('matching_offline_journey_evidence_required')
+        offline_status = json.loads((args.offline_journey_evidence/'status.json').read_text())
+        if offline_status.get('status') != 'OFFLINE_JOURNEY_PASS':
+            raise RuntimeError('matching_offline_journey_evidence_required')
+        if json.loads((args.offline_journey_evidence/'identity.json').read_text()).get('source_files_sha256') != source_hashes:
+            raise RuntimeError('source_changed_since_offline_journey')
+        try:
+            assert_live_provider_may_be_contacted(increment_selection)
+        except Exception as exc:
+            raise RuntimeError(str(exc) or 'increment_not_authorized') from exc
     os.umask(0o077)
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    family = 'quality-eval-live' if args.live else 'quality-eval-paid-entry-audit' if args.audit_paid_entry else 'quality-eval-preflight'
+    family = (
+        'quality-eval-live' if args.live else
+        'quality-eval-offline-journey' if args.offline_journey else
+        'quality-eval-paid-entry-audit' if args.audit_paid_entry else
+        'quality-eval-preflight'
+    )
     out = ROOT / 'evals/commercial-readiness/results' / family / f'{stamp}-{os.getpid()}'
     out.mkdir(parents=True)
     print(f'result_dir={out}', flush=True)
@@ -75,41 +113,65 @@ def main() -> int:
         'VITE_SUPABASE_URL': api+'/__supabase', 'VITE_SUPABASE_ANON_KEY': 'synthetic-public-anon',
         'VITE_CLAW_FEATURE_SUPABASE_AUTH': '1',
         'QUALITY_EVAL_RESULT_DIR': str(out),
+        'QUALITY_EVAL_CASE': args.case,
     })
+    if args.offline_journey:
+        env['QUALITY_EVAL_OFFLINE_JOURNEY'] = '1'
+    if args.filled_only or args.live:
+        env['QUALITY_EVAL_FILLED_ONLY'] = '1'
+    env['CLAW_QUALITY_EVAL_INCREMENT_PATH'] = increment_selection['path']
     budget = None
     if args.live:
-        # Read exactly the known staging service. Raw variable output never
-        # reaches logs/files; only the drafting credential is passed to the API.
-        provider = subprocess.run(['railway','variable','list','--project',
-            '865aee06-0e3e-49f4-b954-b9670ba483eb','--service','claw-protocol',
-            '--environment','staging','--json'], capture_output=True, text=True, timeout=30)
-        if provider.returncode:
-            raise RuntimeError('railway_read_failed_output_suppressed')
-        values = json.loads(provider.stdout)
-        if (not values.get('OPENAI_API_KEY') or values.get('CLAW_LLM_MODEL_PREMIUM') != 'gpt-5.4'
-                or values.get('CLAW_LLM_MODEL_BASIC') != 'gpt-4o-mini'
-                or values.get('OPENAI_BASE_URL', 'https://api.openai.com/v1').rstrip('/') != 'https://api.openai.com/v1'):
-            raise RuntimeError('drafting_configuration_requires_review')
-        from backend.quality_eval_budget import QualityEvalBudget
+        # Authorization is checked before any credential retrieval.
+        try:
+            assert_live_provider_may_be_contacted(increment_selection)
+        except Exception as exc:
+            raise RuntimeError(str(exc) or 'increment_not_authorized') from exc
         ledger = ROOT / 'evals/commercial-readiness/results/quality-eval-approved-20260913.sqlite3'
-        budget = QualityEvalBudget(ledger) if ledger.exists() else QualityEvalBudget.create(ledger, model='gpt-5.4')
+        prepared = prepare_authorized_live_boundary(
+            selection=increment_selection,
+            ledger_path=ledger,
+            retrieve=retrieve_live_drafting_credentials,
+        )
+        budget = prepared['budget']
         if budget.summary()['model'] != 'gpt-5.4' or budget.summary()['halted']:
             raise RuntimeError('approval_ledger_not_ready')
-        env.update({'OPENAI_API_KEY': values['OPENAI_API_KEY'], 'CLAW_LLM_ACCEPTANCE_STUB': '0',
+        creds = prepared['credentials']
+        env.update({'OPENAI_API_KEY': creds['OPENAI_API_KEY'], 'CLAW_LLM_ACCEPTANCE_STUB': '0',
                     'CLAW_LLM_MODEL_PREMIUM': 'gpt-5.4', 'CLAW_LLM_MODEL_PREMIUM_REGEN': 'gpt-5.4',
-                    'CLAW_LLM_MODEL_BASIC': values.get('CLAW_LLM_MODEL_BASIC', 'gpt-4o-mini'),
+                    'CLAW_LLM_MODEL_BASIC': creds.get('CLAW_LLM_MODEL_BASIC', 'gpt-4o-mini'),
                     'CLAW_QUALITY_EVAL_BUDGET_PATH': str(ledger),
-                    'CLAW_QUALITY_EVAL_LIVE': '1', 'QUALITY_EVAL_RESULT_DIR': str(out)})
-        del values, provider
-        print('live_model=gpt-5.4; approval_ceiling_usd=8; SDK retries disabled', flush=True)
+                    'CLAW_QUALITY_EVAL_INCREMENT_PATH': increment_selection['path'],
+                    'CLAW_QUALITY_EVAL_LIVE': '1', 'QUALITY_EVAL_FILLED_ONLY': '1',
+                    'QUALITY_EVAL_RESULT_DIR': str(out)})
+        print(
+            f"live_model=gpt-5.4; increment_authorized={increment_selection['authorized']}; "
+            f"increment_active={increment_selection['active']}; leftover one-pager excluded; SDK retries disabled",
+            flush=True,
+        )
     diff = subprocess.check_output(['git', 'diff', 'HEAD'], cwd=ROOT)
     identity = {'head': subprocess.check_output(['git','rev-parse','HEAD'], cwd=ROOT, text=True).strip(),
                 'tracked_diff_sha256': hashlib.sha256(diff).hexdigest(),
-                'frontend': 'production-build', 'repeats': 1 if args.live else 3,
-                'viewports': ['desktop'] if args.live else ['desktop','mobile'],
-                'retries': 0, 'model': 'gpt-5.4' if args.live else 'acceptance-stub', 'auth_provider': 'local-ES256/SDK-storage'}
+                'frontend': 'production-build',
+                'repeats': 1 if args.live or args.offline_journey else 3,
+                'viewports': ['desktop', 'mobile'],
+                'retries': 0,
+                'model': 'gpt-5.4' if args.live else 'acceptance-stub',
+                'auth_provider': 'local-ES256/SDK-storage',
+                'filled_only': bool(args.filled_only or args.live),
+                'increment_policy': increment_selection['basename'],
+                'increment_policy_sha256': increment_selection['policy_sha256'],
+                'increment_active': increment_selection['active'],
+                'increment_authorized': increment_selection['authorized'],
+                'increment_reason': increment_selection['reason'],
+                'independent_model_samples': 2 if args.live and args.case == 'all' else (1 if args.live else 0),
+                'mode': 'live' if args.live else 'offline-journey' if args.offline_journey else 'audit' if args.audit_paid_entry else 'preflight'}
     identity['selected_cases'] = ['consulting', 'saas'] if args.case == 'all' else [args.case]
     identity['source_files_sha256'] = source_hashes
+    if args.live:
+        identity['viewports'] = ['desktop']
+        identity['reopen_viewports'] = ['desktop', 'mobile']
+        identity['sample_limitation'] = 'two filled cases only; not arbitrary-input proof'
     (out/'identity.json').write_text(json.dumps(identity, indent=2)+'\n')
     processes: list[subprocess.Popen] = []
     logs = []
@@ -150,13 +212,35 @@ def main() -> int:
         ready(origin, frontend)
         if args.live:
             case_filter = [] if args.case == 'all' else ['--grep', f'real drafting: {args.case}$']
-            run('browser', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',
+            run('browser-samples', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',
                 'qualityEvalDrafts.live.spec.ts','--project=desktop','--workers=1','--retries=0','--max-failures=1','--reporter=line', *case_filter],
-                ROOT/'frontend', timeout=660)
-            print('live_browser=PASS; independent human document review still required', flush=True)
+                ROOT/'frontend', timeout=900)
+            env['QUALITY_EVAL_REOPEN_ONLY'] = '1'
+            run('browser-reopen', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',
+                'qualityEvalDrafts.live.spec.ts','--grep','reopen saved samples','--workers=1','--retries=0','--max-failures=1','--reporter=line'],
+                ROOT/'frontend', timeout=600)
+            print('live_browser=PASS; two samples only; independent human document review still required', flush=True)
             (out/'status.json').write_text(json.dumps({'status':'DRAFT_BROWSER_PASS',
                 'cases': identity['selected_cases'],
-                'quality_review':'pending','recipient_paths':'not_yet_exercised'})+'\n')
+                'independent_model_samples': identity['independent_model_samples'],
+                'quality_review':'pending','recipient_paths':'not_yet_exercised',
+                'live_quality':'not_claimed',
+                'sample_limitation':'two filled cases only; not arbitrary-input proof'})+'\n')
+        elif args.offline_journey:
+            case_filter = [] if args.case == 'all' else ['--grep', f'real drafting: {args.case}$']
+            run('browser', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',
+                'qualityEvalDrafts.live.spec.ts','--workers=1','--retries=0','--max-failures=1','--reporter=line', *case_filter],
+                ROOT/'frontend', timeout=1500)
+            print('offline_journey=PASS; stub workflow only; live quality not claimed', flush=True)
+            (out/'status.json').write_text(json.dumps({
+                'status': 'OFFLINE_JOURNEY_PASS',
+                'cases': identity['selected_cases'],
+                'viewports': ['desktop', 'mobile'],
+                'model_calls': 0,
+                'live_quality': 'not_claimed',
+                'manual_edit_recovery': 'unverified',
+                'recipient_paths': 'not_yet_exercised',
+            })+'\n')
         elif args.audit_paid_entry:
             run('browser', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',
                 'qualityEvalPaidEntry.audit.spec.ts','--project=desktop','--workers=1','--retries=0','--reporter=line'],

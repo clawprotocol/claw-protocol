@@ -14,6 +14,30 @@ import { matchAppRoute, routeRequiresAuthenticatedSession } from "../launch/rout
 
 export type CurrentUserSource = "supabase_session" | "e2e_test_bridge" | "demo_checkout" | "anonymous";
 
+export type AuthLifecycleStatus = "loading" | "authenticated" | "signed_out" | "refresh_failed";
+
+export type ResolvedAuthLifecycle = {
+  status: AuthLifecycleStatus;
+  accessToken?: string | null;
+  userId?: string | null;
+  email?: string | null;
+  displayName?: string | null;
+};
+
+let resolvedAuthLifecycle: ResolvedAuthLifecycle | null = null;
+
+export function bindResolvedAuthLifecycle(next: ResolvedAuthLifecycle | null): void {
+  resolvedAuthLifecycle = next;
+}
+
+export function readResolvedAuthLifecycle(): ResolvedAuthLifecycle | null {
+  return resolvedAuthLifecycle;
+}
+
+export function isJwtAccessToken(token: string): boolean {
+  return /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token.trim());
+}
+
 export type CurrentUser = {
   id: string;
   displayName: string;
@@ -73,8 +97,52 @@ export function resolveCurrentUser(args?: {
   supabaseUserId?: string | null;
   supabaseEmail?: string | null;
   supabaseDisplayName?: string | null;
+  lifecycle?: ResolvedAuthLifecycle | null;
 }): CurrentUser {
   const displayName = readStoredDisplayName();
+  const lifecycle = args?.lifecycle === undefined ? resolvedAuthLifecycle : args.lifecycle;
+  if (lifecycle?.status === "signed_out" || lifecycle?.status === "refresh_failed") {
+    void getOrgId();
+    return {
+      id: "anonymous",
+      displayName: displayName || "Guest",
+      email: null,
+      isAuthenticated: false,
+      source: "anonymous",
+    };
+  }
+  if (lifecycle?.status === "authenticated") {
+    const token = String(lifecycle.accessToken || "").trim();
+    const id = String(lifecycle.userId || "").trim();
+    if (id && isJwtAccessToken(token)) {
+      return {
+        id,
+        displayName: (lifecycle.displayName || "").trim() || displayName || lifecycle.email || "Signed-in user",
+        email: (lifecycle.email || "").trim() || null,
+        isAuthenticated: true,
+        source: "supabase_session",
+      };
+    }
+    void getOrgId();
+    return {
+      id: "anonymous",
+      displayName: displayName || "Guest",
+      email: null,
+      isAuthenticated: false,
+      source: "anonymous",
+    };
+  }
+  if (lifecycle?.status === "loading") {
+    void getOrgId();
+    return {
+      id: "anonymous",
+      displayName: displayName || "Guest",
+      email: null,
+      isAuthenticated: false,
+      source: "anonymous",
+    };
+  }
+
   const supabaseUserId = (args?.supabaseUserId || "").trim();
   if (supabaseUserId) {
     return {
@@ -118,7 +186,8 @@ export function resolveCurrentUser(args?: {
     };
   }
 
-  // Org header / local-org is workspace context only — never authentication.
+  // Stored identity or arbitrary token text is never authentication.
+  // Org header / local-org is workspace context only.
   void getOrgId();
   return {
     id: "anonymous",

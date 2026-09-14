@@ -1,7 +1,9 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
+  bindResolvedAuthLifecycle,
   isAuthenticatedDashboardSurface,
   isDashboardAccountSurface,
+  isJwtAccessToken,
   isPublicTokenAgreementSurface,
   resolveCurrentUser,
 } from "./currentUser";
@@ -15,6 +17,7 @@ describe("currentUser adapter", () => {
     });
   });
   afterEach(() => {
+    bindResolvedAuthLifecycle(null);
     vi.unstubAllGlobals();
   });
 
@@ -23,6 +26,108 @@ describe("currentUser adapter", () => {
     expect(user.isAuthenticated).toBe(false);
     expect(user.source).toBe("anonymous");
     expect(user.id).toBe("anonymous");
+  });
+
+  function memoryStorage(initial: Record<string, string> = {}) {
+    const data: Record<string, string> = { ...initial };
+    return {
+      getItem: (key: string) => (key in data ? data[key] : null),
+      setItem: (key: string, value: string) => {
+        data[key] = value;
+      },
+      removeItem: (key: string) => {
+        delete data[key];
+      },
+      clear: () => {
+        for (const key of Object.keys(data)) delete data[key];
+      },
+    };
+  }
+
+  function persistSession(storage: ReturnType<typeof memoryStorage>, args: {
+    id: string;
+    accessToken?: string | null;
+    expiresAt?: number | null;
+  }) {
+    const body: Record<string, unknown> = {
+      user: { id: args.id, email: `${args.id}@example.com`, user_metadata: { full_name: args.id } },
+    };
+    if (args.accessToken !== undefined) body.access_token = args.accessToken;
+    if (args.expiresAt !== undefined) body.expires_at = args.expiresAt;
+    storage.setItem("sb-127-auth-token", JSON.stringify(body));
+  }
+
+  it("does not authenticate stored identity or arbitrary token text", () => {
+    vi.stubEnv("VITE_SUPABASE_URL", "http://127.0.0.1:4190/__supabase");
+    const storage = memoryStorage();
+    persistSession(storage, {
+      id: "stored-only-user",
+      accessToken: "arbitrary-not-a-jwt",
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    });
+    vi.stubGlobal("localStorage", storage);
+    expect(resolveCurrentUser().isAuthenticated).toBe(false);
+    bindResolvedAuthLifecycle({
+      status: "authenticated",
+      accessToken: "arbitrary-not-a-jwt",
+      userId: "stored-only-user",
+    });
+    expect(isJwtAccessToken("arbitrary-not-a-jwt")).toBe(false);
+    expect(resolveCurrentUser().isAuthenticated).toBe(false);
+    vi.unstubAllEnvs();
+  });
+
+  it("uses the resolved authenticated session, not leftover storage, as authority", () => {
+    const jwt = "aaa.bbb.ccc";
+    bindResolvedAuthLifecycle({
+      status: "authenticated",
+      accessToken: jwt,
+      userId: "session-owner",
+      email: "owner@example.com",
+    });
+    const storage = memoryStorage();
+    persistSession(storage, {
+      id: "stale-stored-user",
+      accessToken: jwt,
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    });
+    vi.stubGlobal("localStorage", storage);
+    const user = resolveCurrentUser({ supabaseUserId: null });
+    expect(user.isAuthenticated).toBe(true);
+    expect(user.id).toBe("session-owner");
+  });
+
+  it("covers loading, refresh failure, logout, and account switch through the lifecycle", () => {
+    bindResolvedAuthLifecycle({ status: "loading" });
+    expect(resolveCurrentUser().isAuthenticated).toBe(false);
+
+    bindResolvedAuthLifecycle({
+      status: "authenticated",
+      accessToken: "aaa.bbb.ccc",
+      userId: "owner-a",
+    });
+    expect(resolveCurrentUser().id).toBe("owner-a");
+
+    bindResolvedAuthLifecycle({ status: "refresh_failed", userId: "owner-a" });
+    expect(resolveCurrentUser({ supabaseUserId: null }).isAuthenticated).toBe(false);
+
+    bindResolvedAuthLifecycle({
+      status: "authenticated",
+      accessToken: "ddd.eee.fff",
+      userId: "owner-b",
+    });
+    expect(resolveCurrentUser().id).toBe("owner-b");
+
+    bindResolvedAuthLifecycle({ status: "signed_out" });
+    const storage = memoryStorage();
+    persistSession(storage, {
+      id: "owner-b",
+      accessToken: "ddd.eee.fff",
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    });
+    vi.stubGlobal("localStorage", storage);
+    expect(resolveCurrentUser({ supabaseUserId: null }).isAuthenticated).toBe(false);
+    expect(resolveCurrentUser({ supabaseUserId: "owner-b" }).isAuthenticated).toBe(false);
   });
 
   it("accepts validated supabase session as authenticated", () => {

@@ -3,6 +3,7 @@
 Authoritative repository: `lawdog-repo`  
 Branch: `stabilize/phase3b-paid-entry`  
 Register date: 2026-09-14 (America/Chicago) / 2026-09-14 UTC  
+Live-eval increment proposal: `QUALITY_EVAL_INCREMENTAL_AUTHORIZATION_2026-09-14.md` (inactive sidecar prepared; not authorized, not executed)  
 Continuity C3/C4 close: `68775a946b09a48708fb4ef6eff55e327acea7ed+src-185caa72f8f6a3c6c444dd22163afa65d032219b+run-20260914T143749Z-71780`  
 Date/completion official identity: `96cd7248d803a8bdf2d8072ab409d242e6a255f5+src-ba7dbe25691bf522da2a95a9b68db31fbacc694b+run-20260914T155024Z-82989`  
 Official verified fingerprint (this batch): `ba7dbe25691bf522da2a95a9b68db31fbacc694b`  
@@ -37,8 +38,8 @@ Owners are unknown unless a checkpoint names one.
 | Field | Value |
 |---|---|
 | Customer impact | Harbor/Ironvale paper from the live model must be commercially usable, not only stub-shaped. |
-| Evidence date/source | `LIVE_DRAFTING_BOUNDARY_REPAIR_CHECKPOINT_2026-09-13.md`. Ledger `evals/commercial-readiness/results/quality-eval-approved-20260913.sqlite3` inspected only (2026-09-14). Consulting retry produced named paper; SaaS live dispatch and recipient actions on real-model paper were not exercised. |
-| Status | **not verified on this candidate.** Prior consulting retry is a technical drafting-path pass, not commercial acceptance. Fresh live Harbor + SaaS quality is the next bounded evaluation; it is not authorized by this batch. |
+| Evidence date/source | `LIVE_DRAFTING_BOUNDARY_REPAIR_CHECKPOINT_2026-09-13.md`. Ledger inspected only (2026-09-14). Offline production-preview journey `evals/commercial-readiness/results/quality-eval-offline-journey/20260914T174441Z-89126`: Harbor+SaaS desktop and mobile stub sequence PASS (`status=OFFLINE_JOURNEY_PASS`, `model_calls=0`). Harbor applied digest `ab5f44aa…` / 2903 chars (same as official C5). SaaS snapshot `crs_99e3dffc…` / digest `5f7c2d34…` / 2757 chars. Failed offline dirs from this batch preserved. |
+| Status | **missing evidence** for live-model quality. Offline Harbor+SaaS production sequence is exercised on this candidate; that is not a live-quality pass. Prior consulting retry is a technical drafting-path pass, not commercial acceptance. Fresh live Harbor + SaaS quality is not authorized by this batch. |
 | Owner | unknown |
 | Exit criterion | Separately authorized live `gpt-5.4` run of Harbor consulting and Orion Harbor/Northwind SaaS through production draft/clarification/display/reopen. Accept only if the opening does not invent an undefined Effective Date, consulting completion is asked or already supplied without invented milestones/SLAs, the SaaS control stays hosted-access-only, and `canProceedWithoutAnswer` remains true. Exhausted `primary` (2/2) and `bootstrap_parse` (2/2) block that run until a new approval. Remaining dollars do not authorize those buckets. |
 
@@ -128,6 +129,30 @@ Ledger snapshot (inspected, not modified): ceiling **$8.00** / stored ceiling `1
 | `68775a94+src-185caa72f8f6+run-20260914T143749Z-71780` | Official 16/16 tests; 32/32 viewport rows; `gate_green=true`; C3 and C4 desktop+mobile closed | Date/completion meaning; live-model quality; billing; delivery launch |
 | `96cd7248+src-c0f5e6f9b4df+run-20260914T153730Z-80809` | 16/18; C3/C4 and payment-reload green; C5 panel mounted | C5 first-draft still invented undefined Effective Date |
 | `96cd7248+src-ba7dbe25691b+run-20260914T155024Z-82989` | Official 18/18 tests; 34/34 required viewport rows; `gate_green=true`; C3/C4 kept; C5 desktop+mobile closed | Fresh live-model quality; hosted billing/authentication/delivery/ops; launch |
+| `aaeabe9f+src-d80e4cdf9e82+run-20260914T181043Z-92178` | Official 18/18 stub **regression** after increment-reservation hook in `quality_eval_budget.py`; C3/C4/C5 customer outcomes still pass. Fingerprint changed; do not attribute the C5 close to this source automatically | Fresh live-model quality; increment sidecar still inactive; launch |
 
 Harbor filled intake remains: fixed $48,000, no invoicing schedule, no net-30. Official I2 stays party-name `agreement-intake-clarification`.
+
+---
+
+## 10. Finite release queue (supportable paid release)
+
+This queue is the remaining customer-facing work. Items are not launch claims. Reuse existing evidence; defer nonessential polish. C3/C4/C5 stub closes stay closed unless new regression evidence appears.
+
+| ID | Customer outcome | Kind | Next action | Observable exit |
+|---|---|---|---|---|
+| Q1 | Live Harbor + SaaS paper is commercially usable through intake → draft → clarification where needed → Apply → snapshot-create → authorized GET → visible paper → fresh editable reopen | **failed on first Harbor sample** (`quality-eval-live/20260914T195201Z-5037`): painted first draft lost supplied scope; SaaS not generated; increment repair used. Not a live-quality pass. | Preserve that live dir. Additional provider calls need a new explicit authorization. Matching no-spend used: preflight `20260914T194132Z-3559` and filled-only offline `20260914T194232Z-3885`. | Both live papers meet the increment quality bar; same agreement/snapshot identity; `canProceedWithoutAnswer` unchanged. Not launch. |
+| Q2 | Hosted authentication: a paying owner can sign in and reach paid Create without a synthetic local JWT | **partial on older staging `160079e`** (admin-assisted test login → dashboard → paid Create → resume `49d15cdc` → reload → logout). Local session lifecycle is not on that deploy. Customer-initiated magic-link/email login remains unverified. | After this candidate is deployed to staging, repeat the hosted session pass on the new revision. Cross-account isolation still needs a second authorized session. | Real hosted session on the candidate opens `/app/create` and sees intake; no provider drafting required |
+| Q3 | Paid access / billing: checkout return unlocks the correct workspace only | **missing evidence** (Phase 3B not re-run on this HEAD) | Separately authorized Stripe/entitlement pass; no ledger rewrite | Checkout return entitles the owner org only; wrong-org remains blocked |
+| Q4 | Recipient delivery: review or direct-sign recipients read the locked owner paper | **missing evidence** as launch-ready; A1–B3 passed as stub regressions on `src-185caa72f8f6` / re-passed on `src-ba7dbe25691b` | After Q1, reuse stub A/B rows; live email remains unauthorized | Official A1–B3 still green on the current fingerprint; live email is a later increment |
+| Q5 | Final documents: owner final record binds the same receipt the recipient signed | **missing evidence** as launch-ready | Same as Q4; do not add sitemap/marketing work | Owner final view shows the locked corpus + receipt id |
+| Q6 | Tenant isolation: org switch, revision isolation, and new-agreement clearing do not leak paper or answers | **missing evidence** as a dedicated campaign; helpers exist | One local isolation check (no provider spend) while Q1 is pending; later hosted org-switch | Org-switch abort, V1/V2 isolation, and Create-new clearing still pass |
+| Q7 | Essential operational recovery: failed GET/save and lost Apply stay fail-closed | **missing evidence** beyond C3/C4 create-reopen | Keep C3/C4 closed; add support-console only if a reproduced defect appears | Failed GET/Apply remain fail-closed; no silent empty JSON |
+| Q8 | Manual-edit recovery after reopen | **missing evidence** | Defer until Q1 live pass; mark unverified until directly exercised | Owner can edit, cancel/restore, and keep the same snapshot identity |
+| P1 | Require payment answers before review/sign (`canProceedWithoutAnswer: false`) | **product decision** | Do not change the flag in this queue | Separate product approval |
+| D1 | Date-line wrapping (`October 1,\\n2026`) | **product decision** / presentation | Defer; not a quality pass by itself | Separate display batch |
+
+Kinds: **reproduced defect** = failing official evidence on current behavior; **missing evidence** = not proven on the needed surface; **product decision** = behavior exists and must not be changed without approval.
+
+Nonessential items deferred: public sitemap/value claims (register §7), admin/support console beyond fail-closed recovery, extra agreement families, live recipient email.
 

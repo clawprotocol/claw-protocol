@@ -154,3 +154,5 @@ evals/draft-quality/results/blinded_packets/**/KEY_DO_NOT_SHARE_WITH_RATER.json
 .env.*
 !.env.example
 evals/commercial-readiness/baselines/*-console*.txt
+evals/commercial-readiness/results/
+evals/commercial-readiness/**/quality-eval-increment*.authorized*.json

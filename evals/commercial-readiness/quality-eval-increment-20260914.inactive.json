@@ -1,0 +1,38 @@
+{
+  "active": false,
+  "authorization": null,
+  "ledger_required_basename": "quality-eval-approved-20260913.sqlite3",
+  "approval_baseline_attempts": 11,
+  "approval_baseline_reserved_units": 1223462,
+  "approval_baseline_reserved_usd": 0.611731,
+  "max_additional_reserved_usd": 1.0,
+  "max_additional_reserved_units": 2000000,
+  "global_attempt_cap_when_active": 20,
+  "additional_allowance": {
+    "primary": 2,
+    "bootstrap_parse": 2,
+    "parse": 2,
+    "clarification": 2,
+    "repair": 1,
+    "revision": 0,
+    "negotiation": 0,
+    "bootstrap_one_pager": 0
+  },
+  "baseline_buckets": {
+    "bootstrap_one_pager": 3,
+    "bootstrap_parse": 2,
+    "parse": 3,
+    "primary": 2,
+    "repair": 1
+  },
+  "excluded_purposes": [
+    "explicit_revision",
+    "finalize_audit",
+    "free_one_pager",
+    "premium_review",
+    "recipient_negotiation",
+    "review_route",
+    "structured_revision"
+  ],
+  "notes": "Inactive. Do not raise LIMITS in quality_eval_budget.py. Activation is a later explicit approval. One-pager, revision, and negotiation are excluded; leftover slots are not spendable."
+}

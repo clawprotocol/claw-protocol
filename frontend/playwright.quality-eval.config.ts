@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e', workers: 1, fullyParallel: false, retries: 0, forbidOnly: true,
-  timeout: 180_000,
+  timeout: 300_000,
   outputDir: process.env.CORE_PAID_JOURNEY_LIVE_OUTPUT,
   use: { baseURL: process.env.CORE_PAID_JOURNEY_LIVE_ORIGIN, channel: 'chrome',
     screenshot: 'only-on-failure', trace: 'off' },

@@ -20,6 +20,7 @@ import {
 } from "../launch/genesisReferral/genesisDogOnboardingCapture";
 import { readE2eAuthSessionForDev } from "./e2eAuthSessionBridge";
 import { clearLawdogUserSessionState } from "./userSessionState";
+import { bindResolvedAuthLifecycle } from "../account/currentUser";
 
 export type AuthSignInOpts = {
   returningSignIn?: boolean;
@@ -178,9 +179,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setSession(null);
       finalizedUserRef.current = null;
+      bindResolvedAuthLifecycle({ status: "signed_out" });
       clearLawdogUserSessionState();
     }
   }, []);
+
+  useEffect(() => {
+    if (!enabled) {
+      bindResolvedAuthLifecycle(null);
+      return;
+    }
+    if (loading && !session) {
+      bindResolvedAuthLifecycle({ status: "loading" });
+      return;
+    }
+    const token = String(session?.access_token || "").trim();
+    const userId = String(session?.user?.id || "").trim();
+    if (userId && token) {
+      bindResolvedAuthLifecycle({
+        status: "authenticated",
+        accessToken: token,
+        userId,
+        email: session?.user?.email ?? null,
+        displayName: session?.user ? displayNameFromUser(session.user) : null,
+      });
+      return;
+    }
+    if (session?.user && !token) {
+      bindResolvedAuthLifecycle({ status: "refresh_failed", userId: session.user.id });
+      return;
+    }
+    if (!loading) {
+      bindResolvedAuthLifecycle({ status: "signed_out" });
+    }
+  }, [enabled, loading, session]);
 
   const value = useMemo(
     (): AuthContextValue => ({

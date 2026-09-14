@@ -24,7 +24,7 @@ export function RequireAuthenticatedDashboard({
 }: {
   children: React.ReactNode;
 }): React.ReactElement {
-  const { enabled, loading, user } = useAuth();
+  const { enabled, loading, user, session } = useAuth();
   const { pathname, search, navigate } = useLaunchNav();
   const path = (pathname || "").replace(/\/$/, "") || "/";
   const checkoutContinuation = isSecureCheckoutPath(path);
@@ -53,6 +53,16 @@ export function RequireAuthenticatedDashboard({
     supabaseEmail: user?.email ?? null,
     supabaseDisplayName:
       (user?.user_metadata as { full_name?: string } | undefined)?.full_name ?? null,
+    lifecycle: loading && !user
+      ? { status: "loading" }
+      : user?.id && session?.access_token
+        ? {
+            status: "authenticated",
+            accessToken: session.access_token,
+            userId: user.id,
+            email: user.email ?? null,
+          }
+        : { status: "signed_out" },
   });
 
   // Only a validated session / e2e seed counts — never org headers alone.

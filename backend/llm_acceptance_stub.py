@@ -15,13 +15,18 @@ from typing import Any, Dict, List, Optional
 
 HARBOR = "Harbor Peak Analytics LLC"
 IRONVALE = "Ironvale Manufacturing Inc."
+ORION = "Orion Harbor LLC"
+NORTHWIND = "Northwind Retail Inc."
 CONSULTANT_SIGNER = "Maya Chen"
 CLIENT_SIGNER = "Jordan Hale"
+PROVIDER_SIGNER = "Avery Cole"
+CUSTOMER_SIGNER = "Casey Reed"
 FEE = "$48,000"
 SCOPE = "AI workflow implementation"
 TERM = "twelve months"
 START = "October 1, 2026"
 LAW = "Delaware"
+SAAS_LAW = "New York"
 
 
 def acceptance_stub_enabled() -> bool:
@@ -65,6 +70,10 @@ def _intake_text(messages: List[Dict[str, Any]], payload: Dict[str, Any]) -> str
 
 def _has_named_parties(text: str) -> bool:
     return HARBOR in text and IRONVALE in text
+
+
+def _is_hosted_saas(text: str) -> bool:
+    return ORION in text and NORTHWIND in text
 
 
 def _sparse_response() -> str:
@@ -145,6 +154,79 @@ def _consulting_corpus() -> str:
     return "\n\n".join(sections)
 
 
+def _saas_corpus() -> str:
+    sections = [
+        "SOFTWARE AS A SERVICE SUBSCRIPTION AGREEMENT",
+        f"This SaaS Subscription Agreement (the \"Agreement\") is entered into "
+        f"by and between {ORION} (\"Provider\") and {NORTHWIND} (\"Customer\").",
+        "1. PARTIES AND ROLES. Provider operates a hosted software platform. "
+        "Customer is subscribing to hosted access only. "
+        f"Provider's authorized signer is {PROVIDER_SIGNER}. Customer's authorized signer is {CUSTOMER_SIGNER}.",
+        "2. SERVICES. Provider shall provide hosted platform access and standard onboarding. "
+        "Scope is the hosted platform only. Provider shall not perform professional services, "
+        "consulting deliverables, implementation projects, or a project-acceptance process.",
+        f"3. FEES AND PAYMENT. Customer shall pay {FEE} annually for the hosted subscription. "
+        "Invoices are due net thirty (30) days. The fee is a subscription for hosted access "
+        "and is not a professional-services estimate.",
+        "4. TERM AND DURATION. The initial subscription term is twelve months. "
+        "The Agreement renews only if the parties agree in writing.",
+        "5. OBLIGATIONS. Provider shall make the hosted platform available and furnish "
+        "standard onboarding materials. Customer shall use the platform for its internal business "
+        "and keep account credentials confidential.",
+        "6. INTELLECTUAL PROPERTY. Provider retains ownership of the hosted platform. "
+        "Customer retains ownership of Customer data. This Agreement does not transfer "
+        "consulting work product or project deliverables.",
+        "7. CONFIDENTIALITY. Each party shall protect the other party's non-public information and "
+        "use it only to perform this Agreement.",
+        "8. LIMITATION OF LIABILITY. Except for confidentiality breaches or willful misconduct, "
+        f"each party's aggregate liability is limited to the {FEE} annual subscription fee.",
+        f"9. GOVERNING LAW. This Agreement is governed by the laws of the State of {SAAS_LAW}, "
+        "without regard to conflict-of-law rules.",
+        "10. NOTICES. Notices shall be sent to each party's designated email address.",
+        "11. TERMINATION. Either party may terminate for material breach after written notice "
+        "and a ten-day opportunity to cure.",
+        "12. ENTIRE AGREEMENT. This Agreement is the entire agreement. Electronic signatures are valid.",
+        "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+        f"Provider: {ORION}   By: {PROVIDER_SIGNER}   Title: Product Lead   Date: ________",
+        f"Customer: {NORTHWIND}   By: {CUSTOMER_SIGNER}   Title: Operations Lead   Date: ________",
+        "13. ADDITIONAL OPERATIVE TERMS. Provider shall furnish hosted credentials and standard "
+        "onboarding documentation. Customer shall nominate one account administrator. "
+        "Neither party may assign this Agreement without prior written consent except to a "
+        "surviving affiliate. Force majeure suspends performance only while the event continues. "
+        "Notices are effective on the next business day after email send. This Agreement does "
+        "not create milestones, deemed acceptance, service-level credits, or consulting completion criteria.",
+    ]
+    return "\n\n".join(sections)
+
+
+def _saas_draft_response() -> str:
+    return json.dumps(
+        {
+            "title": "SaaS Subscription Agreement",
+            "agreement_family": "saas_subscription",
+            "document_text": _saas_corpus(),
+            "key_terms_found": [
+                ORION,
+                NORTHWIND,
+                FEE,
+                "hosted platform access",
+                "standard onboarding",
+                "net 30",
+                SAAS_LAW,
+            ],
+            "missing_material_info": [],
+            "parties": [
+                {"name": ORION, "role": "Provider"},
+                {"name": NORTHWIND, "role": "Customer"},
+            ],
+            "purpose": "hosted platform access and standard onboarding",
+            "payment_terms": f"Annual subscription {FEE}, net 30",
+            "jurisdiction": SAAS_LAW,
+            "updated_document_text": _saas_corpus(),
+        }
+    )
+
+
 def _full_draft_response() -> str:
     return json.dumps(
         {
@@ -183,6 +265,19 @@ def stub_legal_llm_completion(
     payload = _user_payload(messages)
     text = _intake_text(messages, payload)
     purpose = (call_purpose or "").strip().lower()
+    if _is_hosted_saas(text):
+        if purpose in {"explicit_revision", "conditional_repair"}:
+            current = str(payload.get("current_document_text") or payload.get("document_text") or "")
+            if ORION in current and NORTHWIND in current:
+                return json.dumps(
+                    {
+                        "updated_document_text": current,
+                        "document_text": current,
+                        "summary_changes": ["Retained the owner-approved hosted SaaS paper."],
+                        "missing_material_info": [],
+                    }
+                )
+        return _saas_draft_response()
     if not _has_named_parties(text):
         return _sparse_response()
     if purpose in {"explicit_revision", "conditional_repair"}:
