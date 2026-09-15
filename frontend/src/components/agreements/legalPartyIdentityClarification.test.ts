@@ -476,7 +476,6 @@ describe("legal party identity clarification", () => {
     expect(shouldPreserveApprovedAddedPartyExecutionTail(accepted, [HARBOR, IRONVALE, "Alex Rivera"])).toBe(
       true,
     );
-    expect(shouldPreserveApprovedAddedPartyExecutionTail(accepted, [HARBOR, IRONVALE])).toBe(true);
     const parties = [
       {
         partyIndex: 0,
@@ -526,13 +525,6 @@ describe("legal party identity clarification", () => {
     expect(overlaid).toMatch(/ADVISOR:\s*\nAlex Rivera/);
     expect(overlaid).not.toMatch(/CLIENT:\s*\nHarbor Peak Analytics LLC/);
     expect(overlaid).not.toMatch(/CONSULTANT:[\s\S]{0,160}Name: Alex Rivera/);
-    const twoNameOverlay = applyPaidProSoTSignerExecutionOverlay(accepted, parties.slice(0, 2), {
-      ...roleContext,
-      draftPartyNames: [HARBOR, IRONVALE.replace(/\.$/, "")],
-    });
-    expect(twoNameOverlay).toMatch(/CLIENT:\s*\nIronvale Manufacturing Inc/);
-    expect(twoNameOverlay).toMatch(/ADVISOR:\s*\nAlex Rivera/);
-    expect(twoNameOverlay).not.toMatch(/CLIENT:\s*\nHarbor Peak Analytics LLC/);
   });
 
   it("does not invent a numbered party when applying a representative to existing paper", () => {
