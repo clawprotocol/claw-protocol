@@ -138,6 +138,11 @@ describe("partySlotIdentityNormalize", () => {
     expect(isInvalidPartySlotLegalEntity("configuration assistance")).toBe(true);
     expect(isInvalidPartySlotLegalEntity("training services")).toBe(true);
     expect(isInvalidPartySlotLegalEntity(RED_MESA)).toBe(false);
+    expect(
+      isInvalidPartySlotLegalEntity(
+        "No authority to bind: the service provider has no authority to bind the company",
+      ),
+    ).toBe(true);
   });
 
   it("collapseDraftPartyRows keeps a durable added individual when intake is still two-party", () => {

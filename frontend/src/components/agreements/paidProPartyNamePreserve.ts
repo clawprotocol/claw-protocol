@@ -443,7 +443,7 @@ const OCCUPATIONAL_OR_JOB_TITLE_PARTY_RE =
   /^(?:(?:a|an|the)\s+)?(?:freelance|independent)?\s*(?:product\s+|ui\s+|ux\s+|graphic\s+|web\s+|software\s+|mobile\s+)?(?:designer|developer|engineer|consultant|contractor|freelancer|attorney|lawyer|accountant|ceo|cto|cfo|coo|founder|president|manager|director|officer|analyst|specialist|architect)(?:\s+(?:and|&)\s+[a-z]+)?$/i;
 
 const EXECUTIVE_OR_SIGNER_TITLE_PARTY_RE =
-  /^(?:chief\s+(?:executive|operating|financial|technology|marketing|security|product|legal|information|revenue|people|compliance)\s+officer|managing\s+partner|general\s+partner|vice\s+president(?:\s+(?:of\s+)?[\w&/-]+)?|vp(?:\s+(?:of\s+)?[\w&/-]+)?|authorized\s+signatory|signatory)$/i;
+  /^(?:chief\s+(?:executive|operating|financial|technology|marketing|security|product|legal|information|revenue|people|compliance|science)\s+officer|managing\s+(?:member|director|partner)|general\s+partner|vice\s+president(?:\s+(?:of\s+)?[\w&/-]+)?|vp(?:\s+(?:of\s+)?[\w&/-]+)?|authorized\s+signatory|signatory)$/i;
 
 export function isOccupationalOrJobTitlePartyName(name: string): boolean {
   const t = (name || "").replace(/\s+/g, " ").trim();
@@ -452,7 +452,18 @@ export function isOccupationalOrJobTitlePartyName(name: string): boolean {
   if (OCCUPATIONAL_OR_JOB_TITLE_PARTY_RE.test(t)) return true;
   if (EXECUTIVE_OR_SIGNER_TITLE_PARTY_RE.test(t)) return true;
   // Bare title tokens that leak as party rows.
-  return /^(?:ceo|cto|cfo|coo|founder|president|director|manager|officer)$/i.test(t);
+  return /^(?:ceo|cto|cfo|coo|cpo|founder|president|director|manager|officer|member)$/i.test(t);
+}
+
+/** Safeguard bullets and clause fragments must never become legal-party slots. */
+export function isContractProsePartyName(name: string): boolean {
+  const t = (name || "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (ENTITY_SUFFIX.test(t) && t.length <= 80 && !/:\s+/.test(t)) return false;
+  if (/^No authority to bind\b/i.test(t)) return true;
+  if (/^Authority,\s+representations\b/i.test(t)) return true;
+  if (t.length > 80) return true;
+  return /:\s*.{12,}\b(?:shall|will|must|may not|has no authority|provider|contractor|company)\b/i.test(t);
 }
 
 /** Reject contract prose fragments mistaken for party names. */
@@ -489,6 +500,7 @@ function looksLikeUsPostalAddressLine(name: string): boolean {
 export function isAuthoritativeLegalEntityName(name: string): boolean {
   const raw = (name || "").replace(/\s+/g, " ").trim();
   if (isAgreementSectionHeadingPartyName(raw)) return false;
+  if (isContractProsePartyName(raw)) return false;
   if (looksLikeAuthorizedSignersBulletLine(raw)) return false;
   // Human signer + title lines must never qualify as legal entities
   // (e.g. "Ethan Cole, Authorized Signatory." from "Acme LLC signer: …" intake).

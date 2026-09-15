@@ -14,6 +14,7 @@ import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValida
 import {
   hasPartyMetadataLabelContamination,
   isAuthoritativeLegalEntityName,
+  isOccupationalOrJobTitlePartyName,
   stripTrailingPartyMetadataLabel,
 } from "./paidProPartyNamePreserve";
 import { normalizeCanonicalPartyAddress } from "./canonicalPartyStructuredAddress";
@@ -113,7 +114,10 @@ const AUTHORIZED_SIGNERS_BULLET_RE =
 function cleanSignerField(value: string | null | undefined, field: "signerName" | "signerTitle"): string {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
-  return normalizeSignerMetadataForSave(raw, field) ?? "";
+  const cleaned = normalizeSignerMetadataForSave(raw, field) ?? "";
+  if (!cleaned) return "";
+  if (field === "signerName" && !isLikelyHumanSignerName(cleaned)) return "";
+  return cleaned;
 }
 
 function cleanEmail(value: string | null | undefined): string {
@@ -180,6 +184,17 @@ export function isBoilerplateLegalPartyPhrase(value: string): boolean {
   return BOILERPLATE_LEGAL_PARTY_PHRASE_RE.test(value.replace(/\s+/g, " ").trim());
 }
 
+const HUMAN_NAME_STREET_SUFFIX_RE =
+  /\b(?:Ave|Avenue|St|Street|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Way|Ct|Court|Pkwy|Parkway|Pl|Place|Cir|Circle|Hwy|Highway|Square)\.?$/i;
+
+/** Street fragments such as "Foundry Ave" are never identity subjects. */
+export function looksLikeStreetOrPlaceName(value: string): boolean {
+  const t = value.replace(/\s+/g, " ").trim();
+  if (!t || isLegalEntityName(t) || isAuthoritativeLegalEntityName(t)) return false;
+  if (/^\d{1,6}\s+\S/.test(t)) return true;
+  return HUMAN_NAME_STREET_SUFFIX_RE.test(t);
+}
+
 /** Human signer names must never populate legal-entity authority fields. */
 export function isLikelyHumanSignerName(value: string): boolean {
   const t = value.replace(/\s+/g, " ").trim();
@@ -187,6 +202,8 @@ export function isLikelyHumanSignerName(value: string): boolean {
   if (isLegalEntityName(t) || isAuthoritativeLegalEntityName(t)) return false;
   if (hasPartyMetadataLabelContamination(t)) return false;
   if (isBoilerplateLegalPartyPhrase(t)) return false;
+  if (isOccupationalOrJobTitlePartyName(t)) return false;
+  if (looksLikeStreetOrPlaceName(t)) return false;
   if (new RegExp(`${ENTITY_SUFFIX_PATTERN}$`, "i").test(t)) return false;
   if (looksLikeConcatenatedSignerNames(t)) return false;
   const words = t.split(/\s+/);

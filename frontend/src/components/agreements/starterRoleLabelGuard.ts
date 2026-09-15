@@ -43,6 +43,7 @@ const SIGNER_TITLE_EXACT = new Set([
   "vp",
   "director",
   "managing director",
+  "managing member",
   "managing partner",
   "general partner",
   "partner",

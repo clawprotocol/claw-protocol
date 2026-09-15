@@ -18,6 +18,7 @@ import {
   hasPartyMetadataLabelContamination,
   isAgreementSectionHeadingPartyName,
   isAuthoritativeLegalEntityName,
+  isContractProsePartyName,
   isDisallowedPartyPhrase,
   isOccupationalOrJobTitlePartyName,
   isStateLegalFormOnlyName,
@@ -270,6 +271,7 @@ export function isInvalidPartySlotLegalEntity(name: string): boolean {
   if (isAgreementSectionHeadingPartyName(t)) return true;
   if (hasPartyMetadataLabelContamination(t)) return true;
   if (isOccupationalOrJobTitlePartyName(t)) return true;
+  if (isContractProsePartyName(t)) return true;
   return false;
 }
 

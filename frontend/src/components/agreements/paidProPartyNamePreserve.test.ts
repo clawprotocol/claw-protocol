@@ -5,6 +5,7 @@ import {
   preserveFullLegalPartyNames,
   collapseDuplicateNoticeEntityLines,
   isOccupationalOrJobTitlePartyName,
+  isContractProsePartyName,
   isAgreementSectionHeadingPartyName,
   isAuthoritativeLegalEntityName,
 } from "./paidProPartyNamePreserve";
@@ -26,6 +27,25 @@ describe("paidProPartyNamePreserve", () => {
     expect(isAuthoritativeLegalEntityName("Freelance Product Designer")).toBe(false);
     expect(isOccupationalOrJobTitlePartyName("Alex Rivera")).toBe(false);
     expect(isOccupationalOrJobTitlePartyName("PixelForge Labs")).toBe(false);
+    expect(isOccupationalOrJobTitlePartyName("Managing Member")).toBe(true);
+    expect(isOccupationalOrJobTitlePartyName("Chief Product Officer")).toBe(true);
+  });
+
+  it("rejects safeguard clause fragments as party legal entities", () => {
+    expect(
+      isContractProsePartyName(
+        "No authority to bind: the service provider has no authority to bind the company",
+      ),
+    ).toBe(true);
+    expect(
+      isContractProsePartyName(
+        "Authority, representations, and access controls: provider may not make false or misleading promises, and company",
+      ),
+    ).toBe(true);
+    expect(isContractProsePartyName("Harbor Peak Analytics LLC")).toBe(false);
+    expect(isAuthoritativeLegalEntityName("No authority to bind: the service provider has no authority to bind the company")).toBe(
+      false,
+    );
   });
 
   it("derives short forms from legal entity names", () => {

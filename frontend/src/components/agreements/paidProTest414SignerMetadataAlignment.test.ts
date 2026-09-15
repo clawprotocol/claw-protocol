@@ -100,6 +100,10 @@ describe("TEST414_SIGNER_METADATA_LEGAL_ENTITY_ALIGNMENT", () => {
     expect(isLikelyHumanSignerName("Either Party")).toBe(false);
     expect(isLikelyHumanSignerName("Each Party")).toBe(false);
     expect(isLikelyHumanSignerName("The Parties")).toBe(false);
+    expect(isLikelyHumanSignerName("Managing Member")).toBe(false);
+    expect(isLikelyHumanSignerName("Chief Product Officer")).toBe(false);
+    expect(isLikelyHumanSignerName("Foundry Ave")).toBe(false);
+    expect(isLikelyHumanSignerName("Sandra Wells")).toBe(true);
     expect(isLikelyHumanSignerName("Harbor Peak Automation LLC")).toBe(false);
     expect(looksLikeConcatenatedSignerNames("Mary Jay Hen Park Ira")).toBe(true);
     expect(resolveAuthorityPartyLegalNameField("Mary Jay", "Harbor Peak Automation LLC")).toBe(

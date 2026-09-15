@@ -32,6 +32,8 @@ import {
   sanitizePartyLegalNameFromIntakeFragment,
 } from "./intakeSignerInstructionParse";
 import { isSeedableSignerNameFromDraftParty } from "./partyNameConfidence";
+import { isOccupationalOrJobTitlePartyName } from "./paidProPartyNamePreserve";
+import { isSignerTitleLikeRole } from "./starterRoleLabelGuard";
 
 export type SignerMetadataAuthoritySource =
   | "user_edited_ui"
@@ -124,7 +126,35 @@ export function entitiesMatchForSignerMetadata(a: string, b: string): boolean {
 function cleanSignerField(value: string | null | undefined, field: "signerName" | "signerTitle"): string {
   const raw = String(value ?? "").trim();
   if (!raw || PLACEHOLDER_SIGNER_VALUE_RE.test(raw)) return "";
-  return normalizeSignerMetadataForSave(raw, field) ?? "";
+  const cleaned = normalizeSignerMetadataForSave(raw, field) ?? "";
+  if (!cleaned) return "";
+  if (field === "signerName" && !isUsableExtractedSignerName(cleaned)) return "";
+  return cleaned;
+}
+
+const EXTRACTED_SIGNER_STREET_SUFFIX_RE =
+  /\b(?:Ave|Avenue|St|Street|Rd|Road|Blvd|Boulevard|Dr|Drive|Ln|Lane|Way|Ct|Court|Pkwy|Parkway|Pl|Place|Cir|Circle|Hwy|Highway|Square)\.?$/i;
+
+function isUsableExtractedSignerName(value: string): boolean {
+  const t = value.replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (isOccupationalOrJobTitlePartyName(t) || isSignerTitleLikeRole(t)) return false;
+  if (/^\d{1,6}\s+\S/.test(t) || EXTRACTED_SIGNER_STREET_SUFFIX_RE.test(t)) return false;
+  if (/\bsigner\s*:/i.test(t) || isContractLikeSignerName(t)) return false;
+  return true;
+}
+
+function isContractLikeSignerName(value: string): boolean {
+  return value.length > 48 || /:\s+/.test(value);
+}
+
+function titleFromRejectedSignerName(value: string): string {
+  const raw = String(value || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  if (isOccupationalOrJobTitlePartyName(raw) || isSignerTitleLikeRole(raw)) {
+    return cleanSignerField(raw, "signerTitle");
+  }
+  return "";
 }
 
 function pushCandidate(
@@ -137,7 +167,7 @@ function pushCandidate(
   const legal = entity.replace(/\s+/g, " ").trim();
   if (!legal) return;
   const name = cleanSignerField(signerName, "signerName");
-  const title = cleanSignerField(signerTitle, "signerTitle");
+  const title = cleanSignerField(signerTitle, "signerTitle") || titleFromRejectedSignerName(signerName);
   if (!name && !title) return;
   const key = normEntityKey(legal);
   const rank = SIGNER_METADATA_AUTHORITY_RANK[source];
@@ -174,10 +204,13 @@ export function extractSignerMetadataFromIntakeNaturalLanguage(
   for (const row of matchSignerForEntityIsClauses(raw)) {
     if (row.entity) pushCandidate(byEntity, row.entity, row.signerName, row.signerTitle, "intake_natural_language");
     else if (row.signerName) {
+      const signerName = cleanSignerField(row.signerName, "signerName");
+      const signerTitle = cleanSignerField(row.signerTitle, "signerTitle") || titleFromRejectedSignerName(row.signerName);
+      if (!signerName && !signerTitle) continue;
       indexOnly.push({
         entity: "",
-        signerName: cleanSignerField(row.signerName, "signerName"),
-        signerTitle: cleanSignerField(row.signerTitle, "signerTitle"),
+        signerName,
+        signerTitle,
         source: "intake_natural_language",
         authorityRank: SIGNER_METADATA_AUTHORITY_RANK.intake_natural_language,
       });
@@ -220,11 +253,13 @@ export function extractSignerMetadataFromIntakeNaturalLanguage(
   for (const m of raw.matchAll(lineRe)) {
     const name = (m[1] ?? "").trim();
     const title = (m[2] ?? "").trim();
-    if (!name) continue;
+    const signerName = cleanSignerField(name, "signerName");
+    const signerTitle = cleanSignerField(title, "signerTitle") || titleFromRejectedSignerName(name);
+    if (!signerName && !signerTitle) continue;
     indexOnly.push({
       entity: "",
-      signerName: cleanSignerField(name, "signerName"),
-      signerTitle: cleanSignerField(title, "signerTitle"),
+      signerName,
+      signerTitle,
       source: "intake_natural_language",
       authorityRank: SIGNER_METADATA_AUTHORITY_RANK.intake_natural_language,
     });
@@ -241,10 +276,13 @@ export function extractSignerMetadataFromIntakeContacts(
   for (const c of contacts) {
     if (!c.name.trim()) continue;
     const entity = c.companyHint.trim();
+    const signerName = cleanSignerField(c.name, "signerName");
+    const signerTitle = cleanSignerField(c.title, "signerTitle") || titleFromRejectedSignerName(c.name);
+    if (!signerName && !signerTitle) continue;
     out.push({
       entity,
-      signerName: cleanSignerField(c.name, "signerName"),
-      signerTitle: cleanSignerField(c.title, "signerTitle"),
+      signerName,
+      signerTitle,
       source: "intake_structured_contact",
       authorityRank: SIGNER_METADATA_AUTHORITY_RANK.intake_structured_contact,
     });
@@ -647,7 +685,7 @@ function resolveUniversalSignerMetadataBySlotInternal(
         }
       }
     }
-    if (!hit && indexOnly[i]) {
+    if (!hit && indexOnly[i]?.signerName) {
       hit = {
         entity,
         signerName: indexOnly[i]!.signerName,

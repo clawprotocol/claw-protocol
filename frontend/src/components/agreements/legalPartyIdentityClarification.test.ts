@@ -360,6 +360,99 @@ describe("legal party identity clarification", () => {
     ).toEqual([]);
   });
 
+  it("does not treat job titles or street fragments as leftover identity subjects", () => {
+    const three = releaseScopeSample("three_party");
+    const paper = [
+      "The coordinator is not a party, signer, notice recipient, or beneficiary.",
+      "Stonebridge Wellness LLC's authorized signer is Sandra Wells, Managing Member.",
+      "NovaPath Learning Inc.'s authorized signer is Caleb Price, Chief Product Officer.",
+      "ClearSpring Distribution LLC's authorized signer is Maya Coleman, President.",
+      "Attn: Sandra Wells, Managing Member",
+      "2841 Foundry Ave.",
+      "Either Party may terminate on written notice as permitted herein.",
+    ].join("\n");
+    const parties = [
+      { name: "Stonebridge Wellness LLC", role: "Licensor", signerName: "Sandra Wells" },
+      { name: "NovaPath Learning Inc.", role: "Platform Provider", signerName: "Caleb Price" },
+      { name: "ClearSpring Distribution LLC", role: "Distributor", signerName: "Maya Coleman" },
+    ];
+    const applied = applyIdentityClarificationAnswers({
+      parties,
+      intake: `${three.filledIntake}\n${paper}`,
+      unresolvedSubjects: [
+        { name: "Managing Member", source: "customer_mentioned", email: "cryptocurated21+s@gmail.com" },
+        { name: "Chief Product Officer", source: "customer_mentioned" },
+        { name: "Foundry Ave", source: "customer_mentioned" },
+        { name: "Either Party", source: "customer_mentioned" },
+      ],
+    });
+    expect(applied.clarificationQuestion).toBeNull();
+    expect(applied.parties.map((party) => party.signerName)).toEqual([
+      "Sandra Wells",
+      "Caleb Price",
+      "Maya Coleman",
+    ]);
+    expect(applied.unresolvedSubjects.some((row) => /Managing Member|Chief Product Officer|Foundry Ave|Either Party/i.test(row.name))).toBe(
+      false,
+    );
+    expect(
+      identityClarificationMaterialItem({
+        intakeRaw: three.filledIntake,
+        parsedParties: parties,
+        body: paper,
+        additionalTerms: mergeUnresolvedIdentityIntoText("", [
+          { name: "Managing Member", source: "customer_mentioned" },
+          { name: "Foundry Ave", source: "customer_mentioned" },
+        ]),
+        unresolvedSubjects: [
+          { name: "Managing Member", source: "customer_mentioned" },
+          { name: "Foundry Ave", source: "customer_mentioned" },
+        ],
+      }),
+    ).toBeNull();
+    expect(
+      contentClarificationQuestions({
+        intake: three.filledIntake,
+        body: paper,
+        parsedParties: parties,
+      }).filter(isIdentityClarificationQuestion),
+    ).toEqual([]);
+  });
+
+  it("drops safeguard clause fragments that leaked into the party list", () => {
+    const four = releaseScopeSample("four_party");
+    const applied = applyIdentityClarificationAnswers({
+      parties: [
+        { name: "Lumen Bioinformatics Inc.", role: "Platform Developer", signerName: "Dr. Elena Vasquez" },
+        { name: "Thalassa Data Systems LLC", role: "Data Infrastructure Provider", signerName: "Marcus Webb" },
+        { name: "Coastal Meridian Analytics LLC", role: "Analytics Integrator", signerName: "Priya Nair" },
+        {
+          name: "Vanguard Regulatory Sciences Ltd.",
+          role: "Regulatory Compliance Advisor",
+          signerName: "James O'Sullivan",
+        },
+        {
+          name: "No authority to bind: the service provider has no authority to bind the company",
+          role: "Platform Developer",
+          signerName: "Priya Nair",
+        },
+        {
+          name: "Authority, representations, and access controls: provider may not make false or misleading promises, and company",
+          role: "Data Infrastructure Provider",
+          signerName: "James O'Sullivan",
+        },
+      ],
+      intake: four.filledIntake,
+    });
+    expect(applied.parties.map((party) => party.name)).toEqual([
+      "Lumen Bioinformatics Inc.",
+      "Thalassa Data Systems LLC",
+      "Coastal Meridian Analytics LLC",
+      "Vanguard Regulatory Sciences Ltd.",
+    ]);
+    expect(applied.clarificationQuestion).toBeNull();
+  });
+
   it("does not ask again for an individual already stated in customer input", () => {
     const intake = `Draft a consulting agreement between ${HARBOR} (Consultant) and ${IRONVALE} (Client). Jordan Hale as an individual (Advisor) is the third contracting party.`;
     const item = identityClarificationMaterialItem({

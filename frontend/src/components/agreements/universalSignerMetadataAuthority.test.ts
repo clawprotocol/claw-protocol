@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  clearIntakeSignerMetadataExtractMemoForTests,
   entitiesMatchForSignerMetadata,
   extractSignerMetadataFromIntake,
   extractSignerMetadataFromIntakeNaturalLanguage,
@@ -21,6 +22,7 @@ import {
   resetPremiumRecipientHandoffDedupForTests,
 } from "./premiumPartyNamesHandoff";
 import { BLUE_CANYON_QA_HOME_PROMPT } from "./intakeSignerInstructionParse";
+import { releaseScopeSample } from "../../launch/releaseScopeQualificationCampaign";
 
 const BLUE = "Blue Canyon Analytics LLC";
 const IRON = "Iron Vale Systems Inc";
@@ -255,6 +257,40 @@ describe("universalSignerMetadataAuthority", () => {
     expect(seed.names[0]).toBe("Pat Lee");
     expect(seed.draftChanged).toBe(true);
     expect((seed.draft?.parties?.[0] as { signerName?: string })?.signerName).toBe("Pat Lee");
+  });
+
+  it("does not promote job titles or street fragments into signer names", () => {
+    clearIntakeSignerMetadataExtractMemoForTests();
+    const three = releaseScopeSample("three_party");
+    const paper = [
+      "Stonebridge Wellness LLC's authorized signer is Sandra Wells, Managing Member.",
+      "NovaPath Learning Inc.'s authorized signer is Caleb Price, Chief Product Officer.",
+      "ClearSpring Distribution LLC's authorized signer is Maya Coleman, President.",
+      "2841 Foundry Ave.",
+    ].join("\n");
+    const resolved = resolveUniversalSignerMetadataBySlot({
+      legalEntities: [
+        "Stonebridge Wellness LLC",
+        "NovaPath Learning Inc.",
+        "ClearSpring Distribution LLC",
+      ],
+      intakeText: `${three.filledIntake}\n${paper}`,
+      draftParties: [
+        { name: "Stonebridge Wellness LLC", role: "Licensor", signerName: "Sandra Wells" },
+        { name: "NovaPath Learning Inc.", role: "Platform Provider", signerName: "Caleb Price" },
+        { name: "ClearSpring Distribution LLC", role: "Distributor", signerName: "Maya Coleman" },
+      ],
+    });
+    expect(resolved.map((row) => row.signerName)).toEqual([
+      "Sandra Wells",
+      "Caleb Price",
+      "Maya Coleman",
+    ]);
+    expect(resolved.map((row) => row.signerName).join(" ")).not.toMatch(
+      /Managing Member|Chief Product Officer|Foundry Ave/i,
+    );
+    const extracted = extractSignerMetadataFromIntake(`${three.filledIntake}\n${paper}`);
+    expect(extracted.extractedNames.join(" ")).not.toMatch(/Managing Member|Chief Product Officer|Foundry Ave/i);
   });
 
   it("extractSignerMetadataFromIntake logs structured extract shape", () => {
