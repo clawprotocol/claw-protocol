@@ -237,12 +237,7 @@ test.describe("identity-resolution customer flow", () => {
     await persistOwnerPartyContacts(reopened.page, started.agreementId, signers);
     await seedCorePaidJourneyOwner(reopened.page);
     await reopened.page.goto(`/app/create?agreementId=${started.agreementId}`, { waitUntil: "domcontentloaded" });
-    await expect
-      .poll(async () => {
-        const text = await articleText(reopened.page, IDENTITY_SCENARIO.partyCue);
-        return paperReady(text, ["Alex Rivera"]) ? text.length : 0;
-      }, { timeout: 90_000 })
-      .toBeGreaterThan(400);
+    await waitForOwnerWorkspaceReady(reopened.page, started.agreementId);
     await expect(reopened.page.getByTestId("identity-clarification-question")).toHaveCount(0);
     const finished = await completeLocalReviewSignAndFinal({
       page: reopened.page,

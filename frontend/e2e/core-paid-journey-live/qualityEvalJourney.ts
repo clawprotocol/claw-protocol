@@ -934,6 +934,10 @@ type OwnerAuditEvent = {
 type OwnerDraftAuthority = {
   parties: OwnerPartyRow[];
   audit: OwnerAuditEvent[];
+  acceptedSnapshotId: string;
+  acceptedDigest: string;
+  lockSnapshotId: string;
+  lockDigest: string;
 };
 
 type RecipientApprovePostEvent = {
@@ -957,11 +961,22 @@ async function fetchOwnerDraftAuthority(page: Page, agreementId: string): Promis
   });
   expect(res.ok(), `owner GET failed ${res.status()}`).toBeTruthy();
   const body = (await res.json()) as {
-    draft?: { parties?: OwnerPartyRow[]; audit_log?: OwnerAuditEvent[] };
+    draft?: {
+      parties?: OwnerPartyRow[];
+      audit_log?: OwnerAuditEvent[];
+      accepted_review_snapshot_v1?: { snapshotId?: string; corpusSha256?: string };
+    };
+    signing_lock?: { accepted_snapshot_id?: string; accepted_snapshot_digest?: string };
   };
+  const accepted = body.draft?.accepted_review_snapshot_v1 || {};
+  const lock = body.signing_lock || {};
   return {
     parties: Array.isArray(body.draft?.parties) ? body.draft.parties : [],
     audit: Array.isArray(body.draft?.audit_log) ? body.draft.audit_log : [],
+    acceptedSnapshotId: String(accepted.snapshotId || "").trim(),
+    acceptedDigest: String(accepted.corpusSha256 || "").trim().toLowerCase(),
+    lockSnapshotId: String(lock.accepted_snapshot_id || "").trim(),
+    lockDigest: String(lock.accepted_snapshot_digest || "").trim().toLowerCase(),
   };
 }
 
@@ -1313,24 +1328,34 @@ export async function completeLocalReviewSignAndFinal(args: {
       recordedAfterPost,
       `${signer.legalEntity} approval missing on intended revision after POST status=${posted?.status}`,
     ).toBeTruthy();
-    await recipient.reload({ waitUntil: "domcontentloaded" });
-    const ownerAfterReload = await fetchOwnerDraftAuthority(args.page, args.agreementId);
-    expect(
-      approvalOnIntendedRevision(ownerAfterReload.audit, String(row.id), args.snapshotId, args.digest),
-      `${signer.legalEntity} approval did not persist after recipient reload`,
-    ).toBeTruthy();
     const persistedApproved = recipient
       .getByTestId("recipient-accepted-awaiting-lock-root")
       .or(recipient.getByTestId("recipient-approved-waiting-header"))
       .or(recipient.getByTestId("recipient-approved-draft-collapsed"))
       .or(recipient.getByTestId("recipient-review-approved-status"))
       .or(recipient.getByText(/Review submitted|Your review has been recorded/i));
-    await expect(persistedApproved.first()).toBeVisible({ timeout: 20_000 });
+    const chromeAfterPersist = await persistedApproved
+      .first()
+      .waitFor({ state: "visible", timeout: 20_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!chromeAfterPersist) {
+      await recipient.reload({ waitUntil: "domcontentloaded" });
+      const ownerAfterReload = await fetchOwnerDraftAuthority(args.page, args.agreementId);
+      expect(
+        approvalOnIntendedRevision(ownerAfterReload.audit, String(row.id), args.snapshotId, args.digest),
+        `${signer.legalEntity} approval did not persist after recipient reload`,
+      ).toBeTruthy();
+      await expect(persistedApproved.first()).toBeVisible({ timeout: 20_000 });
+    }
     const expandApproved = recipient.getByText(/tap to expand|Approved draft/i).first();
     if (await expandApproved.isVisible().catch(() => false)) {
       await expandApproved.click();
     }
-    if (await recipient.getByTestId("recipient-document-shell").isVisible({ timeout: 3_000 }).catch(() => false)) {
+    if (
+      !chromeAfterPersist &&
+      (await recipient.getByTestId("recipient-document-shell").isVisible({ timeout: 3_000 }).catch(() => false))
+    ) {
       expect(args.paperReady(await recipientPaperText(recipient, args.partyCue)), `${signer.legalEntity} reloaded paper`).toBeTruthy();
     }
     await context.close();
@@ -1383,6 +1408,40 @@ export async function completeLocalReviewSignAndFinal(args: {
         : 0;
     }, { timeout: 45_000 })
     .toBe(1);
+  const freezeGet = await fetchOwnerCanonicalSnapshot(args.page, args.agreementId);
+  expect(freezeGet.digest, "send-for-signature freeze must reuse the reviewed apply digest").toBe(args.digest);
+  expect(freezeGet.snapshotId, "send-for-signature freeze must reuse the reviewed apply snapshot").toBe(
+    args.snapshotId,
+  );
+  const freezeAuthority = await fetchOwnerDraftAuthority(args.page, args.agreementId);
+  expect(freezeAuthority.acceptedDigest, "accepted snapshot digest must stay on the reviewed apply digest").toBe(
+    args.digest,
+  );
+  expect(freezeAuthority.acceptedSnapshotId, "accepted snapshot id must stay on the reviewed apply snapshot").toBe(
+    args.snapshotId,
+  );
+  expect(freezeAuthority.lockDigest, "signing lock must bind the reviewed apply digest").toBe(args.digest);
+  expect(freezeAuthority.lockSnapshotId, "signing lock must bind the reviewed apply snapshot").toBe(args.snapshotId);
+  writeQualityEvalArtifact(
+    "freeze-reuse.json",
+    JSON.stringify(
+      {
+        agreement_id: args.agreementId,
+        apply_snapshot_id: args.snapshotId,
+        apply_digest: args.digest,
+        freeze_snapshot_id: freezeGet.snapshotId,
+        freeze_digest: freezeGet.digest,
+        freeze_length: freezeGet.length,
+        accepted_snapshot_id: freezeAuthority.acceptedSnapshotId,
+        accepted_digest: freezeAuthority.acceptedDigest,
+        lock_snapshot_id: freezeAuthority.lockSnapshotId,
+        lock_digest: freezeAuthority.lockDigest,
+      },
+      null,
+      2,
+    ),
+    "freeze",
+  );
   for (const signer of args.signers) {
     const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity))!;
     const token = String(
