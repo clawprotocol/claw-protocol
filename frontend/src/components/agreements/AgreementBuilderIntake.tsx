@@ -807,6 +807,7 @@ import {
   canEnableCommercialPrepareFromServerSnapshot,
   clearAcceptedReviewSnapshotRef,
   hasVerifiedCommercialDisplayCorpus,
+  fetchCanonicalReviewSnapshot,
   hydrateCommercialReviewFromServerSnapshot,
   prepareCommercialReviewSnapshotAuthority,
   readAcceptedReviewSnapshotRef,
@@ -33181,8 +33182,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return false;
     }
     const expectedFrozenHash = frozenGate.hash;
+    const acceptedAuthority = await fetchCanonicalReviewSnapshot({ agreementId: durableAgreementId });
+    const acceptedPlain =
+      acceptedAuthority.ok &&
+      String(acceptedAuthority.status || acceptedAuthority.snapshot.status).toLowerCase() === "accepted"
+        ? (acceptedAuthority.snapshot.corpus_plain || "").trim()
+        : "";
+    const reusedAcceptedSnapshot = acceptedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN;
     const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
-      rawCorpus,
+      rawCorpus: reusedAcceptedSnapshot ? acceptedPlain : rawCorpus,
       authority,
       intakeRaw: intakeForHydration,
       surface: "finalize_paid_pro_signer_metadata",
@@ -33192,11 +33200,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       organizationId,
       expectedFrozenHash,
     });
+    const corpusForSnapshot = reusedAcceptedSnapshot ? acceptedPlain : hydrated.corpus;
     if (
       shouldBlockSignerFinalizeFrozenMismatch({
         agreementId: durableAgreementId,
         organizationId,
-        hydratedCorpus: hydrated.corpus,
+        hydratedCorpus: corpusForSnapshot,
       })
     ) {
       rollbackFinalizeFailure(
@@ -33242,7 +33251,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return true;
     }
     createAuthoritativeSigningSnapshot({
-      corpus: hydrated.corpus,
+      corpus: corpusForSnapshot,
       signerMetadata,
       partyManifest,
       signatureBlockModel,
@@ -33255,12 +33264,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       // Await durable persist below — never advance into broken final review on 403/404.
       persistFrozenToBackend: false,
     });
-    const signingReadyPlain = resolvePaidProSignerFinalizeSigningReadyPlain({
-      hydratedCorpus: hydrated.corpus,
+    let signingReadyPlain = resolvePaidProSignerFinalizeSigningReadyPlain({
+      hydratedCorpus: corpusForSnapshot,
       postFinalizePlain: resolvePaidProPostFinalizeReviewPlain(),
       snapshotCorpus: getAuthoritativeSigningSnapshot()?.corpus,
     });
-    if (!isPaidProSigningReadyHydratedCorpus(signingReadyPlain) || hydrated.rejected) {
+    if (reusedAcceptedSnapshot) {
+      signingReadyPlain = acceptedPlain;
+    }
+    if (!isPaidProSigningReadyHydratedCorpus(signingReadyPlain) || (hydrated.rejected && !reusedAcceptedSnapshot)) {
       rollbackFinalizeFailure(
         "Signer details could not be applied to the agreement. Update signer details and finalize again before preparing for signing.",
       );
@@ -33273,11 +33285,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       generationSessionId: signerFinalizeReviewSessionId,
     });
     if (!prepared.ok) {
-      if (!demoSessionMayContinueWithoutServerSnapshot(prepared.code)) {
-        rollbackFinalizeFailure(
-          `Could not persist the finalized agreement snapshot (${prepared.code}). Stay in signer setup and try again.`,
-        );
-        return false;
+      if (!(reusedAcceptedSnapshot && prepared.code === "accepted_snapshot_immutable")) {
+        if (!demoSessionMayContinueWithoutServerSnapshot(prepared.code)) {
+          rollbackFinalizeFailure(
+            `Could not persist the finalized agreement snapshot (${prepared.code}). Stay in signer setup and try again.`,
+          );
+          return false;
+        }
       }
     }
     const frozenLocal = readFrozenSigningAuthoritySnapshot();

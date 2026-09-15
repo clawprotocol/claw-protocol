@@ -159,6 +159,90 @@ describe("canonicalReviewSnapshotApi", () => {
     expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/accept"))).toBe(false);
   });
 
+  it("prepareCommercialReviewSnapshotAuthority reuses an accepted snapshot without posting a new pending", async () => {
+    const corpus = ("OPERATIVE\n\n" + "accepted-reuse ".repeat(40)).trim();
+    const digest = await sha256CorpusDigest(corpus);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/canonical-review-snapshot") && method === "GET") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "accepted",
+            snapshot: {
+              snapshot_id: "crs_accepted",
+              agreement_id: "ag_accepted",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "accepted",
+            },
+            registry_version: 2,
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await prepareCommercialReviewSnapshotAuthority({
+      agreementId: "ag_accepted",
+      corpusPlain: corpus,
+      generationSessionId: "gen_reuse",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.code);
+    expect(result.snapshot.snapshot_id).toBe("crs_accepted");
+    expect(result.status).toBe("accepted");
+    expect(readAcceptedReviewSnapshotRef("ag_accepted")?.snapshotId).toBe("crs_accepted");
+    expect(fetchMock.mock.calls.some((c) => String(c[1]?.method || "GET").toUpperCase() === "POST")).toBe(
+      false,
+    );
+  });
+
+  it("prepareCommercialReviewSnapshotAuthority does not persist a divergent pending after accept", async () => {
+    const accepted = ("OPERATIVE\n\n" + "accepted-bytes ".repeat(40)).trim();
+    const rewritten = ("OPERATIVE\n\n" + "rewritten-bytes ".repeat(40)).trim();
+    const digest = await sha256CorpusDigest(accepted);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/canonical-review-snapshot") && method === "GET") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "accepted",
+            snapshot: {
+              snapshot_id: "crs_accepted",
+              agreement_id: "ag_locked",
+              corpus_plain: accepted,
+              corpus_sha256: digest,
+              corpus_length: accepted.length,
+              status: "accepted",
+            },
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await prepareCommercialReviewSnapshotAuthority({
+      agreementId: "ag_locked",
+      corpusPlain: rewritten,
+      generationSessionId: "gen_rewrite",
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected immutable reject");
+    expect(result.code).toBe("accepted_snapshot_immutable");
+    expect(fetchMock.mock.calls.some((c) => String(c[1]?.method || "GET").toUpperCase() === "POST")).toBe(
+      false,
+    );
+  });
+
   it("acceptDisplayedCommercialReviewSnapshot fails when display differs from GET", async () => {
     const corpus = ("OPERATIVE\n\n" + "x".repeat(600)).trim();
     const digest = await sha256CorpusDigest(corpus);

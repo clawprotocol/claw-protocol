@@ -538,6 +538,40 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
     }
   }
 
+  const existing = await fetchCanonicalReviewSnapshot({ agreementId: id });
+  if (existing.ok && String(existing.status || existing.snapshot.status).toLowerCase() === "accepted") {
+    const incomingDigest = await sha256CorpusDigest(corpus);
+    const acceptedDigest = String(existing.snapshot.corpus_sha256 || "").trim().toLowerCase();
+    const acceptedPlain = (existing.snapshot.corpus_plain || "").trim();
+    if (incomingDigest !== acceptedDigest || acceptedPlain !== corpus) {
+      return { ok: false, code: "accepted_snapshot_immutable" };
+    }
+    const display: StoredDisplayReviewSnapshotAuthority = {
+      agreementId: id,
+      snapshotId: existing.snapshot.snapshot_id,
+      corpusSha256: acceptedDigest,
+      corpusLength: existing.snapshot.corpus_length,
+      status: "accepted",
+    };
+    storeVerifiedCommercialDisplayCorpus({
+      ...display,
+      corpusPlain: acceptedPlain,
+    });
+    storeAcceptedReviewSnapshotRef({
+      agreementId: id,
+      snapshotId: existing.snapshot.snapshot_id,
+      corpusSha256: acceptedDigest,
+      corpusLength: existing.snapshot.corpus_length,
+    });
+    return {
+      ok: true,
+      snapshot: existing.snapshot,
+      status: "accepted",
+      registryVersion: existing.registryVersion ?? null,
+      display,
+    };
+  }
+
   const persisted = await persistCanonicalReviewSnapshot({
     agreementId: id,
     corpusPlain: corpus,

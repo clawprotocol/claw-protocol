@@ -62,7 +62,7 @@ export function shouldPreserveApprovedAddedPartyExecutionTail(
   corpus: string,
   names: readonly string[] = [],
 ): boolean {
-  if (names.length !== 3) return false;
+  if (names.length < 2 || names.length > 3) return false;
   if (!corpusDeclaresConsultantClientOpening(corpus)) return false;
   const witnessIdx = (corpus || "").search(/\bIN WITNESS WHEREOF\b/i);
   if (witnessIdx < 0) return false;
