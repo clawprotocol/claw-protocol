@@ -4,6 +4,8 @@
  * Does not invent parties or rewrite frozen operative clauses.
  */
 
+import { executionTailBindsPartyNames } from "./paidProAcceptedCorpusPartyRoles";
+
 export function corpusDeclaresConsultantClientOpening(text: string): boolean {
   const head = openingSlice((text || "").replace(/\r\n/g, "\n"));
   return /\(\s*["']?Consultant["']?\s*\)/i.test(head) && /\(\s*["']?Client["']?\s*\)/i.test(head);
@@ -53,6 +55,38 @@ function remapInvertedConsultantExecutionHeadings(text: string, sourceOpening: s
     `$1CLIENT:\n${client}`,
   );
   return `${head}${tail}`;
+}
+
+/** Keep an already-bound Consultant/Client + Advisor tail instead of rebuilding it. */
+export function shouldPreserveApprovedAddedPartyExecutionTail(
+  corpus: string,
+  names: readonly string[] = [],
+): boolean {
+  if (names.length !== 3) return false;
+  if (!corpusDeclaresConsultantClientOpening(corpus)) return false;
+  const witnessIdx = (corpus || "").search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return false;
+  const tail = corpus.slice(witnessIdx);
+  if (!/^\s*CONSULTANT\s*:/im.test(tail) || !/^\s*CLIENT\s*:/im.test(tail) || !/^\s*ADVISOR\s*:/im.test(tail)) {
+    return false;
+  }
+  const advisorEntity =
+    tail
+      .slice(tail.search(/^\s*ADVISOR\s*:/im))
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)[1] || "";
+  const advisorWords = advisorEntity.split(/\s+/);
+  if (
+    advisorWords.length < 2 ||
+    advisorWords.length > 4 ||
+    advisorWords.some((word) => !/^[A-Z][A-Za-z'-]+$/.test(word)) ||
+    /\b(?:LLC|Inc\.?|Corp\.?|Ltd\.?)\b/i.test(advisorEntity)
+  ) {
+    return false;
+  }
+  if (names.length >= 2 && !executionTailBindsPartyNames(corpus, names)) return false;
+  return true;
 }
 
 /** Keep a declared Consultant/Client opening and CONSULTANT execution tail when a later pass rebuilt Client/SP. */

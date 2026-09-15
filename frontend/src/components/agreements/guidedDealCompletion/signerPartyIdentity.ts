@@ -26,6 +26,7 @@ import {
 import { reconcileExecutionBlockToRoleIdentities } from "../paidProSignerMetadataMergeGate";
 import { repairPaidProSignatureSectionOrdering } from "../paidProSignatureSectionOrdering";
 import { partyLegalNamesMatch } from "../paidProAcceptedCorpusPartyRoles";
+import { shouldPreserveApprovedAddedPartyExecutionTail } from "../paidProDeclaredConsultantClientPaper";
 import { sortIdentitiesForExecutionBlockOrder } from "../paidProSignerMetadataMergeGate";
 import {
   applyCanonicalManifestPlaceholdersToCorpus,
@@ -253,6 +254,14 @@ function fillSignatureNameUnderscoreLines(
   text: string,
   identities: readonly CanonicalPartyIdentity[],
 ): { text: string; count: number } {
+  if (
+    shouldPreserveApprovedAddedPartyExecutionTail(
+      text,
+      identities.map((id) => id.partyDisplayName),
+    )
+  ) {
+    return { text, count: 0 };
+  }
   const marker = signaturePatchStartIndex(text);
   const lines = text.split("\n");
   let replacements = 0;
@@ -450,7 +459,11 @@ function polishSignatureBlocksWithPartyIdentities(
   const hasPlaceholderSig =
     /\[your\s+company\s+name\]/i.test(existingSigBody) ||
     /\[service\s+provider\s+name\]/i.test(existingSigBody) ||
-    /name\s*:\s*_{6,}/i.test(existingSigBody);
+    (/name\s*:\s*_{6,}/i.test(existingSigBody) &&
+      !shouldPreserveApprovedAddedPartyExecutionTail(
+        text,
+        identities.map((id) => id.partyDisplayName),
+      ));
 
   if (hasPlaceholderSig && isSafeSignatureTailReplacement(text, marker)) {
     // Prefer patching from an existing witness so we never keep

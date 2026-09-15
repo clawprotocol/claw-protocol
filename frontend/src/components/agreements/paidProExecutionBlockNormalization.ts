@@ -40,6 +40,7 @@ import {
 import {
   corpusDeclaresConsultantClientOpening,
   restoreDeclaredConsultantClientPaper,
+  shouldPreserveApprovedAddedPartyExecutionTail,
 } from "./paidProDeclaredConsultantClientPaper";
 
 export {
@@ -233,12 +234,20 @@ function existingConsultantClientTailMatchesDeclared(text: string): boolean {
   if (witnessIdx < 0) return false;
   const tail = text.slice(witnessIdx);
   return declared.every((row) => {
-    const name = row.legalName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const role = row.roleLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return (
-      new RegExp(`${role}\\s*:\\s*${name}\\.?`, "i").test(tail) ||
-      new RegExp(`^\\s*${role}\\s*:\\s*\\n\\s*${name}\\.?`, "im").test(tail)
-    );
+    const sameLine = tail.split("\n").some((line) => {
+      const match = line.match(new RegExp(`^\\s*${role}\\s*:\\s*(.+)$`, "i"));
+      return Boolean(match && partyLegalNamesMatch(match[1], row.legalName));
+    });
+    if (sameLine) return true;
+    const headingIdx = tail.search(new RegExp(`^\\s*${role}\\s*:\\s*$`, "im"));
+    if (headingIdx < 0) return false;
+    const entity = tail
+      .slice(headingIdx)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)[1];
+    return Boolean(entity && !/^By:/i.test(entity) && partyLegalNamesMatch(entity, row.legalName));
   });
 }
 
@@ -627,7 +636,11 @@ export function enforcePaidProSingleExecutionBlock(
       repairs.push("execution_block:restore_consultant_client");
     }
   }
-  if (existingConsultantClientTailMatchesDeclared(text)) {
+  if (
+    existingConsultantClientTailMatchesDeclared(text) &&
+    (manifestLegalNames.length <= 2 ||
+      shouldPreserveApprovedAddedPartyExecutionTail(text, manifestLegalNames))
+  ) {
     text = stripRecitalFragmentExecutionLinesFromTail(text, repairs);
     const truncated = truncatePostCanonicalExecutionPollution(text, {
       expectedPartyCount: manifestLegalNames.length >= 2 ? manifestLegalNames.length : 2,

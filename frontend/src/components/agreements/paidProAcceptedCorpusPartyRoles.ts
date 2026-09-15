@@ -32,6 +32,21 @@ export function partyLegalNamesMatch(a: string, b: string): boolean {
   return na.startsWith(`${nb} `) || nb.startsWith(`${na} `);
 }
 
+/** True when the witness tail already names every supplied legal party. */
+export function executionTailBindsPartyNames(
+  corpus: string,
+  names: readonly string[],
+): boolean {
+  const witnessIdx = (corpus || "").search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return false;
+  const tail = corpus.slice(witnessIdx);
+  const wanted = names.map((name) => name.replace(/\s+/g, " ").trim()).filter((name) => name.length >= 2);
+  if (wanted.length < 2) return false;
+  return wanted.every((name) =>
+    tail.split("\n").some((line) => partyLegalNamesMatch(line.trim(), name)),
+  );
+}
+
 export type AcceptedCorpusPartyRole = "client" | "service_provider";
 
 export type AcceptedCorpusRoleAssignment = {

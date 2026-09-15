@@ -54,7 +54,8 @@ describe("paidProIntakeContactSubstitution", () => {
     );
     expect(contacts).toHaveLength(1);
     expect(contacts[0]?.email).toBe("alex.rivera@advisor.test");
-    expect(contacts[0]?.name).toMatch(/Alex Rivera/);
+    expect(contacts[0]?.name).toBe("Alex Rivera");
+    expect(contacts[0]?.name).not.toMatch(/Delaware/);
     expect(contacts[0]?.name).not.toMatch(/Harbor Peak Analytics LLC/);
     const aligned = alignIntakeSignerMetadataToLegalEntities(
       "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Alex Rivera, alex.rivera@advisor.test, is involved.",

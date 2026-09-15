@@ -15,6 +15,9 @@ import {
   persistableIdentityResolution,
 } from "./legalPartyIdentityClarification";
 import { bindRepresentativesToLegalParties } from "./legalPartyRepresentativeBind";
+import { applySignerPartyIdentityToAuthoritativeAgreement } from "./guidedDealCompletion/signerPartyIdentity";
+import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
+import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 
 const HARBOR = "Harbor Peak Analytics LLC";
 const IRONVALE = "Ironvale Manufacturing Inc.";
@@ -275,6 +278,87 @@ describe("legal party identity clarification", () => {
     expect(after).toMatch(/ADVISOR:\s*\nAlex Rivera/);
     expect(after).not.toMatch(/SERVICE PROVIDER:\s*\nIronvale Manufacturing Inc/);
     expect(after).not.toMatch(/Advisor shall/);
+  });
+
+  it("does not treat a governing-law state as Harbor's authorized signer", () => {
+    const before =
+      'This Services Agreement is entered into by and between Harbor Peak Analytics LLC ("Consultant") and Ironvale Manufacturing Inc. ("Client"). Consultant\'s authorized signer is ________.';
+    const after = applyIdentityResolutionToAuthorizedPaper(before, [
+      { name: HARBOR, role: "Consultant", signerName: "Delaware. Alex Rivera" },
+      { name: IRONVALE, role: "Client" },
+    ]);
+    expect(after).not.toContain("Consultant's authorized signer is Delaware. Alex Rivera");
+    expect(after).toContain("Consultant's authorized signer is ________.");
+  });
+
+  it("keeps an approved Consultant/Client/Advisor tail through freeze overlay", () => {
+    const accepted = [
+      `This Services Agreement (this "Agreement") is entered into by and between ${HARBOR} ("Consultant") and ${IRONVALE} ("Client"). Consultant, Client, and Advisor may be referred to individually as a "Party" and collectively as the "Parties".`,
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      "Ironvale Manufacturing Inc",
+      "By: __________________________",
+      "Name: Sam Ironvale",
+      "Title: _________________________",
+      "Date: _____________________________",
+      "",
+      "CONSULTANT:",
+      HARBOR,
+      "By: __________________________",
+      "Name: __________________________",
+      "Title: _________________________",
+      "Date: _____________________________",
+      "",
+      "ADVISOR:",
+      "Alex Rivera",
+      "By: __________________________",
+      "Name: Alex Rivera",
+      "Title: ________",
+      "Date: _____________________________",
+    ].join("\n");
+    const identities = [
+      {
+        index: 0,
+        partyDisplayName: HARBOR,
+        email: "pat.harbor@harbor.test",
+        representativeName: "Pat Harbor",
+        title: null,
+        blockHeading: "CLIENT",
+        isIndividual: false,
+      },
+      {
+        index: 1,
+        partyDisplayName: IRONVALE,
+        email: "sam.ironvale@ironvale.test",
+        representativeName: "Sam Ironvale",
+        title: null,
+        blockHeading: "SERVICE PROVIDER",
+        isIndividual: false,
+      },
+      {
+        index: 2,
+        partyDisplayName: "Alex Rivera",
+        email: "alex.rivera@advisor.test",
+        representativeName: "Alex Rivera",
+        title: null,
+        blockHeading: "ADVISOR",
+        isIndividual: true,
+      },
+    ];
+    const enforced = enforcePaidProSingleExecutionBlock(accepted, {
+      draftPartyNames: [HARBOR, IRONVALE, "Alex Rivera"],
+    }).text;
+    const reconciled = reconcileExecutionBlockToRoleIdentities(enforced, identities).text;
+    const overlaid = applySignerPartyIdentityToAuthoritativeAgreement(reconciled, identities, "", {
+      signatureRegionOnly: true,
+    }).text;
+    expect(overlaid).toMatch(/CLIENT:\s*\nIronvale Manufacturing Inc/);
+    expect(overlaid).toMatch(/CONSULTANT:\s*\nHarbor Peak Analytics LLC/);
+    expect(overlaid).toMatch(/ADVISOR:\s*\nAlex Rivera/);
+    expect(overlaid).not.toMatch(/CLIENT:\s*\nHarbor Peak Analytics LLC/);
+    expect(overlaid.match(/Name: Delaware\. Alex Rivera/g)).toBeNull();
   });
 
   it("does not invent a numbered party when applying a representative to existing paper", () => {
