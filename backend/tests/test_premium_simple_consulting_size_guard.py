@@ -158,3 +158,27 @@ class TestSectionCount:
     def test_counts_top_level_numbered_sections(self) -> None:
         doc = "1. One\n1.1 Sub\n2. Two\n3. Three\n"
         assert count_numbered_top_level_sections(doc) == 3
+
+    def test_section_count_alone_is_advisory_not_a_hard_quality_fail(self) -> None:
+        sections = [f"{i}. Section {i}. Operative consulting text for Acme Corp and Jane Doe LLC." for i in range(1, 16)]
+        body = "CONSULTING SERVICES AGREEMENT\n\n" + "\n\n".join(sections)
+        while len(body) < 6200:
+            body += "\n\nClient pays Jane Doe LLC the stated $8,500 fixed fee under California law."
+        ok, reasons = evaluate_simple_consulting_document_length(
+            body,
+            intake=TEST248_STYLE_INTAKE,
+            context=_ctx(),
+            scenario_category="freelancer_service",
+        )
+        assert any("simple_consulting_section_bloat" in r for r in reasons)
+        assert ok is True
+        gate_ok, gate_reasons = evaluate_premium_full_draft_quality(
+            intake=TEST248_STYLE_INTAKE,
+            context=_ctx(),
+            draft_title="Consulting Services Agreement",
+            draft_family="services",
+            draft_document_text=body,
+            scenario_category="freelancer_service",
+        )
+        assert not any("simple_consulting_section_bloat" in r for r in gate_reasons)
+        assert gate_ok is True or not any("simple_consulting_section_bloat" in r for r in gate_reasons)

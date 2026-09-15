@@ -153,6 +153,27 @@ Client will pay a total project fee.
     expectTest94ScopePreserved(result.text);
   });
 
+  it("does not treat generated dashboard extras as customer facts when intake only named AI workflow", () => {
+    const invented =
+      "1. Purpose and Scope\nService Provider will provide AI workflow implementation, dashboard setup, onboarding assistance, and light ongoing maintenance for Client.";
+    const facts = extractProtectedCommercialFacts(
+      "Consulting agreement. Scope is AI workflow implementation. Fixed fee $48,000.",
+      invented,
+    );
+    expect(facts.map((fact) => fact.canonical)).toContain("AI workflow implementation");
+    expect(facts.map((fact) => fact.canonical)).not.toEqual(
+      expect.arrayContaining(["dashboard setup", "onboarding assistance", "light ongoing maintenance"]),
+    );
+    const preserved = preserveProtectedCommercialFacts({
+      text: invented,
+      intakeText: "Consulting agreement. Scope is AI workflow implementation. Fixed fee $48,000.",
+      draftText: invented,
+    });
+    expect(preserved.text).toMatch(/AI workflow implementation/i);
+    expect(preserved.text).not.toMatch(/dashboard setup/i);
+    expect(preserved.text).not.toMatch(/onboarding assistance/i);
+  });
+
   it("canonical snapshots expose the commercial specificity score", () => {
     const snapshot = buildCanonicalAgreementSnapshot({
       surface: "test94_snapshot_specificity",

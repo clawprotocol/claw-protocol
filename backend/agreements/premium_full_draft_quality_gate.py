@@ -609,8 +609,9 @@ def evaluate_premium_full_draft_quality(
         context=context,
         scenario_category=scenario_category,
     )
-    if not _simple_ok:
-        reasons.extend(_simple_reasons)
+    hard_simple = [r for r in _simple_reasons if not str(r).startswith("simple_consulting_section_bloat:")]
+    if hard_simple:
+        reasons.extend(hard_simple)
 
     # Hard drift checks: do not let generic shells pass as "Pro" (wrong state, placeholder parties).
     if re.search(r"\boklahoma\b", intake_low) and "delaware" not in intake_low:

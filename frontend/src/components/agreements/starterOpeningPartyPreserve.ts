@@ -20,6 +20,7 @@ import {
 } from "./canonicalPartyRoleAuthority";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { repairDraftPartiesFromIntakeAuthority } from "./partySlotIdentityNormalize";
+import { applyExplicitIntakeRolesToParties } from "./legalPartyRepresentativeBind";
 
 const GENERIC_STARTER_PARTY_ROLE = new Set(["", "party", "parties", "signer", "signatory"]);
 
@@ -54,6 +55,19 @@ export function inferStarterCommercialPartyRoles(
   const parties = Array.isArray(draft.parties) ? [...draft.parties] : [];
   if (parties.length !== 2) return draft;
   if (!isStarterServicesAgreementLike(draft, intakeText)) return draft;
+
+  const withExplicitRoles = applyExplicitIntakeRolesToParties(parties, intakeText);
+  const explicitRolesHeld = withExplicitRoles.some((party, index) => {
+    const before = String(parties[index]?.role ?? "").trim();
+    const after = String(party.role ?? "").trim();
+    return after && after !== before && !GENERIC_STARTER_PARTY_ROLE.has(after.toLowerCase());
+  }) || withExplicitRoles.every((party) => {
+    const role = String(party.role ?? "").trim().toLowerCase();
+    return Boolean(role && !GENERIC_STARTER_PARTY_ROLE.has(role) && !isSignerTitleLikeRole(role));
+  });
+  if (explicitRolesHeld) {
+    return { ...draft, parties: withExplicitRoles };
+  }
 
   const authority = resolveStarterTwoPartyCommercialAuthority(
     intakeText,

@@ -35,6 +35,11 @@ import {
 } from "./premiumIntakeAskCoverage";
 import { elevatePremiumPaymentTermsFromIntake } from "./premiumPaymentTermsElevate";
 import { draftHasPlaceholderParties } from "./reviewPlaceholderGuard";
+import {
+  applyExplicitIntakeRolesToParties,
+  bindRepresentativesToLegalParties,
+} from "./legalPartyRepresentativeBind";
+import { looksLikeEmail } from "./recipientEmailValidation";
 import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
 import { buildCheckoutPreflightAgreementPreviewText } from "./paidProCheckoutPreviewPreflightCache";
 import {
@@ -1049,6 +1054,23 @@ function meetsPremiumSubstanceFloor(draft: ParsedDraftShape, rawIntake: string):
 export function extractCleanPremiumParties(intakeText: string, draft: ParsedDraftShape): { name: string; role: string }[] {
   const rawIntake = intakeText.trim();
   const fam = draft.agreement_family ?? null;
+  const rawParties = draft.parties || [];
+  const hasRepresentativeRows = rawParties.some(
+    (party) =>
+      looksLikeEmail(nz(party.name)) ||
+      looksLikeEmail(nz(party.email)) ||
+      /\b(?:signer|signatory|email)\b/i.test(nz(party.role)),
+  );
+  if (hasRepresentativeRows) {
+    const bound = bindRepresentativesToLegalParties(rawParties, rawIntake);
+    const authoritative = applyExplicitIntakeRolesToParties(bound.parties, rawIntake);
+    if (authoritative.length >= 2 && !draftHasPlaceholderParties({ ...draft, parties: authoritative })) {
+      return authoritative.map((p, idx) => ({
+        name: coercePartyNameForRecipientAutoFill(nz(p.name), idx <= 1 ? (idx as 0 | 1) : 1, fam),
+        role: nz(p.role) || "party",
+      }));
+    }
+  }
   if ((draft.parties?.length ?? 0) >= 2 && !draftHasPlaceholderParties(draft)) {
     return (draft.parties || []).map((p, idx) => ({
       name: coercePartyNameForRecipientAutoFill(nz(p.name), idx <= 1 ? (idx as 0 | 1) : 1, fam),

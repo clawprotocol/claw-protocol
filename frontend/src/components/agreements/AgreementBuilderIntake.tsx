@@ -1146,10 +1146,15 @@ import {
   longestPlainForAgreementPersist,
   materialPremiumPipelineCorpusMaxLen,
   pickAuthoritativePlainForSendHandoff,
+  plainForCreateRecordPersist,
   SEND_HANDOFF_AUTHORITATIVE_MIN_LEN,
   shouldKeepReviewDisplayAfterProHydrate,
   shouldMinimalProSendRecipientChrome,
 } from "./sendHandoffAuthoritativeCorpus";
+import {
+  applyExplicitIntakeRolesToParties,
+  bindRepresentativesToLegalParties,
+} from "./legalPartyRepresentativeBind";
 import { getOrInitSessionAgreementGenerationId, shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
   PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_COPY_MS,
@@ -5076,12 +5081,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const mergeParsedForApiPersist = React.useCallback(
     (parsedIn: ParsedDraftShape): ParsedDraftShape => {
       let base = parsedIn;
-      if (productionDraftPrimaryReviewSurface) {
-        const longest = longestPlainForAgreementPersist(parsedIn, agreementDocumentTextRef.current);
-        if (longest.trim().length > String(parsedIn.purpose ?? "").trim().length) {
-          base = { ...parsedIn, purpose: longest };
-        }
+    if (productionDraftPrimaryReviewSurface && hasMaterialPremiumPipelineCorpus(parsedIn)) {
+      const longest = longestPlainForAgreementPersist(parsedIn, agreementDocumentTextRef.current);
+      if (longest.trim().length > String(parsedIn.purpose ?? "").trim().length) {
+        base = { ...parsedIn, purpose: longest };
       }
+    }
       if (!productionDraftPrimaryReviewSurface) return base;
       if (!agreementDocumentDirtyRef.current) return base;
       const doc = agreementDocumentTextRef.current.trim();
@@ -5736,7 +5741,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     const o = draft as Record<string, unknown>;
     const partiesIn = Array.isArray(o.parties) ? o.parties : [];
-    const parties: { name: string; role: string }[] = [];
+    const parties: { name: string; role: string; email?: string; signerName?: string; signerTitle?: string }[] = [];
     for (const p of partiesIn) {
       if (!p || typeof p !== "object") continue;
       const rec = p as Record<string, unknown>;
@@ -5744,8 +5749,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const cleaned = sanitizePartiesInput(rawName);
       const name = cleaned || rawName;
       const role = String(rec.role ?? "party").trim() || "party";
-      if (name) parties.push({ name, role });
+      const email = String(rec.email ?? "").trim();
+      const signerName = String(rec.signerName ?? rec.signer_name ?? "").trim();
+      const signerTitle = String(rec.signerTitle ?? rec.signer_title ?? "").trim();
+      if (name) {
+        parties.push({
+          name,
+          role,
+          ...(email ? { email } : {}),
+          ...(signerName ? { signerName } : {}),
+          ...(signerTitle ? { signerTitle } : {}),
+        });
+      }
     }
+    const boundParse = bindRepresentativesToLegalParties(parties, String(intakeFallback || ""));
+    const boundParties = applyExplicitIntakeRolesToParties(boundParse.parties, String(intakeFallback || ""));
     const dueRaw = o.due_date != null ? String(o.due_date).trim() : "";
     const durationRaw = o.duration != null ? String(o.duration).trim() : "";
     const apiGovRaw = String(o.jurisdiction ?? "").trim();
@@ -5756,7 +5774,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       title: String(o.title ?? "").trim(),
       jurisdiction:
         apiGov || (govFallback && !isLikelyCategoryOrTradeLabel(govFallback) ? govFallback : "") || "TBD",
-      parties,
+      parties: boundParties,
       purpose: apiPurpose || (scopeFallback && !isLikelyCategoryOrTradeLabel(scopeFallback) ? scopeFallback : ""),
       payment_terms: String(o.payment_terms ?? "").trim(),
       duration: durationRaw || null,
@@ -5961,14 +5979,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ): Promise<{ id: string; postDraft: AgreementDraft | null }> {
     const reviewFirstHandoffPersist = Boolean(options?.reviewFirstHandoffPersist);
     const merged = mergeParsedForApiPersist(parsed);
-    const persistLegalEntities = (merged.parties ?? [])
+    const intakeForPersist = intakeCombinedRef.current || intakeCombined;
+    const boundPersist = bindRepresentativesToLegalParties(merged.parties ?? [], intakeForPersist);
+    const persistDraft = {
+      ...merged,
+      parties: applyExplicitIntakeRolesToParties(boundPersist.parties, intakeForPersist),
+    };
+    const persistLegalEntities = (persistDraft.parties ?? [])
       .map((party) => String(party.name || "").trim())
       .filter(Boolean);
     const persistSeed = runPaidProSignerMetadataAuthoritySeed({
       stage: "post_new_draft_persist",
       legalEntities: persistLegalEntities,
-      intakeText: intakeCombinedRef.current || intakeCombined,
-      draft: merged,
+      intakeText: intakeForPersist,
+      draft: persistDraft,
       uiSignerNames: partySignerNamesRef.current,
       uiSignerTitles: partySignerTitlesRef.current,
       uiSignerEmails: [
@@ -5978,8 +6002,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ],
       authoritativePartyCount: persistLegalEntities.length >= 2 ? persistLegalEntities.length : undefined,
     });
-    const persistParties = partiesForServerPersistFromSeed(persistSeed.draft?.parties ?? merged.parties ?? [], persistSeed);
-    const persistPurpose = longestPlainForAgreementPersist(merged, agreementDocumentTextRef.current).trim() || merged.purpose;
+    const persistParties = partiesForServerPersistFromSeed(persistSeed.draft?.parties ?? persistDraft.parties ?? [], persistSeed);
+    const persistPurpose = plainForCreateRecordPersist(persistDraft, agreementDocumentTextRef.current).trim() || persistDraft.purpose;
     const {
       payment: _payment,
       termination_summary: _ts,
@@ -14688,7 +14712,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (existingId) {
         const merged = mergeParsedForApiPersist(parsed);
         const purposeForApi = (merged.purpose || "").trim() ? merged.purpose : parsed.purpose;
-        const purposeLong = longestPlainForAgreementPersist(merged, agreementDocumentTextRef.current).trim();
+        const purposeLong = plainForCreateRecordPersist(merged, agreementDocumentTextRef.current).trim();
         const purposePush =
           purposeLong.length >= String(purposeForApi ?? "").trim().length ? purposeLong : purposeForApi;
         const pushField = async (field: string, value: unknown) => {

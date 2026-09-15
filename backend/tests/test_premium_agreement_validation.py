@@ -126,6 +126,18 @@ def test_total_fee_of_total_fee_fails() -> None:
     assert any(f.code == "duplicated_total_fee_phrase" for f in result.failures)
 
 
+def test_applicable_party_is_unresolved_obligation_not_an_arbitrary_party_choice() -> None:
+    result = validatePremiumAgreementDraft(
+        authoritativeDraft=_valid_minimal() + "\nThe applicable Party shall perform the remaining services.",
+        agreementIntelligence=_intel(),
+        originalIntake="Texas law. Harbor Peak Analytics LLC is Consultant. Ironvale Manufacturing Inc. is Client.",
+    )
+    assert result.passed is False
+    assert any(f.code == "fallback_applicable_party" for f in result.failures)
+    # Do not invent a party assignment for the withheld 20260915 corpus.
+    assert not any("Harbor Peak" in (f.message or "") and "selected" in (f.message or "").lower() for f in result.failures)
+
+
 def test_applicable_party_fallback_fails() -> None:
     result = validatePremiumAgreementDraft(
         authoritativeDraft=_valid_minimal() + "\nThe applicable Party shall insert the correct obligation.",

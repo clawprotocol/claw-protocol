@@ -3,7 +3,7 @@
 Authoritative repository: `lawdog-repo`  
 Branch: `stabilize/phase3b-paid-entry`  
 Register date: 2026-09-14 (America/Chicago) / 2026-09-14 UTC  
-Four-sample live increment: `QUALITY_EVAL_NEXT_LIVE_AUTHORIZATION_PREPARED_2026-09-14.md` (owner-authorized 2026-09-15 for the stated $2.50 / 4-sample grant; two-sample inactive sidecar preserved and not activated)  
+Four-sample live increment: `QUALITY_EVAL_NEXT_LIVE_AUTHORIZATION_PREPARED_2026-09-14.md` (owner-authorized 2026-09-15 for the stated $2.50 / 4-sample grant; two-sample inactive sidecar preserved and not activated). Executed once as `quality-eval-live/20260915T125731Z-69053` on `bb66046c`; **stopped after Harbor premium 503**. Report: `QUALITY_EVAL_LIVE_20260915T125731Z.md`. Not a quality pass. Local correction of the demonstrated Harbor parse/persist/scope/validation defects is on this working tree; it is **not** a fresh-model rematch and does **not** authorize another `--live`.  
 Continuity C3/C4 close: `68775a946b09a48708fb4ef6eff55e327acea7ed+src-185caa72f8f6a3c6c444dd22163afa65d032219b+run-20260914T143749Z-71780`  
 Date/completion official identity: `96cd7248d803a8bdf2d8072ab409d242e6a255f5+src-ba7dbe25691bf522da2a95a9b68db31fbacc694b+run-20260914T155024Z-82989`  
 Official verified fingerprint (C5 close, unchanged): `ba7dbe25691bf522da2a95a9b68db31fbacc694b`  
@@ -41,12 +41,12 @@ Owners are unknown unless a checkpoint names one.
 | Field | Value |
 |---|---|
 | Customer impact | Harbor/Ironvale paper from the live model must be commercially usable, not only stub-shaped. |
-| Evidence date/source | Failed live increment `quality-eval-live/20260914T195201Z-5037` preserved. Current offline correction `quality-eval-offline-journey/20260914T220448Z-23971`: Harbor live-replay + SaaS stub, desktop+mobile, `model_calls=0`, `OFFLINE_JOURNEY_PASS`. Prior passing offline dirs preserved. Ledger inspected only. |
-| Status | **offline customer-meaning correction verified** through the production path against captured Harbor bodies. **Fresh live Harbor + SaaS quality remains unverified.** Replay is not fresh-model evidence. Official stub gate on `src-60a08067992d` is green; that is not live-model quality. |
+| Evidence date/source | Failed four-sample live increment `quality-eval-live/20260915T125731Z-69053` on `bb66046c` (`QUALITY_EVAL_LIVE_20260915T125731Z.md`). Matching rematches: preflight `20260915T125219Z-68447`, offline Harbor+SaaS `20260915T125322Z-68664`. Prior failed Harbor live `20260914T195201Z-5037` preserved. Local stub rematches on `c912212c` / `bb66046c` are not fresh-model quality. |
+| Status | **Fresh live Harbor failed** at premium 503 `agreement_validation_failed` (`fallback_applicable_party` + 15-section bloat) after one primary and one repair. SaaS, three-party, and four-party samples **not generated**. Local correction of those demonstrated defects is replay-only (`harborLive20260915.sanitized.ts` + production-path tests). The rejected premium corpus was **not captured** and was not reconstructed. `identity.json` pre-labels are not outcomes. **Two-to-four-party U.S.-law fresh-model quality remains unverified.** |
 | Owner | unknown |
-| Exit criterion | Separately authorized live `gpt-5.4` run of Harbor consulting and Orion Harbor/Northwind SaaS through production draft/clarification/display/reopen. Accept only if the opening does not invent an undefined Effective Date, consulting completion is asked or already supplied without invented milestones/SLAs, the SaaS control stays hosted-access-only, and `canProceedWithoutAnswer` remains true. Exhausted `primary` (2/2) and `bootstrap_parse` (2/2) block that run until a new approval. Remaining dollars do not authorize those buckets. |
+| Exit criterion | Separately authorized live `gpt-5.4` run of Harbor, Orion/Northwind SaaS, three-party IP/royalty, and four-party precision-medicine through production draft/clarification/display/reopen/final records. Remaining increment inventory does **not** authorize another `--live` without a new owner grant. |
 
-Ledger snapshot (inspected, not modified): ceiling **$8.00** / stored ceiling `16000000`, model `gpt-5.4`, not halted, attempts **15**, known-usage **$0.366909**, reserved **$0.970711** (1,941,421 units), unknown-usage **0**. Buckets used: `primary` 3, `parse` 4, `bootstrap_parse` 3, `repair` 2, `bootstrap_one_pager` 3. Under the previous increment (sidecar still inactive): **1 primary remaining**, **0 repair remaining**, global 15/20 if attached. Do not execute or renew.
+Ledger snapshot after `20260915T125731Z-69053` (not reset): ceiling **$8.00**, model `gpt-5.4`, not halted, attempts **19**, known-usage **$0.4888105**, reserved **$1.329615** (2,659,230 units), unknown-usage **0**. Buckets used: `primary` 4, `parse` 5, `bootstrap_parse` 4, `repair` 3, `bootstrap_one_pager` 3. Against the 2026-09-15 policy: +3 primary, +3 parse, +3 bootstrap_parse, ≤4 clarification, +3 repair remaining if later re-approved; global **19/35**. Do not execute or renew without a new grant. The inactive two-sample sidecar stays inactive.
 
 ## 3. Billing and entitlements
 

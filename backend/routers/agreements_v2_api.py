@@ -3631,7 +3631,7 @@ def _unwrap_llm_document_text(raw: str) -> str:
     return text
 
 
-def _normalize_parsed_draft(raw: Dict[str, Any]) -> AgreementDraftCreate:
+def _normalize_parsed_draft(raw: Dict[str, Any], intake_text: str = "") -> AgreementDraftCreate:
     parties_in = raw.get("parties") if isinstance(raw.get("parties"), list) else []
     tmp: List[AgreementParty] = []
     for p in parties_in:
@@ -3652,6 +3652,24 @@ def _normalize_parsed_draft(raw: Dict[str, Any]) -> AgreementDraftCreate:
                 **_party_signer_kwargs(p),
             )
         )
+    if intake_text:
+        from backend.agreements.legal_party_representative_bind import bind_representatives_to_legal_parties
+
+        bound = bind_representatives_to_legal_parties([p.model_dump(by_alias=True) for p in tmp], intake_text)
+        rebound: List[AgreementParty] = []
+        for p in bound.get("parties") or []:
+            if not isinstance(p, dict):
+                continue
+            rebound.append(
+                AgreementParty(
+                    name=str(p.get("name") or "").strip(),
+                    role=str(p.get("role") or "party").strip() or "party",
+                    email=str(p.get("email") or "").strip() or None,
+                    **_party_signer_kwargs(p),
+                )
+            )
+        if rebound:
+            tmp = rebound
     parties = _ensure_agreement_parties_have_ids(tmp)
     due_date = str(raw.get("due_date") or "").strip() or None
     duration = str(raw.get("duration") or "").strip() or None
@@ -3684,11 +3702,11 @@ _PREMIUM_FAMILY_HINTS = frozenset(
 _PREMIUM_CONFIDENCE = frozenset({"low", "medium", "high"})
 
 
-def _parse_premium_intake_result(raw: Dict[str, Any]) -> Tuple[AgreementDraftCreate, AgreementParseExtract]:
+def _parse_premium_intake_result(raw: Dict[str, Any], intake_text: str = "") -> Tuple[AgreementDraftCreate, AgreementParseExtract]:
     """
     Build validated draft from LLM JSON; pull optional extract keys without letting unknown keys break draft validation.
     """
-    draft = _normalize_parsed_draft(raw)
+    draft = _normalize_parsed_draft(raw, intake_text)
     material_asks: List[str] = []
     ma = raw.get("material_asks")
     if isinstance(ma, list):
@@ -4517,7 +4535,7 @@ def _revise_llm_once(
             airlock_profile="agreement_outbound",
         )
         parsed = _extract_json_object(llm_text)
-        return _normalize_parsed_draft(parsed), True
+        return _normalize_parsed_draft(parsed, instruction), True
     except Exception:
         return _revise_instruction_fallback(current, instruction), False
 
@@ -5087,9 +5105,9 @@ def parse_agreement_intake(request: Request, body: AgreementParseRequest) -> Agr
         )
         parsed = _extract_json_object(llm_text)
         if body.ai_model_class == "premium":
-            draft_out, extract_out = _parse_premium_intake_result(parsed)
+            draft_out, extract_out = _parse_premium_intake_result(parsed, body.intake_text)
         else:
-            draft_out = _normalize_parsed_draft(parsed)
+            draft_out = _normalize_parsed_draft(parsed, body.intake_text)
             extract_out = None
         ip = request.client.host if request.client else "unknown"
         record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=ip or "unknown")

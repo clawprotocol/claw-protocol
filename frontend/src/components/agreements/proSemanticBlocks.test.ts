@@ -94,6 +94,54 @@ describe("proSemanticBlocks", () => {
     expect(textRetainsSemanticBlock(block, sectionedScope(renderSemanticBlock(block)))).toBe(true);
   });
 
+  it("does not require unsupplied dashboard or onboarding from an AI-workflow mention", () => {
+    const block = scopeBlock(
+      "Consulting agreement. Scope is AI workflow implementation. Fixed fee $48,000. Delaware law.",
+    );
+    expect(block.requiredPhrases).toEqual(["AI workflow implementation"]);
+    expect(block.suggestedPhrases).toEqual([
+      "dashboard setup",
+      "automation support",
+      "onboarding assistance",
+      "light ongoing maintenance",
+    ]);
+    const rendered = renderSemanticBlock(block);
+    expect(rendered).toMatch(/AI workflow implementation/i);
+    expect(rendered).not.toMatch(/dashboard setup/i);
+    expect(rendered).not.toMatch(/onboarding assistance/i);
+    expect(rendered).not.toMatch(/light ongoing maintenance/i);
+  });
+
+  it("does not promote generated extras when intake only supplied AI workflow implementation", () => {
+    const invented =
+      "1. Purpose and Scope\nService Provider will provide AI workflow implementation, dashboard setup, automation support, onboarding assistance, and light ongoing maintenance for Client.";
+    const block = extractProtectedCommercialClusters(
+      "Consulting agreement. Scope is AI workflow implementation. Fixed fee $48,000. Delaware law.",
+      invented,
+    ).find((candidate) => candidate.id === "scope_block");
+    expect(block?.requiredPhrases).toEqual(["AI workflow implementation"]);
+    expect(renderSemanticBlock(block!)).not.toMatch(/dashboard setup|onboarding assistance|light ongoing maintenance/i);
+    const reconstructed = reconstructProSectionsFromSemanticBlocks(invented, {
+      intakeText: "Consulting agreement. Scope is AI workflow implementation. Fixed fee $48,000. Delaware law.",
+      draftText: invented,
+    });
+    expect(reconstructed.text).toMatch(/AI workflow implementation/i);
+    expect(reconstructed.text).not.toMatch(/dashboard setup/i);
+    expect(reconstructed.text).not.toMatch(/onboarding assistance/i);
+  });
+
+  it("keeps explicitly supplied dashboard and onboarding as agreed scope", () => {
+    const block = scopeBlock(TEST95_AI);
+    expect(block.requiredPhrases).toEqual([
+      "AI workflow implementation",
+      "dashboard setup",
+      "automation support",
+      "onboarding assistance",
+      "light ongoing maintenance",
+    ]);
+    expect(block.suggestedPhrases ?? []).toEqual([]);
+  });
+
   it("does not count isolated words as retained cluster meaning", () => {
     const scattered = `
 1. Purpose and Scope

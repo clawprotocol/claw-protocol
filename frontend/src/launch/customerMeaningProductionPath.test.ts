@@ -12,10 +12,30 @@ import {
   HARBOR_SANITIZED_PREMIUM_DOCUMENT,
 } from "./fixtures/harborCustomerMeaning.sanitized";
 import {
+  HARBOR_LIVE_20260915_INTAKE,
+  HARBOR_LIVE_20260915_PERSISTED_RECORD,
+  HARBOR_LIVE_20260915_PREMIUM_PARSE,
+  HARBOR_LIVE_20260915_VALIDATION,
+} from "./fixtures/harborLive20260915.sanitized";
+import {
+  applyExplicitIntakeRolesToParties,
+  bindRepresentativesToLegalParties,
+} from "../components/agreements/legalPartyRepresentativeBind";
+import { extractProtectedCommercialClusters, renderSemanticBlock } from "../components/agreements/proSemanticBlocks";
+import { extractCleanPremiumParties } from "../components/agreements/premiumCompletionPipeline";
+import { inferStarterCommercialPartyRoles } from "../components/agreements/starterOpeningPartyPreserve";
+import { plainForCreateRecordPersist } from "../components/agreements/sendHandoffAuthoritativeCorpus";
+import {
   applyChangesExplainedByAnswers,
+  checkFourPartyCustomerMeaning,
   checkHarborFirstDraftMeaning,
   checkSaasCustomerMeaning,
+  checkThreePartyCustomerMeaning,
 } from "./qualityEvalCustomerPaper";
+import {
+  RELEASE_SCOPE_FOUR_PARTY_FIRST_DRAFT_SANITIZED,
+  RELEASE_SCOPE_THREE_PARTY_FIRST_DRAFT_SANITIZED,
+} from "./fixtures/releaseScopeMultiparty.sanitized";
 import {
   clearUnconfirmedServiceStartEffectiveDate,
   normalizeParsedDraftLegalConcepts,
@@ -237,5 +257,141 @@ describe("customer-meaning production path from sanitized committed Harbor fixtu
     expect(checkSaasCustomerMeaning(guarded).ok).toBe(true);
     expect(guarded).not.toMatch(/AI workflow implementation/i);
     expect(guarded).not.toMatch(/Consultant shall perform/i);
+  });
+});
+
+describe("Harbor 20260915 live-failure local correction", () => {
+  it("records that the rejected premium corpus was not preserved", () => {
+    expect(HARBOR_LIVE_20260915_VALIDATION.document_text_preserved).toBe(false);
+    expect(HARBOR_LIVE_20260915_VALIDATION.validation_failures).toContain("fallback_applicable_party");
+  });
+
+  it("corrects premium-parse parties, persist roles, and unsupported scope on the production path", () => {
+    const bound = bindRepresentativesToLegalParties(
+      HARBOR_LIVE_20260915_PREMIUM_PARSE.parties,
+      HARBOR_LIVE_20260915_INTAKE,
+    );
+    const parties = applyExplicitIntakeRolesToParties(bound.parties, HARBOR_LIVE_20260915_INTAKE);
+    expect(parties).toHaveLength(2);
+    expect(parties[0]).toMatchObject({ name: "Harbor Peak Analytics LLC", role: "Consultant", signerName: "Maya Chen" });
+    expect(parties[1]).toMatchObject({ role: "Client", signerName: "Jordan Hale" });
+
+    const inverted = inferStarterCommercialPartyRoles(
+      asDraft({
+        ...HARBOR_LIVE_20260915_PERSISTED_RECORD,
+        parties: HARBOR_LIVE_20260915_PERSISTED_RECORD.parties,
+        payment_terms: "$48,000",
+        agreement_family: "services_agreement",
+      }),
+      HARBOR_LIVE_20260915_INTAKE,
+    );
+    expect(inverted.parties?.[0]?.role).toBe("Consultant");
+    expect(inverted.parties?.[1]?.role).toBe("Client");
+
+    const persistPurpose = plainForCreateRecordPersist(
+      asDraft({
+        purpose: "AI workflow implementation",
+        payment_terms: "$48,000",
+        parties,
+      }),
+      HARBOR_LIVE_20260915_PERSISTED_RECORD.purpose,
+    );
+    expect(persistPurpose).toBe("AI workflow implementation");
+    expect(persistPurpose).not.toMatch(/dashboard setup/i);
+
+    const scope = extractProtectedCommercialClusters(HARBOR_LIVE_20260915_INTAKE).find((b) => b.id === "scope_block");
+    expect(scope?.requiredPhrases).toEqual(["AI workflow implementation"]);
+    expect(renderSemanticBlock(scope!)).not.toMatch(/onboarding assistance/i);
+
+    const outgoing = extractCleanPremiumParties(HARBOR_LIVE_20260915_INTAKE, asDraft({
+      purpose: "AI workflow implementation",
+      payment_terms: "$48,000",
+      parties: HARBOR_LIVE_20260915_PREMIUM_PARSE.parties,
+    }));
+    expect(outgoing.map((p) => p.role)).toEqual(["Consultant", "Client"]);
+    expect(outgoing[0]?.name).toMatch(/Harbor Peak/);
+
+    const request = buildPremiumFullDraftContext(
+      asDraft({
+        purpose: "AI workflow implementation",
+        payment_terms: "$48,000",
+        parties,
+        jurisdiction: "Delaware",
+        duration: "twelve months",
+      }),
+    );
+    expect(request.parties).toEqual([
+      { name: "Harbor Peak Analytics LLC", role: "Consultant" },
+      { name: expect.stringMatching(/Ironvale Manufacturing Inc/), role: "Client" },
+    ]);
+    expect(request.purpose).toBe("AI workflow implementation");
+    expect(request.effective_date).toBeNull();
+  });
+
+  it("keeps Harbor Consultant→Client economics through Apply, saved retrieval, and reopen", () => {
+    const first = [
+      'This Consulting Services Agreement is entered into by and between Harbor Peak Analytics LLC ("Consultant") and Ironvale Manufacturing Inc. ("Client").',
+      "1. Services",
+      "Consultant will provide consulting services focused on AI workflow implementation.",
+      "2. Term",
+      "The term begins on October 1, 2026 and continues for twelve (12) months.",
+      "3. Fees",
+      "Client will pay Consultant a fixed fee of $48,000.",
+      "4. Ownership",
+      "Consultant owns pre-existing tools. Client owns deliverables after payment.",
+      "11. Governing Law",
+      "Delaware.",
+    ].join("\n");
+    expect(applyChangesExplainedByAnswers(first, first, HARBOR_ANSWERS).ok).toBe(true);
+    expect(first).toMatch(/Client will pay Consultant a fixed fee of \$48,000/);
+    expect(first).not.toMatch(/Consultant will pay Client/);
+    expect(checkHarborFirstDraftMeaning(first).reasons).not.toContain("missing_supplied_scope");
+
+    const persisted = {
+      ...HARBOR_LIVE_20260915_PERSISTED_RECORD,
+      parties: applyExplicitIntakeRolesToParties(
+        bindRepresentativesToLegalParties(HARBOR_LIVE_20260915_PERSISTED_RECORD.parties, HARBOR_LIVE_20260915_INTAKE)
+          .parties,
+        HARBOR_LIVE_20260915_INTAKE,
+      ),
+      purpose: plainForCreateRecordPersist(
+        asDraft({
+          purpose: "AI workflow implementation",
+          payment_terms: "$48,000",
+          parties: HARBOR_LIVE_20260915_PERSISTED_RECORD.parties,
+        }),
+        HARBOR_LIVE_20260915_PERSISTED_RECORD.purpose,
+      ),
+    };
+    const retrieved = structuredClone(persisted);
+    const reopened = structuredClone(retrieved);
+    expect(retrieved.parties[0]).toMatchObject({ name: "Harbor Peak Analytics LLC", role: "Consultant" });
+    expect(retrieved.parties[1]).toMatchObject({ role: "Client" });
+    expect(retrieved.purpose).toBe("AI workflow implementation");
+    expect(reopened.parties).toEqual(retrieved.parties);
+    expect(reopened.purpose).toBe(retrieved.purpose);
+    expect(retrieved.purpose).not.toMatch(/dashboard setup/i);
+  });
+
+  it("does not reconstruct the withheld 20260915 rejected corpus and keeps unresolved applicable-party as a hard fail", () => {
+    expect(HARBOR_LIVE_20260915_VALIDATION.document_text_preserved).toBe(false);
+    expect(HARBOR_LIVE_20260915_VALIDATION.note).toMatch(/not captured/i);
+    expect(HARBOR_LIVE_20260915_VALIDATION.schema_validation_reasons).toContain(
+      "simple_consulting_section_bloat:sections=15>14",
+    );
+    const ask = dateMeaningMaterialItem({ intakeRaw: HARBOR_LIVE_20260915_INTAKE, body: "" });
+    expect(ask?.canProceedWithoutAnswer).toBe(true);
+    expect(ask?.question).toMatch(/October 1, 2026 service start/);
+  });
+
+  it("retains three- and four-party who-owes-what controls", () => {
+    expect(checkThreePartyCustomerMeaning(RELEASE_SCOPE_THREE_PARTY_FIRST_DRAFT_SANITIZED)).toEqual({
+      ok: true,
+      reasons: [],
+    });
+    expect(checkFourPartyCustomerMeaning(RELEASE_SCOPE_FOUR_PARTY_FIRST_DRAFT_SANITIZED)).toEqual({
+      ok: true,
+      reasons: [],
+    });
   });
 });

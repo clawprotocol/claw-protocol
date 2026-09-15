@@ -406,25 +406,35 @@ export function renderMilestonePaymentsSubsection(context: FinalAgreementCompile
 }
 
 function renderServicesScopeSubsection(context: FinalAgreementCompilerIntegrityContext): string[] {
-  const source = `${context.intakeText ?? ""}\n${context.draftText ?? ""}`;
-  if (/AI workflow implementation|dashboard setup|automation support/i.test(source)) {
-    return [
-      "- AI workflow implementation.",
-      "- Dashboard setup.",
-      "- Automation support, onboarding assistance, and light ongoing maintenance.",
-    ];
-  }
-  if (/paid advertising management|email marketing|campaign optimization/i.test(source)) {
-    return [
-      "- Paid advertising management, launch coordination, and email marketing.",
-      "- Analytics reporting, creative strategy, and campaign optimization.",
-    ];
-  }
-  if (/operations consulting|advisory calls|workflow recommendations/i.test(source)) {
-    return [
-      "- Operations consulting and recurring advisory calls.",
-      "- Workflow recommendations, vendor coordination, and monthly reporting support.",
-    ];
+  const intake = context.intakeText ?? "";
+  const source = intake.trim() ? intake : `${context.draftText ?? ""}`;
+  const catalogs = [
+    [
+      "AI workflow implementation",
+      "dashboard setup",
+      "automation support",
+      "onboarding assistance",
+      "light ongoing maintenance",
+    ],
+    [
+      "paid advertising management",
+      "launch coordination",
+      "email marketing",
+      "analytics reporting",
+      "creative strategy",
+      "campaign optimization",
+    ],
+    [
+      "operations consulting",
+      "recurring advisory calls",
+      "workflow recommendations",
+      "vendor coordination",
+      "monthly reporting support",
+    ],
+  ];
+  for (const catalog of catalogs) {
+    const supplied = catalog.filter((phrase) => new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(source));
+    if (supplied.length > 0) return supplied.map((phrase) => `- ${phrase.charAt(0).toUpperCase()}${phrase.slice(1)}.`);
   }
   return ["- Service Provider will provide the services and deliverables described in this Agreement."];
 }

@@ -35,7 +35,7 @@ export type { AgreementFamily } from "./agreementFamilyRouter";
 export type ParsedDraftShape = {
   title: string;
   jurisdiction: string;
-  parties: { id?: string; name: string; role: string; email?: string }[];
+  parties: { id?: string; name: string; role: string; email?: string; signerName?: string; signerTitle?: string }[];
   purpose: string;
   payment_terms: string;
   duration: string | null;

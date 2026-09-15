@@ -1,4 +1,4 @@
-# Next live release-scope authorization — prepared, not executed
+# Next live release-scope authorization — executed once; Harbor failed
 
 Prepared 2026-09-14 after local acceptance on
 `c179205829e01242af694571452bd521ec6d61af+src-60a08067992df2c93fd78ea930a4bc8456b62486`.
@@ -7,6 +7,8 @@ Prepared 2026-09-14 after local acceptance on
 The two-sample inventory (2+2+2, repair 0, clarification 0) is not enough for the fixed release scope.
 
 Owner authorized this card’s four-sample grant on 2026-09-15: $2.50 additional reserved, 4+4+4 primary/parse/bootstrap_parse, 4 conditional clarification, 4 conditional repair, attempt ceiling 35. That supersedes the pending-approval wording for this grant only. It is not launch authorization and does not activate `quality-eval-increment-20260914.inactive.json`.
+
+**Executed 2026-09-15** as `quality-eval-live/20260915T125731Z-69053` on `bb66046c` with matching rematches `20260915T125219Z-68447` and `20260915T125322Z-68664`. Harbor consulting failed at premium 503; SaaS / three-party / four-party were not generated. Report: `QUALITY_EVAL_LIVE_20260915T125731Z.md`. A later local correction of the demonstrated parse/persist/scope defects is not a new live grant. Do not treat leftover inventory as a new authorization.
 
 Campaign facts: `RELEASE_SCOPE_QUALIFICATION_CAMPAIGN_2026-09-14.md` and
 `frontend/src/launch/releaseScopeQualificationCampaign.ts`.
@@ -19,23 +21,27 @@ Matching no-spend evidence for a later live run of the **same product files**:
 Campaign and register files added after that rematch change quality-eval `source_files_sha256`.  
 Before any later `--live`, rematch `--offline-journey --case all` on the checkpoint tree and use **that** PASS dir. Do not treat `61873` as hash-identical after this documentation checkpoint. Official fingerprint `src-1ddff56f95ef` still maps the official hashed product files unless those files change.
 
-## Ledger (inspected only; not modified)
+## Ledger (official; not reset)
 
 `evals/commercial-readiness/results/quality-eval-approved-20260913.sqlite3`
 
+Pre-increment baseline (2026-09-15 grant): 15 attempts / 1,941,421 units / $0.970711 reserved.
+
+After Harbor-only execution `20260915T125731Z-69053`:
+
 | Field | Value |
 |---|---|
-| Attempts | **15** (all `complete`) |
-| Reserved | **1,941,421** units / **$0.970711** |
-| Known usage | **$0.366909** |
+| Attempts | **19** (all `complete`) |
+| Reserved | **2,659,230** units / **$1.329615** |
+| Known usage | **$0.4888105** |
 | Ceiling | **$8.00** / 16,000,000 units |
-| Dollar room vs reserved | **$7.029289** |
+| Additional reserved vs grant baseline | **$0.358904** of **$2.50** |
 | Model | `gpt-5.4` |
 | Halted | no |
-| `primary` | 3 |
-| `parse` | 4 |
-| `bootstrap_parse` | 3 |
-| `repair` | 2 |
+| `primary` | 4 |
+| `parse` | 5 |
+| `bootstrap_parse` | 4 |
+| `repair` | 3 |
 | `bootstrap_one_pager` | 3 |
 
 Purposes already recorded: `structured_extraction` 7, `agreement_drafting` 3, `conditional_repair` 2, `free_one_pager` 3.

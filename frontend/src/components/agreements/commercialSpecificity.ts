@@ -15,6 +15,7 @@ export type ProtectedCommercialFact = {
 import {
   extractProtectedCommercialClusters,
   renderSemanticBlock,
+  stripUnsuppliedSuggestedPhrases,
   textRetainsSemanticBlock,
   type ProSemanticBlock,
 } from "./proSemanticBlocks";
@@ -199,11 +200,22 @@ function pushFact(out: ProtectedCommercialFact[], seen: Set<string>, fact: Prote
   out.push({ ...fact, text: normalizeFactText(fact.text), canonical });
 }
 
-export function extractProtectedCommercialFacts(
-  intakeText: string | null | undefined,
-  draftText?: string | null,
-): ProtectedCommercialFact[] {
-  const blob = `${intakeText ?? ""}\n${draftText ?? ""}`;
+const GENERATED_SCOPE_EXTRAS = new Set([
+  "dashboard setup",
+  "automation support",
+  "onboarding assistance",
+  "light ongoing maintenance",
+  "launch coordination",
+  "analytics reporting",
+  "creative strategy",
+  "campaign optimization",
+  "recurring advisory calls",
+  "workflow recommendations",
+  "vendor coordination",
+  "monthly reporting support",
+]);
+
+function factsFromBlob(blob: string): ProtectedCommercialFact[] {
   const facts: ProtectedCommercialFact[] = [];
   const seen = new Set<string>();
   for (const spec of CONCRETE_FACT_PATTERNS) {
@@ -219,6 +231,25 @@ export function extractProtectedCommercialFacts(
     }
   }
   return facts;
+}
+
+export function extractProtectedCommercialFacts(
+  intakeText: string | null | undefined,
+  draftText?: string | null,
+): ProtectedCommercialFact[] {
+  const intakeFacts = factsFromBlob(intakeText ?? "");
+  const intakeHasScope = intakeFacts.some(
+    (fact) => fact.category === "scope" || fact.category === "deliverable" || fact.category === "support_model",
+  );
+  if (!intakeHasScope) return factsFromBlob(`${intakeText ?? ""}\n${draftText ?? ""}`);
+  const intakeCanonical = new Set(intakeFacts.map((fact) => fact.canonical));
+  const draftFacts = factsFromBlob(draftText ?? "");
+  return [
+    ...intakeFacts,
+    ...draftFacts.filter(
+      (fact) => !intakeCanonical.has(fact.canonical) && !GENERATED_SCOPE_EXTRAS.has(fact.canonical),
+    ),
+  ];
 }
 
 function significantTerms(text: string): string[] {
@@ -521,6 +552,7 @@ export function preserveProtectedCommercialFacts(args: {
     out = inserted.text;
     if (inserted.repaired) repairs.push(`commercial_specificity:${fact.category}_fact_preserved`);
   }
+  out = stripUnsuppliedSuggestedPhrases(out, clusters);
   const score = scoreCommercialSpecificity(facts, out);
   logCommercialSpecificityScore({
     score,
