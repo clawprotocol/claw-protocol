@@ -32,6 +32,20 @@ export function isAgreementSectionHeadingPartyName(name: string): boolean {
   return AGREEMENT_SECTION_HEADING_PARTY_PREFIX_RE.test(t);
 }
 
+const TITLE_CASE_NON_PERSON_MENTION_RE =
+  /^(?:Platform Developer|Data Infrastructure Provider|Analytics Integrator|Regulatory Compliance Advisor|Initial Term|Acceptance Criteria|Insurance Requirements|Confidential Information|Intellectual Property|San Diego|Los Angeles|Cambridge|Charlotte|Harrisburg)$/i;
+
+const INCOMPLETE_PERSON_MENTION_RE = /^[A-Z][a-z]+\s+[A-Z]'$/;
+
+/** Title-case role, heading, city, or truncated-name fragments are never people. */
+export function isTitleCaseNonPersonMention(name: string): boolean {
+  const t = (name || "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (isAgreementSectionHeadingPartyName(t)) return true;
+  if (TITLE_CASE_NON_PERSON_MENTION_RE.test(t)) return true;
+  return INCOMPLETE_PERSON_MENTION_RE.test(t);
+}
+
 export type PaidProNoticeBlockLogPayload = {
   partyId: string;
   legalEntity: string;

@@ -160,7 +160,16 @@ export function customerMentionedUnresolvedFromIntake(
     if (/\b(?:agreement|services|consulting|subscription|draft|scope|fees|payment|governing|confidentiality|termination)\b/i.test(name)) {
       continue;
     }
-    if (/^(?:New York|New Jersey|New Mexico|New Hampshire|North Carolina|South Carolina|North Dakota|South Dakota|West Virginia|Rhode Island|Washington Dc)$/i.test(name)) {
+    if (/^(?:New York|New Jersey|New Mexico|New Hampshire|North Carolina|South Carolina|North Dakota|South Dakota|West Virginia|Rhode Island|Washington Dc|San Diego)$/i.test(name)) {
+      continue;
+    }
+    if (confirmedParties.some((party) => samePerson(String(party.role || ""), name))) continue;
+    if (
+      confirmedParties.some((party) => {
+        const signer = String(party.signerName || "").trim();
+        return Boolean(signer) && (samePerson(signer, name) || signer.toLowerCase().startsWith(name.toLowerCase().replace(/'$/, "")));
+      })
+    ) {
       continue;
     }
     const before = blob.slice(Math.max(0, match.index - 28), match.index);

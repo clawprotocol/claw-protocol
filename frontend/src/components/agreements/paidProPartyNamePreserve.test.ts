@@ -8,6 +8,7 @@ import {
   isContractProsePartyName,
   isAgreementSectionHeadingPartyName,
   isAuthoritativeLegalEntityName,
+  isTitleCaseNonPersonMention,
 } from "./paidProPartyNamePreserve";
 
 describe("paidProPartyNamePreserve", () => {
@@ -18,6 +19,11 @@ describe("paidProPartyNamePreserve", () => {
     expect(isAuthoritativeLegalEntityName("SCOPE OF SERVICES")).toBe(false);
     expect(isAuthoritativeLegalEntityName("2. SCOPE OF SERVICES.")).toBe(false);
     expect(isAgreementSectionHeadingPartyName("Summit AI Consulting LLC")).toBe(false);
+    expect(isTitleCaseNonPersonMention("Intellectual Property")).toBe(true);
+    expect(isTitleCaseNonPersonMention("Platform Developer")).toBe(true);
+    expect(isTitleCaseNonPersonMention("San Diego")).toBe(true);
+    expect(isTitleCaseNonPersonMention("James O'")).toBe(true);
+    expect(isTitleCaseNonPersonMention("Elena Vasquez")).toBe(false);
     expect(isAgreementSectionHeadingPartyName("2. Summit AI Consulting LLC (Lead Provider)")).toBe(false);
     expect(isAuthoritativeLegalEntityName("Summit AI Consulting LLC")).toBe(true);
   });

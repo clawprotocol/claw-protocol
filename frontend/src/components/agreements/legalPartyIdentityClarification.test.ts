@@ -419,6 +419,46 @@ describe("legal party identity clarification", () => {
     ).toEqual([]);
   });
 
+  it("does not ask about four-party role labels, headings, or truncated signer names", () => {
+    const four = releaseScopeSample("four_party");
+    const paper = [
+      "The parties are Lumen Bioinformatics Inc. (Platform Developer), Thalassa Data Systems LLC (Data Infrastructure Provider), Coastal Meridian Analytics LLC (Analytics Integrator), and Vanguard Regulatory Sciences Ltd. (Regulatory Compliance Advisor).",
+      "Intellectual Property. Confidential Information. Initial Term. Acceptance Criteria. Insurance Requirements.",
+      "Address: 9200 Pacific Heights Blvd, San Diego, CA 92121",
+      "Attn: James O'Sullivan, Managing Director",
+    ].join("\n");
+    const parties = four.parties.map((party) => ({
+      name: party.legalEntity,
+      role: party.role,
+      signerName: party.signerName,
+    }));
+    const applied = applyIdentityClarificationAnswers({
+      parties,
+      intake: `${four.filledIntake}\n${paper}`,
+      unresolvedSubjects: [
+        { name: "Platform Developer", source: "customer_mentioned" },
+        { name: "Analytics Integrator", source: "customer_mentioned" },
+        { name: "James O'", source: "customer_mentioned" },
+        { name: "Intellectual Property", source: "customer_mentioned" },
+        { name: "San Diego", source: "customer_mentioned" },
+      ],
+    });
+    expect(applied.clarificationQuestion).toBeNull();
+    expect(applied.parties.map((party) => party.name)).toEqual(parties.map((party) => party.name));
+    expect(
+      applied.unresolvedSubjects.some((row) =>
+        /Platform Developer|Analytics Integrator|James O'|Intellectual Property|San Diego/i.test(row.name),
+      ),
+    ).toBe(false);
+    expect(
+      identityClarificationMaterialItem({
+        intakeRaw: four.filledIntake,
+        parsedParties: parties,
+        body: paper,
+      }),
+    ).toBeNull();
+  });
+
   it("drops safeguard clause fragments that leaked into the party list", () => {
     const four = releaseScopeSample("four_party");
     const applied = applyIdentityClarificationAnswers({

@@ -15,6 +15,7 @@ import {
   hasPartyMetadataLabelContamination,
   isAuthoritativeLegalEntityName,
   isOccupationalOrJobTitlePartyName,
+  isTitleCaseNonPersonMention,
   stripTrailingPartyMetadataLabel,
 } from "./paidProPartyNamePreserve";
 import { normalizeCanonicalPartyAddress } from "./canonicalPartyStructuredAddress";
@@ -203,6 +204,7 @@ export function isLikelyHumanSignerName(value: string): boolean {
   if (hasPartyMetadataLabelContamination(t)) return false;
   if (isBoilerplateLegalPartyPhrase(t)) return false;
   if (isOccupationalOrJobTitlePartyName(t)) return false;
+  if (isTitleCaseNonPersonMention(t)) return false;
   if (looksLikeStreetOrPlaceName(t)) return false;
   if (new RegExp(`${ENTITY_SUFFIX_PATTERN}$`, "i").test(t)) return false;
   if (looksLikeConcatenatedSignerNames(t)) return false;
