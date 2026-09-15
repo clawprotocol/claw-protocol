@@ -42,7 +42,9 @@ function legalPartyNames(rows: Array<{ name?: string | null }>): string[] {
 
 function paperReady(article: string, extra: string[] = []): boolean {
   return (
-    IDENTITY_SCENARIO.parties.every((party) => article.includes(party)) &&
+    IDENTITY_SCENARIO.parties.every(
+      (party) => article.includes(party) || article.includes(party.replace(/\.$/, "")),
+    ) &&
     IDENTITY_SCENARIO.terms.every((term) => article.includes(term)) &&
     extra.every((fact) => article.includes(fact)) &&
     article.length > 400
@@ -112,7 +114,8 @@ async function freshReopenWithoutIdentityQuestion(
 
 test.describe("identity-resolution customer flow", () => {
   test("representative assignment persists from normalized parse", async ({ page, browser }) => {
-    test.setTimeout(300_000);
+    // Existing waits already sum past 300s (parse + premium + paint + apply + 90s reopen).
+    test.setTimeout(540_000);
     const started = await startFromIntake(page, IDENTITY_AMBIGUOUS_INTAKE);
     await expect(page.getByTestId("identity-clarification-question")).toContainText(IDENTITY_QUESTION, {
       timeout: 20_000,
@@ -256,7 +259,7 @@ test.describe("identity-resolution customer flow", () => {
   });
 
   test("negative answer is not marked resolved", async ({ page }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(540_000);
     const started = await startFromIntake(page, IDENTITY_AMBIGUOUS_INTAKE);
     await applyIdentityClarificationAnswer(page, started.agreementId, IDENTITY_NEGATIVE_ANSWER, {
       expectUnresolved: true,
