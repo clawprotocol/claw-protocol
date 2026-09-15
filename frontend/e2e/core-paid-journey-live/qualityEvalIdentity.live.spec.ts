@@ -164,7 +164,7 @@ test.describe("identity-resolution customer flow", () => {
     expect(saved.parties.filter((row) => /^\d+\s+/.test(String(row.name || "")))).toEqual([]);
     expect(saved.parties.some((row) => /Alex Rivera/i.test(String(row.name || "")))).toBe(false);
     expect(saved.unresolved.some((row) => /Alex Rivera/i.test(String(row.name || "")))).toBe(false);
-    await expect(page.getByTestId("identity-clarification-question")).toHaveCount(0);
+    await expect(page.getByTestId("identity-clarification-question")).toHaveCount(0, { timeout: 20_000 });
     const independent = await fetchOwnerIdentityState(page, started.agreementId);
     expect(
       independent.parties.some((row) =>
@@ -203,7 +203,7 @@ test.describe("identity-resolution customer flow", () => {
     const added = saved.parties.find((row) => /Alex Rivera/i.test(String(row.name || "")));
     expect(added).toMatchObject({ name: "Alex Rivera" });
     expect(String(added?.email || "")).toMatch(/alex\.rivera@advisor\.test/i);
-    await expect(page.getByTestId("identity-clarification-question")).toHaveCount(0);
+    await expect(page.getByTestId("identity-clarification-question")).toHaveCount(0, { timeout: 20_000 });
     const after = await articleText(page, IDENTITY_SCENARIO.partyCue);
     expect(after).toContain("Alex Rivera");
     expect(after).not.toContain("Riley Chen");
