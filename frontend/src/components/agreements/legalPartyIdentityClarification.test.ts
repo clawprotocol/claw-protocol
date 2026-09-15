@@ -204,6 +204,44 @@ describe("legal party identity clarification", () => {
         parsedParties: [...NORMALIZED_PARTIES, { name: "Alex Rivera", role: "party" }],
       }),
     ).toContain(QUESTION);
+    const inferredSignerParties = [
+      { name: HARBOR, role: "Consultant", signerName: "Alex Rivera" },
+      { name: IRONVALE, role: "Client", signerName: IRONVALE },
+    ];
+    const inferredPaper = [
+      `This Services Agreement is entered into by and between ${HARBOR} ("Consultant") and ${IRONVALE} ("Client"). Consultant and Client may be referred to individually as a "Party" and collectively as the "Parties."`,
+      `If to ${HARBOR}:`,
+      HARBOR,
+      "Attn: Alex Rivera",
+      "Email: alex.rivera@advisor.test",
+      "CLIENT:",
+      IRONVALE,
+      "Name: Alex Rivera",
+      "CONSULTANT:",
+      HARBOR,
+      "Name: __________________________",
+    ].join("\n");
+    const inferredIntake =
+      `${INTAKE.replace("Alex Rivera is involved.", "Alex Rivera, alex.rivera@advisor.test, is involved.")}`;
+    expect(
+      contentClarificationQuestions({
+        intake: inferredIntake,
+        body: inferredPaper,
+        parsedParties: inferredSignerParties,
+        unresolvedSubjects: [
+          { name: "Alex Rivera", source: "customer_mentioned" },
+          { name: "Riley Chen", source: "extraction_only" },
+        ],
+      }),
+    ).toContain(QUESTION);
+    const stripped = applyIdentityClarificationAnswers({
+      parties: inferredSignerParties,
+      intake: inferredIntake,
+      unresolvedSubjects: [{ name: "Alex Rivera", source: "customer_mentioned" }],
+    });
+    expect(stripped.clarificationQuestion).toBe(QUESTION);
+    expect(stripped.parties[0]?.signerName || "").toBe("");
+    expect(stripped.parties.map((p) => p.name)).toEqual([HARBOR, IRONVALE]);
     expect(
       contentClarificationQuestions({
         intake: CORE_PAID_JOURNEY_FILLED_INTAKE,

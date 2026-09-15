@@ -284,6 +284,30 @@ function emailFromText(text: string): string | undefined {
   return text.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)?.[0];
 }
 
+/** Explicit customer or intake signer instructions only — not inferred contact/notice fills. */
+function explicitResolvedPersonNames(args: {
+  intake: string;
+  answers?: string | null;
+  knownEntities?: readonly string[];
+}): string[] {
+  const names: string[] = [];
+  for (const row of extractEntitySignerInstructions(args.intake)) {
+    if (row.signerName) names.push(row.signerName);
+  }
+  for (const row of extractRoleSignerInstructions(args.intake)) {
+    if (row.signerName) names.push(row.signerName);
+  }
+  for (const line of statementsOf([args.intake, args.answers || ""].join("\n"))) {
+    const canonical = canonicalizeIdentityAnswer(line, { knownEntities: args.knownEntities });
+    if (!canonical) continue;
+    const signer = canonical.match(/^(.+?) signer: (.+)$/);
+    if (signer) names.push(signer[2]!.trim());
+    const own = canonical.match(/^(.+?) as an individual \((.+)\) is a contracting party$/);
+    if (own) names.push(own[1]!.trim());
+  }
+  return names;
+}
+
 function isConfirmedIndividualParty(name: string, intake: string): boolean {
   return new RegExp(`${escapeRe(name)}\\s+as\\s+an\\s+individual`, "i").test(intake);
 }
@@ -450,13 +474,26 @@ export function applyIdentityClarificationAnswers<T extends BindableParty>(args:
     }
   }
 
-  const boundSignerNames = parties
-    .map((party) => String(party.signerName || "").trim())
-    .filter(Boolean);
+  const explicitPeople = explicitResolvedPersonNames({
+    intake: mergedIntake,
+    answers: args.answers,
+    knownEntities,
+  });
+  parties = parties.map((party) => {
+    const signer = String(party.signerName || "").trim();
+    if (!signer) return party;
+    const inferredBind = unresolved.some(
+      (row) =>
+        row.source === "customer_mentioned" &&
+        samePerson(row.name, signer) &&
+        !explicitPeople.some((name) => samePerson(name, signer)),
+    );
+    return inferredBind ? { ...party, signerName: "" } : party;
+  });
   const askable = unresolved.filter(
     (row) =>
       row.source === "customer_mentioned" &&
-      !boundSignerNames.some((signer) => samePerson(signer, row.name)) &&
+      !explicitPeople.some((name) => samePerson(name, row.name)) &&
       !parties.some((party) => samePerson(party.name, row.name)),
   );
   return {
