@@ -11,7 +11,7 @@ import {
 } from "./legalPartyRepresentativeBind";
 import { isLikelyHumanSignerName } from "./intakeSignerMetadataAuthority";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
-import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
+import { partyLegalNamesMatch, resolvePaidProPartyRolesFromAcceptedCorpus } from "./paidProAcceptedCorpusPartyRoles";
 import type { MaterialMissingItem } from "./proAgreementCompleteness/types";
 
 export const IDENTITY_SIGNING_OR_PARTY_QUESTION_RE =
@@ -530,6 +530,104 @@ export function entityAlreadyHasExplicitSigner(intake: string, entity: string): 
   return extractEntitySignerInstructions(intake).some((row) => row.entity.toLowerCase() === entity.toLowerCase());
 }
 
+function oxfordRoleList(roles: readonly string[]): string {
+  if (roles.length <= 1) return roles[0] || "";
+  if (roles.length === 2) return `${roles[0]} and ${roles[1]}`;
+  return `${roles.slice(0, -1).join(", ")}, and ${roles[roles.length - 1]}`;
+}
+
+function displayRoleForParty(party: BindableParty): string {
+  const role = String(party.role || "").trim();
+  if (role && !/^party$/i.test(role)) return role;
+  return isLikelyHumanSignerName(party.name) ? "Advisor" : "Party";
+}
+
+function removeEmailFromUnrelatedNoticeStanzas(doc: string, ownerName: string, email: string): string {
+  if (!email) return doc;
+  const ownerRe = new RegExp(`^If to\\s+${escapeRe(ownerName)}\\b`, "i");
+  const emailLine = new RegExp(`^Email:\\s*${escapeRe(email)}\\s*\\n?`, "im");
+  return doc
+    .split(/(?=^If to )/m)
+    .map((stanza) => {
+      if (!/^If to /i.test(stanza) || ownerRe.test(stanza.trimStart())) return stanza;
+      return stanza.replace(emailLine, "");
+    })
+    .join("");
+}
+
+function ensureNoticeStanzaForParty(doc: string, name: string, email?: string): string {
+  const headerRe = new RegExp(`^If to\\s+${escapeRe(name)}\\s*:`, "im");
+  if (headerRe.test(doc)) {
+    if (!email || new RegExp(`If to\\s+${escapeRe(name)}[\\s\\S]{0,400}${escapeRe(email)}`, "i").test(doc)) {
+      return doc;
+    }
+    return doc.replace(
+      new RegExp(`(^If to\\s+${escapeRe(name)}\\s*:\\s*\\n${escapeRe(name)}\\s*\\n)`, "im"),
+      `$1Email: ${email}\n`,
+    );
+  }
+  const block = [`If to ${name}:`, name, ...(email ? [`Email: ${email}`] : []), ""].join("\n");
+  const witness = doc.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witness >= 0) {
+    return `${doc.slice(0, witness).trimEnd()}\n\n${block}\n${doc.slice(witness)}`;
+  }
+  return `${doc.trimEnd()}\n\n${block}\n`;
+}
+
+function remapInvertedConsultantClientHeadings(doc: string): string {
+  const declared = resolvePaidProPartyRolesFromAcceptedCorpus(doc);
+  const consultant =
+    declared.find((row) => row.roleLabel === "Consultant")?.legalName ||
+    declared.find((row) => row.role === "service_provider")?.legalName;
+  const client = declared.find((row) => row.role === "client")?.legalName;
+  if (!consultant || !client) return doc;
+  const witness = doc.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witness < 0) return doc;
+  const prefix = doc.slice(0, witness);
+  let tail = doc.slice(witness);
+  const consultantEsc = escapeRe(consultant);
+  const clientEsc = escapeRe(client);
+  tail = tail.replace(
+    new RegExp(`^(\\s*)CLIENT\\s*:\\s*${consultantEsc}\\.?\\s*$`, "im"),
+    `$1CONSULTANT:\n${consultant}`,
+  );
+  tail = tail.replace(
+    new RegExp(`^(\\s*)CLIENT\\s*:\\s*\\n\\s*${consultantEsc}\\.?\\s*$`, "im"),
+    `$1CONSULTANT:\n${consultant}`,
+  );
+  tail = tail.replace(
+    new RegExp(`^(\\s*)SERVICE\\s+PROVIDER\\s*:\\s*${clientEsc}\\.?\\s*$`, "im"),
+    `$1CLIENT:\n${client}`,
+  );
+  tail = tail.replace(
+    new RegExp(`^(\\s*)SERVICE\\s+PROVIDER\\s*:\\s*\\n\\s*${clientEsc}\\.?\\s*$`, "im"),
+    `$1CLIENT:\n${client}`,
+  );
+  return `${prefix}${tail}`;
+}
+
+function ensureIndividualExecutionBlock(doc: string, person: BindableParty): string {
+  const role = displayRoleForParty(person);
+  const heading = role.toUpperCase();
+  const witness = doc.search(/\bIN WITNESS WHEREOF\b/i);
+  const tail = witness >= 0 ? doc.slice(witness) : doc;
+  if (new RegExp(`^\\s*${escapeRe(heading)}\\s*:`, "im").test(tail)) return doc;
+  const thin = new RegExp(
+    `\\n+${escapeRe(role)}:\\s*${escapeRe(person.name)}\\s+By:[^\\n]*\\n?`,
+    "i",
+  );
+  const stripped = doc.replace(thin, "\n");
+  const block = [
+    `${heading}:`,
+    person.name,
+    "By: __________________________",
+    `Name: ${person.signerName || person.name}`,
+    "Title: ________",
+    "Date: _____________________________",
+  ].join("\n");
+  return `${stripped.trimEnd()}\n\n${block}\n`;
+}
+
 export function applyIdentityResolutionToAuthorizedPaper(
   documentText: string,
   parties: readonly BindableParty[],
@@ -546,17 +644,35 @@ export function applyIdentityResolutionToAuthorizedPaper(
   }
   const individuals = parties.filter((party) => isLikelyHumanSignerName(party.name));
   for (const person of individuals) {
-    if (new RegExp(`\\b${escapeRe(person.name)}\\b`, "i").test(doc)) continue;
-    const role = person.role && person.role !== "party" ? ` ("${person.role}")` : "";
+    const role = displayRoleForParty(person);
+    if (!new RegExp(`\\b${escapeRe(person.name)}\\b`, "i").test(doc)) {
+      doc = doc.replace(
+        /(entered into by and between\s+)([\s\S]*?)(\.\s+(?:Consultant|Client|The |This |[A-Z][a-z]+ and ))/,
+        (full, prefix: string, middle: string, end: string) =>
+          middle.toLowerCase().includes(person.name.toLowerCase())
+            ? full
+            : `${prefix}${middle} and ${person.name} ("${role}")${end}`,
+      );
+    }
+  }
+  const roleLabels = parties.map((party) => displayRoleForParty(party)).filter((role) => role !== "Party");
+  if (roleLabels.length >= 2) {
+    const collective = oxfordRoleList(roleLabels);
     doc = doc.replace(
-      /(entered into by and between\s+)([\s\S]*?)(\.\s+(?:Consultant|Client|The |This |[A-Z][a-z]+ and ))/,
-      (full, prefix: string, middle: string, end: string) =>
-        middle.toLowerCase().includes(person.name.toLowerCase())
-          ? full
-          : `${prefix}${middle} and ${person.name}${role}${end}`,
+      /[A-Z][A-Za-z]+(?:\s+and\s+[A-Z][A-Za-z]+)+ may be referred to individually as a ["“]Party["”] and collectively as the ["“]Parties\.?["”]\.?/,
+      `${collective} may be referred to individually as a "Party" and collectively as the "Parties".`,
     );
-    const block = `\n\n${person.role || "Advisor"}: ${person.name}   By: ${person.signerName || person.name}   Title: ________   Date: ________`;
-    doc = `${doc.trim()}${block}\n`;
+  }
+  for (const person of individuals) {
+    const email = String(person.email || "").trim();
+    if (email) {
+      doc = removeEmailFromUnrelatedNoticeStanzas(doc, person.name, email);
+      doc = ensureNoticeStanzaForParty(doc, person.name, email);
+    }
+  }
+  doc = remapInvertedConsultantClientHeadings(doc);
+  for (const person of individuals) {
+    doc = ensureIndividualExecutionBlock(doc, person);
   }
   return doc;
 }

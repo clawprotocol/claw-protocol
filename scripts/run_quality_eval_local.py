@@ -326,9 +326,10 @@ def main() -> int:
             })+'\n')
         elif args.offline_journey:
             if args.case == 'identity':
-                run('browser', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',
-                    'qualityEvalIdentity.live.spec.ts','--project=desktop','--workers=1','--retries=0','--max-failures=1','--reporter=line'],
-                    ROOT/'frontend', timeout=2400)
+                identity_browser = ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',
+                    'qualityEvalIdentity.live.spec.ts','--workers=1','--retries=0','--max-failures=1','--reporter=line']
+                run('browser-desktop', identity_browser + ['--project=desktop'], ROOT/'frontend', timeout=2400)
+                run('browser-mobile', identity_browser + ['--project=mobile'], ROOT/'frontend', timeout=2400)
             else:
                 case_filter = [] if args.case in {'all', 'release_scope'} else ['--grep', f'real drafting: {args.case}$']
                 browser_timeout = 2400 if args.case in {'four_party', 'three_party', 'release_scope'} else 1500

@@ -37,7 +37,10 @@ import {
   multiPartyExecutionBlockHeading,
   tripartiteRoleLabelForPartyIndex,
 } from "./labeledPartyBlockParse";
-import { corpusDeclaresConsultantClientOpening } from "./paidProDeclaredConsultantClientPaper";
+import {
+  corpusDeclaresConsultantClientOpening,
+  restoreDeclaredConsultantClientPaper,
+} from "./paidProDeclaredConsultantClientPaper";
 
 export {
   isRecitalFragmentExecutionPartyLine,
@@ -233,8 +236,8 @@ function existingConsultantClientTailMatchesDeclared(text: string): boolean {
     const name = row.legalName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const role = row.roleLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return (
-      new RegExp(`${role}\\s*:\\s*${name}`, "i").test(tail) ||
-      new RegExp(`^\\s*${role}\\s*:\\s*\\n\\s*${name}`, "im").test(tail)
+      new RegExp(`${role}\\s*:\\s*${name}\\.?`, "i").test(tail) ||
+      new RegExp(`^\\s*${role}\\s*:\\s*\\n\\s*${name}\\.?`, "im").test(tail)
     );
   });
 }
@@ -617,6 +620,13 @@ export function enforcePaidProSingleExecutionBlock(
     manifestRoles ?? sanitizeRoleAssignments(text),
     text,
   );
+  if (corpusDeclaresConsultantClientOpening(text)) {
+    const restored = restoreDeclaredConsultantClientPaper(text, text);
+    if (restored !== text) {
+      text = restored;
+      repairs.push("execution_block:restore_consultant_client");
+    }
+  }
   if (existingConsultantClientTailMatchesDeclared(text)) {
     text = stripRecitalFragmentExecutionLinesFromTail(text, repairs);
     const truncated = truncatePostCanonicalExecutionPollution(text, {

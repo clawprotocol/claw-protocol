@@ -232,6 +232,51 @@ describe("legal party identity clarification", () => {
     expect(item).toBeNull();
   });
 
+  it("adds an individual to Parties, notices, and execution without inventing obligations", () => {
+    const before = [
+      `This Services Agreement (this "Agreement") is entered into by and between ${HARBOR} ("Consultant") and ${IRONVALE} ("Client"). Consultant and Client may be referred to individually as a "Party" and collectively as the "Parties."`,
+      "",
+      "1. PARTIES AND ROLES",
+      "",
+      "Consultant is an independent professional services firm. Client is retaining Consultant to perform the services described in this Agreement.",
+      "",
+      "11. NOTICES",
+      "",
+      `If to ${HARBOR}:`,
+      HARBOR,
+      "Email: alex.rivera@advisor.test",
+      "",
+      `If to ${IRONVALE}:`,
+      IRONVALE,
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      HARBOR,
+      "By: __________________________",
+      "",
+      "SERVICE PROVIDER:",
+      IRONVALE,
+      "By: __________________________",
+    ].join("\n");
+    const after = applyIdentityResolutionToAuthorizedPaper(before, [
+      { name: HARBOR, role: "Consultant" },
+      { name: IRONVALE, role: "Client" },
+      { name: "Alex Rivera", role: "Advisor", email: "alex.rivera@advisor.test" },
+    ]);
+    expect(after).toContain(`and Alex Rivera ("Advisor")`);
+    expect(after).toMatch(/Consultant, Client, and Advisor may be referred to individually as a "Party"/);
+    expect(after).toMatch(/If to Alex Rivera:[\s\S]*Email: alex\.rivera@advisor\.test/);
+    expect(after).not.toMatch(
+      /If to Harbor Peak Analytics LLC:\s*\nHarbor Peak Analytics LLC\s*\nEmail: alex\.rivera@advisor\.test/,
+    );
+    expect(after).toMatch(/CONSULTANT:\s*\nHarbor Peak Analytics LLC/);
+    expect(after).toMatch(/CLIENT:\s*\nIronvale Manufacturing Inc/);
+    expect(after).toMatch(/ADVISOR:\s*\nAlex Rivera/);
+    expect(after).not.toMatch(/SERVICE PROVIDER:\s*\nIronvale Manufacturing Inc/);
+    expect(after).not.toMatch(/Advisor shall/);
+  });
+
   it("does not invent a numbered party when applying a representative to existing paper", () => {
     const before =
       'This Consulting Services Agreement is entered into by and between Harbor Peak Analytics LLC ("Consultant") and Ironvale Manufacturing Inc. ("Client"). Consultant and Client may be referred to individually as a "Party". Consultant\'s authorized signer is ________.';

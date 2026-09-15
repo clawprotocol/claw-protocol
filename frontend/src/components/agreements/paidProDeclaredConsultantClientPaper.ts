@@ -18,7 +18,7 @@ function legalBoundToRole(opening: string, role: string): string | null {
   const escaped = role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = opening.match(
     new RegExp(
-      `([A-Za-z0-9][A-Za-z0-9.,&'’\\- ]{1,120}?)\\s*\\(\\s*["'“”‘’]?${escaped}["'“”‘’]?\\s*\\)`,
+      `\\b([A-Z][A-Za-z0-9&.'’\\-]*(?:\\s+[A-Z][A-Za-z0-9&.'’\\-]*)*(?:\\s+(?:LLC|L\\.L\\.C\\.|Inc\\.?|Incorporated|Corp\\.?|Ltd\\.?))?)\\s*\\(\\s*["'“”‘’]?${escaped}["'“”‘’]?\\s*\\)`,
       "i",
     ),
   );

@@ -59,6 +59,7 @@ import {
 import type { ParsedDraftShape } from "../components/agreements/intakeSmartDefaults";
 import {
   applyIdentityClarificationAnswers,
+  applyIdentityResolutionToAuthorizedPaper,
   canonicalizeIdentityAnswer,
   identityClarificationResolved,
 } from "../components/agreements/legalPartyIdentityClarification";
@@ -410,6 +411,18 @@ describe("Harbor 20260915 live-failure local correction", () => {
       "Alex Rivera",
     ]);
     expect(reopened).toEqual(persisted);
+    const paper = applyIdentityResolutionToAuthorizedPaper(
+      'This Services Agreement is entered into by and between Harbor Peak Analytics LLC ("Consultant") and Ironvale Manufacturing Inc. ("Client"). Consultant and Client may be referred to individually as a "Party" and collectively as the "Parties."\n\nIf to Harbor Peak Analytics LLC:\nHarbor Peak Analytics LLC\nEmail: alex.rivera@advisor.test\n\nIN WITNESS WHEREOF, the Parties execute this Agreement.\n\nCLIENT:\nHarbor Peak Analytics LLC\n\nSERVICE PROVIDER:\nIronvale Manufacturing Inc.',
+      persisted.map((party) =>
+        party.name === "Alex Rivera" ? { ...party, email: "alex.rivera@advisor.test" } : party,
+      ),
+    );
+    expect(paper).toContain('and Alex Rivera ("Advisor")');
+    expect(paper).toMatch(/Consultant, Client, and Advisor may be referred to/);
+    expect(paper).toMatch(/If to Alex Rivera:[\s\S]*alex\.rivera@advisor\.test/);
+    expect(paper).not.toMatch(
+      /If to Harbor Peak Analytics LLC:\s*\nHarbor Peak Analytics LLC\s*\nEmail: alex\.rivera@advisor\.test/,
+    );
     expect(canonicalizeIdentityAnswer("Alex Rivera is not signing for Harbor Peak Analytics LLC.")).toBeNull();
     expect(
       identityClarificationResolved("Alex Rivera is not signing for Harbor Peak Analytics LLC.", applied.clarificationQuestion || "Is Alex Rivera signing for one of the named companies, or contracting as their own legal party?"),

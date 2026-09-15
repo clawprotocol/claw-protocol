@@ -120,7 +120,17 @@ export function buildNPartyPaidProServerCorpus(args: {
 }): string {
   const parties = args.parties
     .map((p) => p.trim())
-    .filter((p) => isAuthoritativeLegalEntityName(p))
+    .filter((p) => {
+      const name = p.trim();
+      if (isAuthoritativeLegalEntityName(name)) return true;
+      const words = name.split(/\s+/);
+      return (
+        words.length >= 2 &&
+        words.length <= 4 &&
+        words.every((word) => /^[A-Za-z][A-Za-z'.-]*$/.test(word)) &&
+        !/\b(?:LLC|Inc\.?|Corp\.?|Ltd\.?)\b/i.test(name)
+      );
+    })
     .slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
   if (parties.length < 2) return "";
   const intake = args.intakeText.trim();

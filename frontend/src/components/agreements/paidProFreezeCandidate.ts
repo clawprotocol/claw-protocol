@@ -146,9 +146,10 @@ function reconcileExecutionRolesBeforeFreezeCommit(text: string): string {
 
   const identities = buildCorpusRoleIdentitiesForExecutionReconcile(body);
   const client = identities.find((i) => i.blockHeading.trim().toUpperCase() === "CLIENT");
-  const provider = identities.find(
-    (i) => i.blockHeading.trim().toUpperCase() === "SERVICE PROVIDER",
-  );
+  const provider = identities.find((i) => {
+    const heading = i.blockHeading.trim().toUpperCase();
+    return heading === "SERVICE PROVIDER" || heading === "CONSULTANT";
+  });
   if (!client?.partyDisplayName?.trim() || !provider?.partyDisplayName?.trim()) return body;
 
   const reconciled = reconcileExecutionBlockToRoleIdentities(body, [client, provider]);

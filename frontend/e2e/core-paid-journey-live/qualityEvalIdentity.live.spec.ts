@@ -184,6 +184,13 @@ test.describe("identity-resolution customer flow", () => {
     const after = await articleText(page, IDENTITY_SCENARIO.partyCue);
     expect(after).toContain("Alex Rivera");
     expect(after).not.toContain("Riley Chen");
+    expect(after).toMatch(/Consultant, Client, and Advisor may be referred to/i);
+    expect(after).toMatch(/If to Alex Rivera:[\s\S]{0,160}alex\.rivera@advisor\.test/i);
+    expect(after).not.toMatch(
+      /If to Harbor Peak Analytics LLC:\s*\nHarbor Peak Analytics LLC\s*\nEmail:\s*alex\.rivera@advisor\.test/i,
+    );
+    expect(after).not.toMatch(/CLIENT:\s*\n\s*Harbor Peak Analytics LLC/i);
+    expect(after).not.toMatch(/SERVICE PROVIDER:\s*\n\s*Ironvale Manufacturing Inc/i);
     const persisted = await fetchOwnerCanonicalSnapshot(page, started.agreementId);
     expect(persisted.corpus).toContain("Alex Rivera");
     const reopened = await freshReopenWithoutIdentityQuestion(browser, page, started.agreementId, ["Alex Rivera"], {

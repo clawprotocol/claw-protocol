@@ -280,9 +280,26 @@ function synchronizeIntakeSignerMetadataIntoRecords(
     let contact = emailHint
       ? contacts.find((c) => c.email.toLowerCase() === emailHint.toLowerCase())
       : undefined;
-    if (!contact?.name.trim() && contacts[i]?.name.trim()) contact = contacts[i];
+    if (!contact?.name.trim() && contacts[i]?.name.trim()) {
+      const candidate = contacts[i]!;
+      const candidateName = candidate.name.trim();
+      if (
+        !isLikelyHumanSignerName(candidateName) ||
+        entitiesMatchForSignerMetadata(record.partyLegalName, candidateName)
+      ) {
+        contact = candidate;
+      }
+    }
+    const contactName = contact?.name.trim() || "";
+    if (
+      contactName &&
+      isLikelyHumanSignerName(contactName) &&
+      record.partyLegalName.trim() &&
+      !entitiesMatchForSignerMetadata(record.partyLegalName, contactName)
+    ) {
+      contact = undefined;
+    }
     if (contact?.name.trim() || contact?.title.trim() || contact?.email.trim()) {
-      const contactName = contact.name.trim();
       mergeRecordFields(
         record,
         intakeRecordForSlot(

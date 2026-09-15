@@ -610,6 +610,16 @@ export function alignIntakeSignerMetadataToLegalEntities(
   for (const row of indexOnly) {
     while (cursor < slots.length && slots[cursor]!.signerName) cursor += 1;
     if (cursor >= slots.length) break;
+    const person = (row.signerName || "").trim();
+    const slotEntity = slots[cursor]!.partyLegalName;
+    if (
+      person &&
+      isLikelyHumanSignerName(person) &&
+      slotEntity &&
+      !entitiesMatchForSignerMetadata(slotEntity, person)
+    ) {
+      continue;
+    }
     mergeNonEmptyFields(slots[cursor]!, row);
     cursor += 1;
   }
