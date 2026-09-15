@@ -33105,10 +33105,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     writePremiumRecipientHandoffFromAuthorityParties(authority.parties);
     setConsumedPaidProSignerMetadataAuthority(authority);
-    const partyManifest = buildCanonicalFinalPartyManifestFromAuthority(authority, {
-      intakeText: intakeForHydration,
-      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
-    });
     const paidSessionVisibleRebuild = (
       paidProFirstReviewDisplayContext.acceptedCanonicalPlain ||
       lastKnownGoodAuthoritativeDraftRef.current ||
