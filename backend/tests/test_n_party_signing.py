@@ -174,6 +174,39 @@ def test_four_party_reviewer_stamped_without_packet_counts_four() -> None:
     assert all(party_requires_signature(p) for p in draft["parties"])
 
 
+def test_consultant_client_advisor_without_packet_are_required_signers() -> None:
+    draft = {
+        "parties": [
+            {"id": "p1", "name": "Harbor Peak Analytics LLC", "role": "Consultant"},
+            {"id": "p2", "name": "Ironvale Manufacturing Inc.", "role": "Client"},
+            {"id": "p3", "name": "Alex Rivera", "role": "Advisor"},
+        ],
+    }
+    assert resolve_required_signer_count(draft) == 3
+    assert all(party_requires_signature(p) for p in draft["parties"])
+    one = [
+        {
+            "event_type": "signature_completed",
+            "value": {"participant_id": "p1", "typed_name": "Pat Harbor"},
+        }
+    ]
+    two = one + [
+        {
+            "event_type": "signature_completed",
+            "value": {"participant_id": "p2", "typed_name": "Sam Ironvale"},
+        }
+    ]
+    three = two + [
+        {
+            "event_type": "signature_completed",
+            "value": {"participant_id": "p3", "typed_name": "Alex Rivera"},
+        }
+    ]
+    assert all_signers_signed_from_audit(draft, one) is False
+    assert all_signers_signed_from_audit(draft, two) is False
+    assert all_signers_signed_from_audit(draft, three) is True
+
+
 def test_explicit_requires_signature_false_excludes_reviewer_only_extra() -> None:
     draft = {
         "parties": [

@@ -12792,29 +12792,26 @@ def _resolve_signing_participant_for_ceremony(
 
 
 def _required_signing_parties(draft: AgreementDraft) -> List[Any]:
-    """Owner, signer, and reviewer parties must complete on the signature track.
-    Viewers never count. Role=signer remains the review-then-sign subset."""
+    """Legal parties that sign. Viewers/coordinators/FYI never count."""
+    from backend.services.vs01_signer_completion import party_requires_signature
+
     required = []
     for p in draft.parties or []:
-        wr = _normalize_workflow_role(p.role)
-        if wr == "viewer":
-            continue
-        if wr in ("owner", "signer", "reviewer", "party"):
+        row = p.model_dump() if hasattr(p, "model_dump") else {
+            "id": getattr(p, "id", None),
+            "name": getattr(p, "name", ""),
+            "role": getattr(p, "role", ""),
+        }
+        if party_requires_signature(row):
             required.append(p)
     return required
 
 
 def _all_signers_signed_from_audit(draft: AgreementDraft, audit: List[Any]) -> bool:
-    signers = _required_signing_parties(draft)
-    if not signers:
-        return False
-    done = _signature_completed_participant_ids(audit)
-    ids = [(p.id or "").strip() for p in signers]
-    if all(ids):
-        return bool(ids) and all(i in done for i in ids)
-    if len(signers) == 1:
-        return _has_legacy_signature_without_participant(audit)
-    return False
+    from backend.services.vs01_signer_completion import all_signers_signed_from_audit
+
+    body = draft.model_dump() if hasattr(draft, "model_dump") else {}
+    return all_signers_signed_from_audit(body, audit)
 
 
 def public_agreement_verify_enabled() -> bool:
