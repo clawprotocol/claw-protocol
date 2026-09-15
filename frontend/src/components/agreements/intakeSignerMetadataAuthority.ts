@@ -172,12 +172,21 @@ export function scrubLegalEntityCopiedSignerNames(
   });
 }
 
+/** Contract boilerplate, never a human signer ("Either Party may terminate…"). */
+const BOILERPLATE_LEGAL_PARTY_PHRASE_RE =
+  /^(?:(?:Either|Each|Any|Neither|Other|This|That|A|The|Both|All|Such)\s+Part(?:y|ies))$/i;
+
+export function isBoilerplateLegalPartyPhrase(value: string): boolean {
+  return BOILERPLATE_LEGAL_PARTY_PHRASE_RE.test(value.replace(/\s+/g, " ").trim());
+}
+
 /** Human signer names must never populate legal-entity authority fields. */
 export function isLikelyHumanSignerName(value: string): boolean {
   const t = value.replace(/\s+/g, " ").trim();
   if (t.length < 2 || t.length > 48) return false;
   if (isLegalEntityName(t) || isAuthoritativeLegalEntityName(t)) return false;
   if (hasPartyMetadataLabelContamination(t)) return false;
+  if (isBoilerplateLegalPartyPhrase(t)) return false;
   if (new RegExp(`${ENTITY_SUFFIX_PATTERN}$`, "i").test(t)) return false;
   if (looksLikeConcatenatedSignerNames(t)) return false;
   const words = t.split(/\s+/);

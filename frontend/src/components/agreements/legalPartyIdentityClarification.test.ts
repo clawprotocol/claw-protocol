@@ -289,6 +289,47 @@ describe("legal party identity clarification", () => {
     }
   });
 
+  it("does not keep an identity question for boilerplate Either Party after Alex is Advisor", () => {
+    const individualAnswer =
+      "Alex Rivera, alex.rivera@advisor.test, is contracting as their own legal party (Advisor).";
+    const intake = `${INTAKE}\nEither Party may terminate on 30 days written notice.`;
+    const paper = [
+      `This Services Agreement is entered into by and between ${HARBOR} ("Consultant") and ${IRONVALE} ("Client").`,
+      `Consultant and Client may be referred to individually as a "Party" and collectively as the "Parties."`,
+      "Either Party may terminate on 30 days written notice.",
+    ].join("\n");
+    const applied = applyIdentityClarificationAnswers({
+      parties: NORMALIZED_PARTIES,
+      intake,
+      answers: individualAnswer,
+      unresolvedSubjects: [
+        { name: "Riley Chen", source: "extraction_only" },
+        { name: "Either Party", source: "customer_mentioned" },
+      ],
+    });
+    expect(applied.parties.map((party) => party.name)).toEqual([HARBOR, IRONVALE, "Alex Rivera"]);
+    expect(applied.parties[2]).toMatchObject({ name: "Alex Rivera", role: "Advisor" });
+    expect(applied.clarificationQuestion).toBeNull();
+    expect(applied.unresolvedSubjects.some((row) => /Either Party/i.test(row.name))).toBe(false);
+    expect(applied.unresolvedSubjects.some((row) => /Riley Chen/i.test(row.name))).toBe(true);
+    const item = identityClarificationMaterialItem({
+      intakeRaw: intake,
+      userGapAnswers: individualAnswer,
+      parsedParties: applied.parties,
+      additionalTerms: mergeUnresolvedIdentityIntoText("", [
+        { name: "Riley Chen", source: "extraction_only" },
+        { name: "Either Party", source: "customer_mentioned" },
+      ]),
+      body: paper,
+      unresolvedSubjects: [
+        { name: "Riley Chen", source: "extraction_only" },
+        { name: "Either Party", source: "customer_mentioned" },
+      ],
+    });
+    expect(item?.question || "").not.toMatch(/Either Party/);
+    expect(item).toBeNull();
+  });
+
   it("does not ask again for an individual already stated in customer input", () => {
     const intake = `Draft a consulting agreement between ${HARBOR} (Consultant) and ${IRONVALE} (Client). Jordan Hale as an individual (Advisor) is the third contracting party.`;
     const item = identityClarificationMaterialItem({

@@ -9,7 +9,7 @@ import {
   extractEntitySignerInstructions,
   extractRoleSignerInstructions,
 } from "./legalPartyRepresentativeBind";
-import { isLikelyHumanSignerName } from "./intakeSignerMetadataAuthority";
+import { isBoilerplateLegalPartyPhrase, isLikelyHumanSignerName } from "./intakeSignerMetadataAuthority";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
 import { partyLegalNamesMatch, resolvePaidProPartyRolesFromAcceptedCorpus } from "./paidProAcceptedCorpusPartyRoles";
 import type { MaterialMissingItem } from "./proAgreementCompleteness/types";
@@ -109,7 +109,7 @@ export function parseUnresolvedIdentity(text: string | null | undefined): Unreso
     if (!line.startsWith(IDENTITY_UNRESOLVED_MARKER)) continue;
     const body = stripMarkers(line);
     const [name, source, email, roleHint] = body.split("|").map((part) => part.trim());
-    if (!name) continue;
+    if (!name || isBoilerplateLegalPartyPhrase(name)) continue;
     out.push({
       name,
       source: source === "customer_mentioned" ? "customer_mentioned" : "extraction_only",
@@ -125,7 +125,7 @@ export function classifyUnresolvedIdentitySubjects(
   intake: string,
 ): UnresolvedIdentitySubject[] {
   return rows
-    .filter((row) => isLikelyHumanSignerName(row.name))
+    .filter((row) => isLikelyHumanSignerName(row.name) && !isBoilerplateLegalPartyPhrase(row.name))
     .map((row) => ({
       name: row.name,
       source: isCustomerMentionedPerson(intake, row.name) ? "customer_mentioned" : "extraction_only",
@@ -149,7 +149,7 @@ export function customerMentionedUnresolvedFromIntake(
   const blob = intake || "";
   while ((match = nameRe.exec(blob))) {
     const name = match[1]!.trim();
-    if (!isLikelyHumanSignerName(name)) continue;
+    if (!isLikelyHumanSignerName(name) || isBoilerplateLegalPartyPhrase(name)) continue;
     if (/\b(?:agreement|services|consulting|subscription|draft|scope|fees|payment|governing|confidentiality|termination)\b/i.test(name)) {
       continue;
     }
@@ -398,6 +398,7 @@ function collectUnresolvedSubjects(args: {
   const merged = [...(args.unresolvedSubjects || []), ...fromRows, ...fromText, ...fromIntakeMentions];
   const out: UnresolvedIdentitySubject[] = [];
   for (const row of merged) {
+    if (isBoilerplateLegalPartyPhrase(row.name)) continue;
     if (!out.some((existing) => samePerson(existing.name, row.name))) out.push(row);
   }
   return out;
@@ -506,6 +507,7 @@ export function applyIdentityClarificationAnswers<T extends BindableParty>(args:
   });
   const askable = unresolved.filter((row) => {
     if (row.source !== "customer_mentioned") return false;
+    if (isBoilerplateLegalPartyPhrase(row.name)) return false;
     if (explicitPeople.some((name) => samePerson(name, row.name))) return false;
     if (parties.some((party) => samePerson(party.name, row.name))) return false;
     const persistedSigner = parties.some((party) => samePerson(String(party.signerName || ""), row.name));
@@ -542,7 +544,11 @@ export function identityClarificationMaterialItem(args: {
   const unresolvedSubjects = [
     ...(args.unresolvedSubjects || parseUnresolvedIdentity(intake)),
     ...customerMentionedUnresolvedFromIntake(intake, parties),
-  ].filter((row, index, all) => all.findIndex((other) => samePerson(other.name, row.name)) === index);
+  ].filter(
+    (row, index, all) =>
+      !isBoilerplateLegalPartyPhrase(row.name) &&
+      all.findIndex((other) => samePerson(other.name, row.name)) === index,
+  );
   const applied = applyIdentityClarificationAnswers({
     parties,
     intake,

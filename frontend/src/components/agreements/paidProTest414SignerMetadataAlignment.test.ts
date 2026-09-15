@@ -97,6 +97,9 @@ describe("TEST414_SIGNER_METADATA_LEGAL_ENTITY_ALIGNMENT", () => {
   it("rejects human signer names and concatenated names as legal entities", () => {
     expect(isLikelyHumanSignerName("Mary Jay")).toBe(true);
     expect(isLikelyHumanSignerName("Hen Park")).toBe(true);
+    expect(isLikelyHumanSignerName("Either Party")).toBe(false);
+    expect(isLikelyHumanSignerName("Each Party")).toBe(false);
+    expect(isLikelyHumanSignerName("The Parties")).toBe(false);
     expect(isLikelyHumanSignerName("Harbor Peak Automation LLC")).toBe(false);
     expect(looksLikeConcatenatedSignerNames("Mary Jay Hen Park Ira")).toBe(true);
     expect(resolveAuthorityPartyLegalNameField("Mary Jay", "Harbor Peak Automation LLC")).toBe(
