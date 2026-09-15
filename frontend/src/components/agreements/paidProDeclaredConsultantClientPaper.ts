@@ -89,10 +89,28 @@ export function shouldPreserveApprovedAddedPartyExecutionTail(
   return true;
 }
 
+function isUnusablePreservedExecutionName(
+  value: string,
+  parties: readonly { legal: string; signer: string }[],
+): boolean {
+  const name = String(value || "").trim();
+  if (!name || /^_{2,}$/.test(name)) return true;
+  if (/\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Ltd\.?|Limited)\b/i.test(name)) return true;
+  return parties.some((party) => partyLegalNamesMatch(name, party.legal));
+}
+
+function signerForExecutionEntity(
+  entity: string,
+  parties: readonly { legal: string; signer: string }[],
+): string {
+  const hit = parties.find((party) => partyLegalNamesMatch(entity, party.legal));
+  return hit?.signer || "";
+}
+
 /**
- * Display-only: fill blank execution-tail Name: lines from persisted signer names.
- * Matches the entity line already on the paper — does not rebuild headings or
- * rewrite the accepted digest.
+ * Display-only: fill blank or legal-entity execution-tail Name: lines from persisted
+ * signer names. Matches the entity already on the paper — does not rebuild headings
+ * or rewrite the accepted digest.
  */
 export function fillBlankPreservedAddedPartySignerNames(
   corpus: string,
@@ -112,17 +130,31 @@ export function fillBlankPreservedAddedPartySignerNames(
   const lines = corpus.slice(witnessIdx).split("\n");
   let currentSigner = "";
   for (let i = 0; i < lines.length; i += 1) {
-    const trimmed = (lines[i] ?? "").trim();
-    const entity = trimmed.replace(/:\s*$/, "");
-    const match = named.find((party) => partyLegalNamesMatch(entity, party.legal));
-    if (match) {
-      currentSigner = match.signer;
+    const raw = lines[i] ?? "";
+    const trimmed = raw.trim();
+    const headingEntity = trimmed.replace(/^(?:CLIENT|CONSULTANT|ADVISOR|SERVICE\s+PROVIDER)\s*:\s*/i, "").replace(/:\s*$/, "");
+    const headingMatch = named.find((party) => partyLegalNamesMatch(headingEntity, party.legal) || partyLegalNamesMatch(trimmed.replace(/:\s*$/, ""), party.legal));
+    if (headingMatch && !/\bName:\s*/i.test(trimmed)) {
+      currentSigner = headingMatch.signer;
       continue;
     }
-    const nameLine = (lines[i] ?? "").match(/^(\s*)Name:\s*(.*)$/i);
+    const inline = raw.match(
+      /^(\s*)((?:CLIENT|CONSULTANT|ADVISOR|SERVICE\s+PROVIDER)\s*:\s*)(.+?)(\s+By:\s*.+?\s+Name:\s*)(.+?)(\s+Title:[\s\S]*)$/i,
+    );
+    if (inline) {
+      const entity = (inline[3] ?? "").trim();
+      const signer = signerForExecutionEntity(entity, named) || currentSigner;
+      const value = (inline[5] ?? "").trim();
+      if (signer && isUnusablePreservedExecutionName(value, named)) {
+        lines[i] = `${inline[1]}${inline[2]}${inline[3]}${inline[4]}${signer}${inline[6]}`;
+        currentSigner = signer;
+      }
+      continue;
+    }
+    const nameLine = raw.match(/^(\s*)Name:\s*(.*)$/i);
     if (!nameLine || !currentSigner) continue;
     const value = (nameLine[2] ?? "").trim();
-    if (value && !/^_{2,}$/.test(value)) continue;
+    if (!isUnusablePreservedExecutionName(value, named)) continue;
     lines[i] = `${nameLine[1]}Name: ${currentSigner}`;
   }
   return `${head}${lines.join("\n")}`;
