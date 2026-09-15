@@ -44,6 +44,7 @@ describe("paidProDirectSigningLockAndInvite", () => {
     expect(isDurableSigningParticipantId("")).toBe(false);
     expect(isDurableSigningParticipantId("legacy_p1")).toBe(false);
     expect(isDurableSigningParticipantId("harbor-uuid")).toBe(true);
+    expect(isDurableSigningParticipantId("party_27:e02cafe9")).toBe(false);
   });
 
   it("requires durable owner and counterparty ids, never array order", () => {

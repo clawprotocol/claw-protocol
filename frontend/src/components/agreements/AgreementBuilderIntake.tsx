@@ -33189,9 +33189,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ? (acceptedAuthority.snapshot.corpus_plain || "").trim()
         : "";
     const reusedAcceptedSnapshot = acceptedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN;
+    const finalizeRoleContext = {
+      intakeText: intakeForHydration,
+      draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
+      acceptedCorpus: reusedAcceptedSnapshot ? acceptedPlain : undefined,
+    };
+    const finalizeAuthority = reusedAcceptedSnapshot
+      ? buildPaidProSignerMetadataAuthorityForFinalize(committedSignerUi, finalizeRoleContext)
+      : authority;
+    const finalizeManifest = buildCanonicalFinalPartyManifestFromAuthority(
+      finalizeAuthority,
+      finalizeRoleContext,
+    );
+    if (reusedAcceptedSnapshot) {
+      writePremiumRecipientHandoffFromAuthorityParties(finalizeAuthority.parties);
+      setConsumedPaidProSignerMetadataAuthority(finalizeAuthority);
+    }
     const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
       rawCorpus: reusedAcceptedSnapshot ? acceptedPlain : rawCorpus,
-      authority,
+      authority: finalizeAuthority,
       intakeRaw: intakeForHydration,
       surface: "finalize_paid_pro_signer_metadata",
       signatureRegionOnly: true,
@@ -33218,7 +33234,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       identities: hydrated.identities,
       signFirst: premiumSignatureSenderFirst,
     });
-    const signerMetadata = authorityPartiesToRecipientMetadata(authority.parties, [
+    const signerMetadata = authorityPartiesToRecipientMetadata(finalizeAuthority.parties, [
       ...extraPartyReviewEmails,
     ]);
     // After pay, a visible ≥200 rebuild on the card is enough to open existing
@@ -33253,16 +33269,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createAuthoritativeSigningSnapshot({
       corpus: corpusForSnapshot,
       signerMetadata,
-      partyManifest,
+      partyManifest: finalizeManifest,
       signatureBlockModel,
       intakeText: intakeForHydration,
-      authorityParties: authority.parties,
+      authorityParties: finalizeAuthority.parties,
       replaceExisting: true,
       preserveFrozenServerFullHydratedCorpus:
         reusedAcceptedSnapshot || rawCorpusResolution.source === "paid_pro_source_of_truth",
       agreementId: durableAgreementId,
       // Await durable persist below — never advance into broken final review on 403/404.
       persistFrozenToBackend: false,
+      draftParties: draft?.parties ?? null,
     });
     let signingReadyPlain = resolvePaidProSignerFinalizeSigningReadyPlain({
       hydratedCorpus: corpusForSnapshot,
@@ -33342,7 +33359,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       logSignerMetadataLifecycleEvent("snapshot-write", {
         hash: getAuthoritativeSigningSnapshot()?.hash ?? null,
         signerMetadata,
-        partyManifestPartyNames: partyManifest.parties.map((p) => p.partyName),
+        partyManifestPartyNames: finalizeManifest.parties.map((p) => p.partyName),
       });
       emitPaidProSignerMetadataAuthoritativeWrite({
         path: "finalizePaidProSignerMetadataAndOpenReviewDecision",
@@ -33351,7 +33368,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
     }
     logSnapshotSignerState({
-      partyCount: partyManifest.parties.length,
+      partyCount: finalizeManifest.parties.length,
       signerNames: signerMetadata.partySignerNames,
       emails: [
         signerMetadata.recipient1Email,

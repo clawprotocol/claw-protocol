@@ -84,6 +84,34 @@ describe("mergeReviewLinkRecipientEmailsOntoHydratedDraft", () => {
     expect(out.parties[1].email).toContain("example.org");
   });
 
+  it("does not copy Ironvale's signer onto Alex when primed slots are misaligned", () => {
+    const fetched = {
+      id: "ag-alex",
+      parties: [
+        { id: "p1", name: "Harbor Peak Analytics LLC", role: "Consultant", signerName: "Pat Harbor", email: "pat.harbor@harbor.test" },
+        { id: "p2", name: "Ironvale Manufacturing Inc.", role: "Client", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+        { id: "p3", name: "Alex Rivera", role: "Advisor", email: "alex.rivera@advisor.test" },
+      ],
+    } as AgreementDraft;
+    const primed = {
+      id: "ag-alex",
+      parties: [
+        { name: "Harbor Peak Analytics LLC", role: "Consultant", signerName: "Pat Harbor", email: "pat.harbor@harbor.test" },
+        { name: "Ironvale Manufacturing Inc.", role: "Client", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+        { name: "Ironvale Manufacturing Inc.", role: "party", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+      ],
+    } as AgreementDraft;
+    const out = mergeReviewLinkRecipientEmailsOntoHydratedDraft(fetched, primed);
+    expect(out.parties.map((party) => party.name)).toEqual([
+      "Harbor Peak Analytics LLC",
+      "Ironvale Manufacturing Inc.",
+      "Alex Rivera",
+    ]);
+    expect(out.parties[2]?.role).toBe("Advisor");
+    expect(out.parties[2]?.signerName).toBeFalsy();
+    expect(out.parties[2]?.email).toBe("alex.rivera@advisor.test");
+  });
+
   it("replaces a legal-entity signerName copy with the intake human signer", () => {
     const fetched = {
       id: "ag-3",

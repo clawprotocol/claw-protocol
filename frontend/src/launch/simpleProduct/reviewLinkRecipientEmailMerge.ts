@@ -159,11 +159,19 @@ export function mergeReviewLinkRecipientEmailsOntoHydratedDraft(
   const fetched = (Array.isArray(fetchedDraft.parties) ? [...fetchedDraft.parties] : []) as AgreementParty[];
   const primedList = (primedDraft && Array.isArray(primedDraft.parties) ? [...primedDraft.parties] : []) as AgreementParty[];
 
-  let next = fetched.map((fp, i) => {
-    const prim = primedList[i];
+  let next = fetched.map((fp) => {
+    const prim =
+      primedList.find((row) => {
+        const id = String(row.id ?? "").trim();
+        return Boolean(id && id === String(fp.id ?? "").trim());
+      }) ??
+      primedList.find((row) => {
+        const key = normalizeLegalPartyKey(row.name);
+        return Boolean(key && key === normalizeLegalPartyKey(fp.name));
+      });
     let email = plausibleSlotEmail(fp.email);
     if (!email && prim) email = plausibleSlotEmail(prim.email);
-    const entityName = String(fp.name || prim?.name || "").trim();
+    const entityName = String(fp.name || "").trim();
     const signerName =
       humanSignerNameOrEmpty(fp.signerName, entityName) ||
       humanSignerNameOrEmpty(prim?.signerName, entityName);
@@ -216,6 +224,10 @@ export function mergeLiveDraftWithRecipientSetupForReviewLinks(
   for (let i = 0; i < legalNames.length && i < parties.length; i++) {
     const name = legalNames[i];
     if (!name || parties[i]?.name?.trim() === name) continue;
+    const siblingOwnsName = parties.some(
+      (party, index) => index !== i && normalizeLegalPartyKey(party.name) === normalizeLegalPartyKey(name),
+    );
+    if (siblingOwnsName) continue;
     parties[i] = { ...parties[i], name };
     changed = true;
   }

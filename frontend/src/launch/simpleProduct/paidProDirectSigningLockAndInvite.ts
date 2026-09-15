@@ -33,11 +33,13 @@ export function shouldMintSignTokenForEveryRequiredParticipant(
 }
 
 const SYNTHETIC_PARTY_ID = /^party_\d+$/i;
+const SYNTHETIC_HASH_PARTY_ID = /^party_[0-9a-f]+:[0-9a-f]+$/i;
 
 export function isDurableSigningParticipantId(id: string | null | undefined): id is string {
   const value = String(id || "").trim();
   if (!value || value.startsWith("legacy_")) return false;
   if (SYNTHETIC_PARTY_ID.test(value)) return false;
+  if (SYNTHETIC_HASH_PARTY_ID.test(value)) return false;
   return true;
 }
 

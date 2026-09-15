@@ -22,6 +22,32 @@ describe("reviewEmailPartyRoles", () => {
     expect(isOwnerNormalizedWorkflowRole("service_provider")).toBe(false);
   });
 
+  it("does not copy a sibling signer onto an added Advisor when local slots are misaligned", () => {
+    const serverDraft = {
+      parties: [
+        { id: "p1", name: "Harbor Peak Analytics LLC", role: "Consultant", signerName: "Pat Harbor", email: "pat.harbor@harbor.test" },
+        { id: "p2", name: "Ironvale Manufacturing Inc.", role: "Client", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+        { id: "p3", name: "Alex Rivera", role: "Advisor", email: "alex.rivera@advisor.test" },
+      ],
+    } as AgreementDraft;
+    const localDraft = {
+      parties: [
+        { id: "p1", name: "Harbor Peak Analytics LLC", role: "Consultant", signerName: "Pat Harbor", email: "pat.harbor@harbor.test" },
+        { id: "p2", name: "Ironvale Manufacturing Inc.", role: "Client", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+        { id: "p2-dup", name: "Ironvale Manufacturing Inc.", role: "party", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+      ],
+    } as AgreementDraft;
+    const out = prepareReviewEmailPartyRowsForServer(serverDraft, localDraft);
+    expect(out.map((p) => p.name)).toEqual([
+      "Harbor Peak Analytics LLC",
+      "Ironvale Manufacturing Inc.",
+      "Alex Rivera",
+    ]);
+    expect(out.find((p) => p.name === "Alex Rivera")?.role).toBe("Advisor");
+    expect(out.find((p) => p.name === "Alex Rivera")?.signerName).toBeFalsy();
+    expect(out.find((p) => p.name === "Alex Rivera")?.email).toBe("alex.rivera@advisor.test");
+  });
+
   it("keeps an added individual legal party through review-email prepare", () => {
     const serverDraft = {
       parties: [

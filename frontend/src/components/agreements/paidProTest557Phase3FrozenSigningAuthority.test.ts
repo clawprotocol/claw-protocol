@@ -154,6 +154,77 @@ function freezeTwoPartySnapshot(intake = TEST550_CEDAR_NORTHWIND_INTAKE) {
 describe("paidProTest557 Phase 3 frozen signing authority", () => {
   afterEach(() => resetPhase3Isolation());
 
+  it("binds durable draft party ids for Harbor / Ironvale / Alex", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc";
+    const parties = [
+      {
+        partyIndex: 0,
+        partyLegalName: harbor,
+        signerEmail: "pat.harbor@harbor.test",
+        signerName: "Pat Harbor",
+        signerTitle: "",
+        partyAddress: "",
+      },
+      {
+        partyIndex: 1,
+        partyLegalName: ironvale,
+        signerEmail: "sam.ironvale@ironvale.test",
+        signerName: "Sam Ironvale",
+        signerTitle: "",
+        partyAddress: "",
+      },
+      {
+        partyIndex: 2,
+        partyLegalName: "Alex Rivera",
+        signerEmail: "alex.rivera@advisor.test",
+        signerName: "Alex Rivera",
+        signerTitle: "",
+        partyAddress: "",
+      },
+    ];
+    setConsumedPaidProSignerMetadataAuthority({
+      parties,
+      source: "live_ui",
+      hash: "",
+      updatedAt: Date.now(),
+    });
+    const manifest = buildCanonicalFinalPartyManifestFromAuthority(
+      { parties, source: "live_ui", hash: "", updatedAt: Date.now() },
+      { draftPartyNames: [harbor, ironvale, "Alex Rivera"] },
+    );
+    createAuthoritativeSigningSnapshot({
+      corpus:
+        "CONSULTING AGREEMENT\n\nIN WITNESS WHEREOF\n\nCONSULTANT:\nHarbor Peak Analytics LLC\n\nCLIENT:\nIronvale Manufacturing Inc\n\nADVISOR:\nAlex Rivera",
+      signerMetadata: authorityPartiesToRecipientMetadata(parties),
+      partyManifest: manifest,
+      signatureBlockModel: buildCanonicalSignerManifest({ identities: [], signFirst: true }),
+      authorityParties: parties,
+      replaceExisting: true,
+      draftParties: [
+        { id: "65cc52e7-8f7d-4ee9-ba95-45a2d5eddf68", name: harbor },
+        { id: "5f009b46-ac4f-436f-a188-e520725f54c1", name: `${ironvale}.` },
+        { id: "97ef5b01-384d-45e5-8320-42d87cc1f38c", name: "Alex Rivera" },
+      ],
+    });
+    const frozen = readFrozenSigningAuthoritySnapshot();
+    expect(frozen?.parties.map((party) => party.legalEntityName)).toEqual([
+      harbor,
+      ironvale,
+      "Alex Rivera",
+    ]);
+    expect(frozen?.parties.map((party) => party.agreementPartyId)).toEqual([
+      "65cc52e7-8f7d-4ee9-ba95-45a2d5eddf68",
+      "5f009b46-ac4f-436f-a188-e520725f54c1",
+      "97ef5b01-384d-45e5-8320-42d87cc1f38c",
+    ]);
+    expect(frozen?.signers.map((signer) => signer.signerName)).toEqual([
+      "Pat Harbor",
+      "Sam Ironvale",
+      "Alex Rivera",
+    ]);
+  });
+
   it("Case 1 — two-party packet snapshot preserves stable IDs and corpus hash", () => {
     const { snap, frozen } = freezeTwoPartySnapshot();
     expect(frozen).not.toBeNull();

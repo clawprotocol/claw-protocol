@@ -112,24 +112,47 @@ function executionTailHash(corpus: string): string {
   return hashPaidProCorpus(tail.trim());
 }
 
+const GENERATED_PARTY_ID_RE = /^party_\d+$/i;
+const GENERATED_HASH_PARTY_ID_RE = /^party_[0-9a-f]+:[0-9a-f]+$/i;
+
+function isGeneratedFrozenPartyId(id: string | null | undefined): boolean {
+  const value = String(id || "").trim();
+  return !value || GENERATED_PARTY_ID_RE.test(value) || GENERATED_HASH_PARTY_ID_RE.test(value);
+}
+
 function resolveAgreementPartyIdForManifestIndex(args: {
   index: number;
   legalName: string;
   handoffPartyIds: readonly string[];
   snapshotPartyIds: readonly string[];
+  draftPartyIdsByName?: ReadonlyMap<string, string>;
 }): string {
+  const draftByName = args.draftPartyIdsByName;
+  if (draftByName) {
+    for (const [name, id] of draftByName) {
+      if (partyLegalNamesMatch(name, args.legalName) && !isGeneratedFrozenPartyId(id)) {
+        return id;
+      }
+    }
+  }
   const fromSnapshot = args.snapshotPartyIds[args.index]?.trim();
-  if (fromSnapshot) return fromSnapshot;
+  if (fromSnapshot && !isGeneratedFrozenPartyId(fromSnapshot)) return fromSnapshot;
   const handoff = readStarterToPaidPartyHandoff();
   if (handoff) {
-    const byOrder = handoff.parties.find((p) => p.canonicalOrder === args.index);
-    if (byOrder?.agreementPartyId) return byOrder.agreementPartyId;
     const byName = handoff.parties.find((p) =>
       partyLegalNamesMatch(p.legalEntityName, args.legalName),
     );
-    if (byName?.agreementPartyId) return byName.agreementPartyId;
+    if (byName?.agreementPartyId && !isGeneratedFrozenPartyId(byName.agreementPartyId)) {
+      return byName.agreementPartyId;
+    }
+    const byOrder = handoff.parties.find((p) => p.canonicalOrder === args.index);
+    if (byOrder?.agreementPartyId && !isGeneratedFrozenPartyId(byOrder.agreementPartyId)) {
+      return byOrder.agreementPartyId;
+    }
   }
-  if (args.handoffPartyIds[args.index]?.trim()) return args.handoffPartyIds[args.index].trim();
+  const handoffAtIndex = args.handoffPartyIds[args.index]?.trim();
+  if (handoffAtIndex && !isGeneratedFrozenPartyId(handoffAtIndex)) return handoffAtIndex;
+  if (fromSnapshot) return fromSnapshot;
   return partyIdFromStableKey(args.legalName, args.index);
 }
 
@@ -233,6 +256,11 @@ export function extractRequiredSigningActions(
   return actions;
 }
 
+export type FrozenDraftPartyIdHint = {
+  id?: string | null;
+  name?: string | null;
+};
+
 export type BuildFrozenSigningAuthoritySnapshotArgs = {
   agreementId: string;
   authoritativeSnapshot: AuthoritativeSigningSnapshot;
@@ -240,6 +268,8 @@ export type BuildFrozenSigningAuthoritySnapshotArgs = {
   requiresInitialsByPartyId?: ReadonlyMap<string, boolean>;
   /** Review-only emails not tied to a signing party. */
   reviewerEmails?: readonly { email: string; agreementPartyId?: string }[];
+  /** Durable workspace party ids keyed by legal name — never synthetic party_* hashes. */
+  draftParties?: readonly FrozenDraftPartyIdHint[] | null;
 };
 
 export function buildFrozenSigningAuthoritySnapshotV1(
@@ -251,6 +281,13 @@ export function buildFrozenSigningAuthoritySnapshotV1(
   const snapshotPartyIds = meta.partyIds ?? [];
   const handoff = readStarterToPaidPartyHandoff(args.intakeText ?? undefined);
   const handoffPartyIds = handoff?.parties.map((p) => p.agreementPartyId) ?? [];
+  const draftPartyIdsByName = new Map<string, string>();
+  for (const party of args.draftParties ?? []) {
+    const name = String(party.name ?? "").trim();
+    const id = String(party.id ?? "").trim();
+    if (name.length < 2 || isGeneratedFrozenPartyId(id)) continue;
+    draftPartyIdsByName.set(name, id);
+  }
   const executionRecords = readSignerExecutionAuthority(args.intakeText)?.records ?? [];
 
   const parties: FrozenSigningAuthorityPartyV1[] = manifest.parties
@@ -266,6 +303,7 @@ export function buildFrozenSigningAuthoritySnapshotV1(
           legalName: legalEntityName,
           handoffPartyIds,
           snapshotPartyIds,
+          draftPartyIdsByName,
         }),
         legalEntityName,
         agreementRole: handoffParty?.agreementRole ?? (p.roleLabel?.trim() || undefined),
