@@ -279,6 +279,12 @@ export function extractSignerMetadataFromIntakeContacts(
     const signerName = cleanSignerField(c.name, "signerName");
     const signerTitle = cleanSignerField(c.title, "signerTitle") || titleFromRejectedSignerName(c.name);
     if (!signerName && !signerTitle) continue;
+    const contactText = [c.line, String(intakeRaw || "")].join("\n");
+    const involvementOnly =
+      !entity &&
+      /\bis involved\b/i.test(contactText) &&
+      !/\b(?:signer|signatory|will sign|signing for|authorized signer)\b/i.test(contactText);
+    if (involvementOnly) continue;
     out.push({
       entity,
       signerName,
@@ -686,13 +692,17 @@ function resolveUniversalSignerMetadataBySlotInternal(
       }
     }
     if (!hit && indexOnly[i]?.signerName) {
-      hit = {
-        entity,
-        signerName: indexOnly[i]!.signerName,
-        signerTitle: indexOnly[i]!.signerTitle,
-        source: "intake_natural_language",
-        authorityRank: SIGNER_METADATA_AUTHORITY_RANK.intake_natural_language,
-      };
+      const person = indexOnly[i]!.signerName;
+      const slotIsLegalEntity = Boolean(entity) && !entitiesMatchForSignerMetadata(entity, person);
+      if (!slotIsLegalEntity) {
+        hit = {
+          entity,
+          signerName: person,
+          signerTitle: indexOnly[i]!.signerTitle,
+          source: "intake_natural_language",
+          authorityRank: SIGNER_METADATA_AUTHORITY_RANK.intake_natural_language,
+        };
+      }
     }
     if (!hit) {
       hit = { entity, signerName: "", signerTitle: "", source: "draft_party", authorityRank: 99 };

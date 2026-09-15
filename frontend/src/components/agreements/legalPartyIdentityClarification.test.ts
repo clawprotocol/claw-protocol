@@ -231,6 +231,13 @@ describe("legal party identity clarification", () => {
         intake: inferredIntake,
         body: inferredPaper,
         parsedParties: inferredSignerParties,
+      }),
+    ).toContain(QUESTION);
+    expect(
+      contentClarificationQuestions({
+        intake: inferredIntake,
+        body: inferredPaper,
+        parsedParties: inferredSignerParties,
         unresolvedSubjects: [
           { name: "Alex Rivera", source: "customer_mentioned" },
           { name: "Riley Chen", source: "extraction_only" },

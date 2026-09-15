@@ -167,7 +167,10 @@ export function customerMentionedUnresolvedFromIntake(
     if (
       confirmedParties.some((party) => {
         const signer = String(party.signerName || "").trim();
-        return Boolean(signer) && (samePerson(signer, name) || signer.toLowerCase().startsWith(name.toLowerCase().replace(/'$/, "")));
+        if (!signer) return false;
+        const explicitlyBound = boundSigners.some((bound) => samePerson(bound, name) || samePerson(bound, signer));
+        if (!explicitlyBound) return false;
+        return samePerson(signer, name) || signer.toLowerCase().startsWith(name.toLowerCase().replace(/'$/, ""));
       })
     ) {
       continue;

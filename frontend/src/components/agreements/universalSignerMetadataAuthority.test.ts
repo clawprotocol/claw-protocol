@@ -32,6 +32,7 @@ describe("universalSignerMetadataAuthority", () => {
 
   beforeEach(() => {
     resetSignerMetadataLossDetectionBaseline();
+    clearIntakeSignerMetadataExtractMemoForTests();
     clearConsumedPaidProSignerMetadataAuthority();
     vi.stubEnv("VITE_PAID_PRO_SIGNER_METADATA_DEBUG", "1");
     vi.stubGlobal("sessionStorage", {
@@ -83,6 +84,35 @@ describe("universalSignerMetadataAuthority", () => {
       true,
     );
     expect(hits.some((h) => h.entity.includes("Iron Vale") && h.signerName === "Jim Summit")).toBe(true);
+  });
+
+  it("does not slot-assign an involvement-only person as a company signer", () => {
+    const intake =
+      "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Scope is AI workflow implementation. Fixed fee $48,000. Governing law Delaware. Alex Rivera, alex.rivera@advisor.test, is involved.";
+    const extracted = extractSignerMetadataFromIntake(intake);
+    expect(
+      extracted.candidates.filter((row) => /Alex Rivera/i.test(row.signerName)),
+      JSON.stringify(extracted.candidates),
+    ).toEqual([]);
+    const resolved = resolveUniversalSignerMetadataBySlot({
+      legalEntities: ["Harbor Peak Analytics LLC", "Ironvale Manufacturing Inc."],
+      intakeText: intake,
+    });
+    expect(resolved.map((row) => row.signerName)).toEqual(["", ""]);
+    const seeded = runPaidProSignerMetadataAuthoritySeed({
+      stage: "identity_involved_not_signer",
+      legalEntities: ["Harbor Peak Analytics LLC", "Ironvale Manufacturing Inc."],
+      intakeText: intake,
+      draft: {
+        parties: [
+          { name: "Harbor Peak Analytics LLC", role: "Consultant" },
+          { name: "Ironvale Manufacturing Inc.", role: "Client" },
+        ],
+      },
+    });
+    expect((seeded.draft?.parties || []).some((party) => /Alex Rivera/i.test(String(party.signerName || "")))).toBe(
+      false,
+    );
   });
 
   it("resolves multiple entities with different signers from intake", () => {
