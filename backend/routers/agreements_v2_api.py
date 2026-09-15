@@ -12808,10 +12808,16 @@ def _required_signing_parties(draft: AgreementDraft) -> List[Any]:
 
 
 def _all_signers_signed_from_audit(draft: AgreementDraft, audit: List[Any]) -> bool:
-    from backend.services.vs01_signer_completion import all_signers_signed_from_audit
-
-    body = draft.model_dump() if hasattr(draft, "model_dump") else {}
-    return all_signers_signed_from_audit(body, audit)
+    signers = _required_signing_parties(draft)
+    if not signers:
+        return False
+    done = _signature_completed_participant_ids(audit)
+    ids = [(p.id or "").strip() for p in signers]
+    if all(ids):
+        return bool(ids) and all(i in done for i in ids)
+    if len(signers) == 1:
+        return _has_legacy_signature_without_participant(audit)
+    return False
 
 
 def public_agreement_verify_enabled() -> bool:

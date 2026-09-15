@@ -207,6 +207,49 @@ def test_consultant_client_advisor_without_packet_are_required_signers() -> None
     assert all_signers_signed_from_audit(draft, three) is True
 
 
+def test_ceremony_gate_counts_audit_event_models_plus_latest_dict() -> None:
+    from backend.routers.agreements_v2_api import (
+        AgreementDraft,
+        AgreementParty,
+        AuditEvent,
+        _all_signers_signed_from_audit,
+    )
+
+    draft = AgreementDraft(
+        id="ag_legal_roles",
+        created_at="2026-09-15T00:00:00Z",
+        updated_at="2026-09-15T00:00:00Z",
+        title="Consulting Agreement",
+        jurisdiction="DE",
+        parties=[
+            AgreementParty(id="p1", name="Harbor Peak Analytics LLC", role="Consultant"),
+            AgreementParty(id="p2", name="Ironvale Manufacturing Inc.", role="Client"),
+            AgreementParty(id="p3", name="Alex Rivera", role="Advisor"),
+        ],
+        audit_log=[
+            AuditEvent(
+                event_type="signature_completed",
+                at="2026-09-15T00:01:00Z",
+                value={"participant_id": "p1", "typed_name": "Pat Harbor"},
+            ),
+            AuditEvent(
+                event_type="signature_completed",
+                at="2026-09-15T00:02:00Z",
+                value={"participant_id": "p2", "typed_name": "Sam Ironvale"},
+            ),
+        ],
+    )
+    mixed = list(draft.audit_log) + [
+        {
+            "event_type": "signature_completed",
+            "at": "2026-09-15T00:03:00Z",
+            "value": {"participant_id": "p3", "typed_name": "Alex Rivera"},
+        }
+    ]
+    assert _all_signers_signed_from_audit(draft, list(draft.audit_log)) is False
+    assert _all_signers_signed_from_audit(draft, mixed) is True
+
+
 def test_explicit_requires_signature_false_excludes_reviewer_only_extra() -> None:
     draft = {
         "parties": [
