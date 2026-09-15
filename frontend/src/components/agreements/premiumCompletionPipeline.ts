@@ -2499,6 +2499,8 @@ async function runPremiumCompletionInner(
           body: doc,
           structuralIssues,
           serverMissing: effectiveFull.missing_material_info ?? undefined,
+          parsedParties: merged.parties,
+          additionalTerms: merged.additional_terms || null,
         });
         const postProcessMs = Math.round(
           (typeof performance !== "undefined" ? performance.now() : Date.now()) - postProcessStartedAt,

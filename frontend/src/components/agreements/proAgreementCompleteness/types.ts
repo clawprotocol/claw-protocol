@@ -47,4 +47,6 @@ export type ProCompletenessContext = {
   partyNames?: readonly string[];
   agreementFamily?: AgreementFamily | null;
   surface: string;
+  parsedParties?: readonly { name: string; role: string; email?: string; signerName?: string }[];
+  additionalTerms?: string | null;
 };

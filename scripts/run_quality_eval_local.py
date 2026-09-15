@@ -167,7 +167,20 @@ def main() -> int:
                     'CLAW_QUALITY_EVAL_BUDGET_PATH': str(ledger),
                     'CLAW_QUALITY_EVAL_INCREMENT_PATH': increment_selection['path'],
                     'CLAW_QUALITY_EVAL_LIVE': '1', 'QUALITY_EVAL_FILLED_ONLY': '1',
-                    'QUALITY_EVAL_RESULT_DIR': str(out)})
+                    'QUALITY_EVAL_RESULT_DIR': str(out),
+                    # TRACE is metadata-only (hashes/lengths). Restricted rejected-paper
+                    # capture requires TRACE+DUMP+matching eval auth; never enable DUMP here.
+                    'CLAW_DRAFT_QUALITY_TRACE': '1'})
+        if (os.environ.get('CLAW_DRAFT_QUALITY_TRACE_DUMP') or '').strip() in {'1', 'true', 'yes', 'on'}:
+            auth = (os.environ.get('CLAW_DRAFT_QUALITY_EVAL_AUTH') or '').strip()
+            expected = (os.environ.get('CLAW_DRAFT_QUALITY_EVAL_AUTH_EXPECTED') or '').strip()
+            if auth and expected and auth == expected:
+                env['CLAW_DRAFT_QUALITY_TRACE_DUMP'] = '1'
+                env['CLAW_DRAFT_QUALITY_EVAL_AUTH'] = auth
+                env['CLAW_DRAFT_QUALITY_EVAL_AUTH_EXPECTED'] = expected
+                dump_dir = (os.environ.get('CLAW_DRAFT_QUALITY_TRACE_DIR') or '').strip()
+                if dump_dir:
+                    env['CLAW_DRAFT_QUALITY_TRACE_DIR'] = dump_dir
         print(
             f"live_model=gpt-5.4; increment_authorized={increment_selection['authorized']}; "
             f"increment_active={increment_selection['active']}; leftover one-pager excluded; SDK retries disabled",

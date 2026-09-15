@@ -27,6 +27,9 @@ CRITICAL_BE=(
   backend/tests/test_vs01_signer_completion.py
   backend/tests/test_commercial_beta_lifecycle.py
   backend/tests/test_explicit_acceptance_http_e2e.py
+  backend/tests/test_legal_party_representative_bind.py
+  backend/tests/test_harbor_six_row_production_path.py
+  backend/tests/test_draft_quality_trace.py
 )
 
 echo "== Phase 2 paid-journey release gate =="

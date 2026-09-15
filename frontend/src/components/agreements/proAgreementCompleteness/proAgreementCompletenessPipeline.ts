@@ -55,6 +55,8 @@ export function applyProAgreementCompletenessPipeline(
     body: working,
     structuralIssues: issues,
     serverMissing: ctx.serverMissingMaterial,
+    parsedParties: ctx.parsedParties,
+    additionalTerms: ctx.additionalTerms,
   });
 
   const structuralOk =

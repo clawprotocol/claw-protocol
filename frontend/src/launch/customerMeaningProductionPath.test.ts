@@ -328,7 +328,7 @@ describe("Harbor 20260915 live-failure local correction", () => {
     expect(request.effective_date).toBeNull();
   });
 
-  it("keeps Harbor Consultant→Client economics through Apply, saved retrieval, and reopen", () => {
+  it("function-level Harbor role/purpose coverage (structuredClone is not Apply, GET, or reopen)", () => {
     const first = [
       'This Consulting Services Agreement is entered into by and between Harbor Peak Analytics LLC ("Consultant") and Ironvale Manufacturing Inc. ("Client").',
       "1. Services",

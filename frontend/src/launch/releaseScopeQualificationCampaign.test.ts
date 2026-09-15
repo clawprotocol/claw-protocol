@@ -120,12 +120,22 @@ describe("release-scope qualification campaign facts", () => {
       "src/launch/releaseScopeQualificationJourney.test.ts",
       "src/launch/qualityEvalCustomerPaper.test.ts",
       "src/launch/customerMeaningProductionPath.test.ts",
+      "src/components/agreements/legalPartyRepresentativeBind.test.ts",
+      "src/components/agreements/legalPartyIdentityClarification.test.ts",
       "src/components/agreements/paidProPartyEconomicRelationships.test.ts",
       "src/components/agreements/paidProMilestonePayer.test.ts",
       "src/components/agreements/paymentClarificationApplyRecovery.test.ts",
       "src/vs01/paidProTest465RecipientIsolation.test.ts",
     ]) {
       expect(config).toContain(`"${path}"`);
+    }
+    const phase2 = readFileSync(join(process.cwd(), "../scripts/run_phase2_paid_journey_release_gate.sh"), "utf8");
+    for (const path of [
+      "backend/tests/test_legal_party_representative_bind.py",
+      "backend/tests/test_harbor_six_row_production_path.py",
+      "backend/tests/test_draft_quality_trace.py",
+    ]) {
+      expect(phase2).toContain(path);
     }
   });
 

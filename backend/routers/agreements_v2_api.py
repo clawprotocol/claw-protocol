@@ -1302,6 +1302,54 @@ def _premium_full_draft_model_to_wire_dict(model: PremiumFullDraftResponse) -> D
     return _premium_full_draft_sanitize_wire_nested(dumped)
 
 
+def _persist_draft_quality_trace_before_wire(
+    dq_trace: Any,
+    model: PremiumFullDraftResponse,
+    *,
+    rejected_corpus: str = "",
+) -> None:
+    """Persist TRACE metadata, and DUMP-authorized redacted rejected paper, before the wire is emptied."""
+    if dq_trace is None or not getattr(dq_trace, "enabled", False):
+        return
+    reasons = list(getattr(model, "schema_validation_reasons", None) or [])
+    validation = getattr(model, "agreement_validation", None)
+    validation_reasons = list(getattr(validation, "reasons", None) or [])
+    dq_trace.generation_outcome = str(
+        getattr(model, "generation_outcome", "")
+        or getattr(model, "server_generation_failure_code", "")
+        or ""
+    )
+    dq_trace.gate_reasons = (validation_reasons or reasons)[:32]
+    if rejected_corpus:
+        dq_trace.record_stage(
+            "rejected_paper_before_wire_empty",
+            rejected_corpus,
+            extra={
+                "failure_code": str(getattr(model, "server_generation_failure_code", "") or ""),
+                "validation_passed": bool(getattr(validation, "passed", True)),
+                "wire_will_empty": True,
+            },
+        )
+    try:
+        persisted = dq_trace.persist_local()
+        dq_trace.safe_log_event(dq_trace.generation_outcome or "complete")
+        log.info(
+            "[draft-quality-trace] event=persist_before_wire trace_id=%s persisted=%s "
+            "stages=%s llm_calls=%s dump_authorized=%s rejected_len=%s",
+            getattr(dq_trace, "trace_id", ""),
+            "1" if persisted else "0",
+            len(getattr(dq_trace, "stages", []) or []),
+            len(getattr(dq_trace, "llm_calls", []) or []),
+            int(bool(rejected_corpus)),
+            len(rejected_corpus or ""),
+        )
+    except Exception as persist_exc:
+        log.warning(
+            "[draft-quality-trace] event=persist_failed err=%s",
+            type(persist_exc).__name__,
+        )
+
+
 def _premium_full_draft_finalize_http_response(
     model: PremiumFullDraftResponse,
     *,
@@ -1309,20 +1357,34 @@ def _premium_full_draft_finalize_http_response(
     session_hint: str,
     server_timing: Optional[PaidProServerTiming] = None,
     request: Optional[Request] = None,
+    dq_trace: Any = None,
+    rejected_corpus: str = "",
 ) -> Response:
     """
     Single JSON serialization to bytes — avoids streaming/partial frames and catches wire-unsafe text
     before any response bytes are committed.
     """
+    captured_rejected = rejected_corpus
     if model.generation_ok and model.agreement_validation is not None and not model.agreement_validation.passed:
         # Final boundary: neither normal nor degraded paths may contradict validation.
         # Keep questions/diagnostics, never put rejected bytes in an authority alias.
+        captured_rejected = captured_rejected or (
+            model.document_text or model.authoritative_draft or model.server_full_document_text or ""
+        )
+        _persist_draft_quality_trace_before_wire(dq_trace, model, rejected_corpus=captured_rejected)
         model = model.model_copy(update={
             "generation_ok": False, "retryable": True, "generation_outcome": "degraded",
             "document_text": "", "authoritative_draft": "", "server_full_document_text": "",
             "server_repair_document_text": "", "server_generation_failure_code": "agreement_validation_failed",
             "server_generation_failure_message": "The draft did not pass document checks. Your Pro access is saved. Please retry; no rejected agreement was frozen.",
         })
+    elif dq_trace is not None:
+        failed_body = captured_rejected
+        if not failed_body and not model.generation_ok:
+            failed_body = (
+                model.document_text or model.authoritative_draft or model.server_full_document_text or ""
+            )
+        _persist_draft_quality_trace_before_wire(dq_trace, model, rejected_corpus=failed_body)
     serialize_started = time.perf_counter()
     try:
         wire = _premium_full_draft_model_to_wire_dict(model)
@@ -3714,6 +3776,16 @@ def _parse_premium_intake_result(raw: Dict[str, Any], intake_text: str = "") -> 
             s = str(x).strip() if x is not None else ""
             if s and len(material_asks) < 8:
                 material_asks.append(s)
+    if intake_text:
+        from backend.agreements.legal_party_representative_bind import bind_representatives_to_legal_parties
+
+        bound_asks = bind_representatives_to_legal_parties(
+            [p for p in (raw.get("parties") or []) if isinstance(p, dict)],
+            intake_text,
+        )
+        question = str(bound_asks.get("clarification_question") or "").strip()
+        if question and question not in material_asks and len(material_asks) < 8:
+            material_asks.append(question)
     hint_raw = raw.get("agreement_family_hint")
     hint_s: Optional[str] = None
     if hint_raw is not None:
@@ -5436,6 +5508,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
         len(intake_s),
         len(json.dumps(user_payload, ensure_ascii=False)),
     )
+    dq_trace = None
     if not (OPENAI_API_KEY or "").strip():
         log.error("premium_full_draft event=config_error category=missing_env OPENAI_API_KEY_unset=1")
         dm = _premium_full_draft_degraded_response(
@@ -5455,6 +5528,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             session_hint=session_hint,
             server_timing=server_timing,
             request=request,
+            dq_trace=dq_trace,
         )
     primary_temp = 0.2 if sim_regen else 0.15
     _ablation_temp = ablation_temperature_override()
@@ -5536,6 +5610,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 session_hint=session_hint,
                 server_timing=server_timing,
                 request=request,
+                dq_trace=dq_trace,
             )
         if dq_trace.enabled:
             u0 = dq_usage_primary[-1] if dq_usage_primary else {}
@@ -5607,6 +5682,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                     session_hint=session_hint,
                     server_timing=server_timing,
                     request=request,
+                    dq_trace=dq_trace,
                 )
             log.warning(
                 "[premium-full-draft] event=json_parse_no_substantive_body "
@@ -5688,6 +5764,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                         session_hint=session_hint,
                         server_timing=server_timing,
                         request=request,
+                        dq_trace=dq_trace,
                     )
                 log.warning(
                     "[premium-full-draft] event=json_parse_regen_still_degraded "
@@ -6112,6 +6189,8 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 session_hint=session_hint,
                 server_timing=server_timing,
                 request=request,
+                dq_trace=dq_trace,
+                rejected_corpus=doc,
             )
         log.info(
             "premium_full_draft_quality_event event=premium_full_draft_render_source source=%s doc_len=%s",
@@ -6204,6 +6283,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 session_hint=session_hint,
                 server_timing=server_timing,
                 request=request,
+                dq_trace=dq_trace,
             )
 
         dq_summary: Optional[Dict[str, Any]] = None
@@ -6219,27 +6299,10 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 },
             )
             # Metadata-only summary may attach on non-production when TRACE=1.
-            # Full corpora never ride the HTTP response.
+            # Full corpora never ride the HTTP response. Persist happens in finalize
+            # so rejection paths also capture DUMP-authorized paper before the wire empties.
             if api_trace_summary_allowed():
                 dq_summary = dq_trace.summary()
-            try:
-                persisted = dq_trace.persist_local()
-                dq_trace.safe_log_event("complete")
-                log.info(
-                    "[draft-quality-trace] event=complete_meta trace_id=%s persisted=%s "
-                    "stages=%s llm_calls=%s finish_reasons=%s api_summary=%s",
-                    dq_trace.trace_id,
-                    "1" if persisted else "0",
-                    len(dq_trace.stages),
-                    len(dq_trace.llm_calls),
-                    ",".join(str(c.get("finish_reason") or "") for c in dq_trace.llm_calls),
-                    int(dq_summary is not None),
-                )
-            except Exception as persist_exc:
-                log.warning(
-                    "[draft-quality-trace] event=persist_failed err=%s",
-                    type(persist_exc).__name__,
-                )
         ok_model = PremiumFullDraftResponse(
             title=out.title,
             agreement_family=out.agreement_family,
@@ -6264,6 +6327,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             session_hint=session_hint,
             server_timing=server_timing,
             request=request,
+            dq_trace=dq_trace,
         )
     except Exception as exc:
         code, log_detail = _classify_premium_full_draft_failure(exc)
@@ -6343,6 +6407,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             session_hint=session_hint,
             server_timing=server_timing,
             request=request,
+            dq_trace=dq_trace,
         )
 
 

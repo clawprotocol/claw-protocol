@@ -15,11 +15,14 @@ Campaign facts: `RELEASE_SCOPE_QUALIFICATION_CAMPAIGN_2026-09-14.md` and
 
 Matching no-spend evidence for a later live run of the **same product files**:
 
-- Offline Harbor/SaaS: `quality-eval-offline-journey/20260915T032105Z-61873` (`OFFLINE_JOURNEY_PASS`, `model_calls=0`). Older `20260914T220448Z-23971` is preserved and is not hash-identical to this candidate.
-- Official stub: `d261556bfcf99cb7b6b1eaf6966f4fb583af7f11+src-1ddff56f95efd470971acff04d43eae0b3a1b85c+run-20260915T030701Z-59511` (`gate_green=true`). Historical `src-60a08067992d` / `src-64516accffb1` do not certify these official hashed files.
+- Harbor six-row parse replay persist (current tree): `quality-eval-offline-journey/20260915T153058Z-80080`. Drafting was the labeled acceptance stub, **not** the withheld 20260915 rejected corpus. StructuredClone customer-meaning coverage is function-level only.
+- Three-party Oklahoma review/sign/final: `quality-eval-offline-journey/20260915T153707Z-81175`.
+- Four-party Massachusetts review/sign/final: `quality-eval-offline-journey/20260915T154454Z-81794`.
+- Official stub on this tree: `4742fa2c76160fa02f2aaa4319c7c422337c84ee+src-2b1586295617893823fa43b79cd1a406b58ab8ae+run-20260915T154940Z-82412` (`gate_green=true`). Historical `src-97cb23bd` / `src-1ddff56f95ef` / `src-60a08067992d` do not certify these official hashed files.
+- Older Harbor+SaaS offline `20260915T032105Z-61873` is preserved and is not hash-identical to this candidate.
 
-Campaign and register files added after that rematch change quality-eval `source_files_sha256`.  
-Before any later `--live`, rematch `--offline-journey --case all` on the checkpoint tree and use **that** PASS dir. Do not treat `61873` as hash-identical after this documentation checkpoint. Official fingerprint `src-1ddff56f95ef` still maps the official hashed product files unless those files change.
+Campaign, identity-bind, and register files change quality-eval `source_files_sha256`.  
+Before any later `--live`, rematch `--offline-journey --case all` on the checkpoint tree and use **that** PASS dir. Official fingerprint `src-2b158629` maps the current official hashed product files unless those files change. This local correction is **not** a new live grant.
 
 ## Ledger (official; not reset)
 

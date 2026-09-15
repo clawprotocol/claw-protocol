@@ -1,0 +1,48 @@
+[
+  {
+    "path": "/api/agreements/parse",
+    "status": 200,
+    "request": { "ai_model_class": "premium" },
+    "body": {
+      "draft": {
+        "title": "AI Workflow Implementation Consulting Services Agreement",
+        "jurisdiction": "Delaware",
+        "parties": [
+          { "name": "Harbor Peak Analytics LLC", "role": "Consultant" },
+          { "name": "Ironvale Manufacturing Inc", "role": "Client" },
+          { "name": "Maya Chen", "role": "Consultant signer" },
+          { "name": "Jordan Hale", "role": "Client signer" },
+          { "name": "maya.chen@harborpeak.test", "role": "Consultant signer email" },
+          { "name": "jordan.hale@ironvale.test", "role": "Client signer email" }
+        ],
+        "purpose": "Harbor Peak Analytics LLC will provide consulting services to Ironvale Manufacturing Inc focused on AI workflow implementation.",
+        "payment_terms": "Ironvale Manufacturing Inc will pay Harbor Peak Analytics LLC a fixed fee of $48,000 for the AI workflow implementation consulting services."
+      },
+      "extract": {
+        "material_asks": [],
+        "agreement_family_hint": "services",
+        "confidence": "high"
+      }
+    }
+  },
+  {
+    "path": "/api/agreements/parse",
+    "status": 200,
+    "request": { "ai_model_class": "basic" },
+    "body": {
+      "draft": {
+        "title": "Consulting Services Agreement",
+        "jurisdiction": "Delaware",
+        "parties": [
+          { "name": "Harbor Peak Analytics LLC", "role": "Consultant" },
+          { "name": "Ironvale Manufacturing Inc", "role": "Client" }
+        ],
+        "purpose": "AI workflow implementation",
+        "payment_terms": "Fixed fee $48,000",
+        "duration": "twelve months",
+        "effective_date": "October 1, 2026"
+      },
+      "extract": { "material_asks": [], "confidence": "medium" }
+    }
+  }
+]

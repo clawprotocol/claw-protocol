@@ -203,7 +203,8 @@ describe("Alex/PixelForge signer finalize signing-ready", () => {
     expect(records[1]?.fullLegalName).toBe(PIXEL);
     const repaired = ensurePaidProServicesAgreementOpening(untitled, records, INTAKE);
     expect(repaired.text).toMatch(/^SERVICES AGREEMENT/m);
-    expect(repaired.text).toMatch(/entered into as of the Effective Date/i);
+    expect(repaired.text).toMatch(/entered into by and between/i);
+    expect(repaired.text).not.toMatch(/entered into as of the Effective Date/i);
     expect(repaired.text).toContain(ALEX);
     expect(repaired.text).toContain(PIXEL);
   });

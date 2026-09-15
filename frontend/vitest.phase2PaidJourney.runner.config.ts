@@ -103,6 +103,8 @@ const PHASE2_JOURNEY_ONLY = [
   "src/launch/ownerSignedAgreementPresentation.test.ts",
   "src/agreement/nPartySigning.test.ts",
   "src/launch/customerMeaningProductionPath.test.ts",
+  "src/components/agreements/legalPartyRepresentativeBind.test.ts",
+  "src/components/agreements/legalPartyIdentityClarification.test.ts",
   "src/components/agreements/paidProPartyEconomicRelationships.test.ts",
   "src/components/agreements/paidProMilestonePayer.test.ts",
   "src/components/agreements/paymentClarificationApplyRecovery.test.ts",

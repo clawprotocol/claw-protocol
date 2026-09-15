@@ -56,6 +56,14 @@ CONTENT_FP="$(
       frontend/src/components/agreements/paidProAgreementRecitalRepair.ts \
       frontend/src/components/agreements/paidProOpeningRoleLabelConsistency.ts \
       frontend/src/components/agreements/canonicalPartyIdentityResolver.ts \
+      frontend/src/components/agreements/legalPartyRepresentativeBind.ts \
+      frontend/src/components/agreements/legalPartyIdentityClarification.ts \
+      backend/agreements/legal_party_representative_bind.py \
+      backend/agreements/draft_quality_trace.py \
+      backend/tests/test_legal_party_representative_bind.py \
+      backend/tests/test_harbor_six_row_production_path.py \
+      backend/tests/test_draft_quality_trace.py \
+      scripts/run_quality_eval_local.py \
       frontend/e2e/core-paid-journey-live/corePaidJourneyLiveAuth.ts \
       backend/tests/test_core_paid_journey_acceptance.py \
       backend/llm_acceptance_stub.py \

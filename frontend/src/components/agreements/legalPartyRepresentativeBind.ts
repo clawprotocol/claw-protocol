@@ -30,17 +30,29 @@ export type BoundRepresentative = {
 export type RepresentativeBindResult = {
   parties: BindableParty[];
   boundRepresentatives: BoundRepresentative[];
+  unresolvedExtractionRows: BindableParty[];
   clarificationQuestion: string | null;
 };
 
 const ENTITY_SUFFIX_RE =
   /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.)\b/i;
 
+const ENTITY_NAME =
+  "[A-Z][A-Za-z0-9&'.-]+(?:\\s+[A-Z][A-Za-z0-9&'.-]+){0,6}\\s+(?:LLC|L\\.L\\.C\\.|Inc\\.?|Incorporated|Corp\\.?|Corporation|Ltd\\.?|Limited|LLP|PLLC|LP|L\\.P\\.)\\.?";
+
 const ROLE_SIGNER_LINE_RE =
   /\b(consultant|client|customer|provider|service\s+provider|contractor)\s+signer[:\s]+([A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+){0,3})(?:[, ]+([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}))?/gi;
 
+const ENTITY_SIGNER_LINE_RE = new RegExp(
+  `(${ENTITY_NAME})\\s+signer[:\\s]+([A-Z][A-Za-z'.-]+(?:\\s+[A-Z][A-Za-z'.-]+){0,3})(?:[^@\\n]*?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}))?`,
+  "g",
+);
+
 const INDIVIDUAL_CONTRACTING_RE =
-  /\b([A-Z][a-z]+(?:\s+[A-Z][a-z'.-]+){0,3})\s+(?:as\s+an\s+individual|\(individual\)|\(an\s+individual\))/i;
+  /\b([A-Z][a-z]+(?:\s+[A-Z][a-z'.-]+){0,3})\s+(?:as\s+an\s+individual|\(individual\)|\(an\s+individual\))(?:\s*\(\s*([A-Za-z][A-Za-z\s-]{1,40})\s*\))?/g;
+
+const CONTRACTING_PARTY_RE =
+  /\b([A-Z][a-z]+(?:\s+[A-Z][a-z'.-]+){0,3})\s+is\s+(?:a|the)\s+(?:(?:second|third|fourth)\s+)?(?:contracting|legal)\s+party/gi;
 
 const REPRESENTATIVE_ROLE_RE =
   /\b(?:signer|signatory|authorized\s+signer|notice\s+contact|email)\b/i;
@@ -56,6 +68,13 @@ function normKey(value: string): string {
   return normalizeAgreementPartyName(value).toLowerCase();
 }
 
+function personNamesMatch(a: string, b: string): boolean {
+  const left = normKey(a);
+  const right = normKey(b);
+  if (!left || !right) return false;
+  return left === right || left.replace(/\.$/, "") === right.replace(/\.$/, "");
+}
+
 function isLegalEntityName(name: string): boolean {
   const cleaned = normalizeAgreementPartyName(name);
   if (!cleaned) return false;
@@ -69,6 +88,8 @@ function isRepresentativeRole(role: string): boolean {
 }
 
 function parentRoleFromRepresentativeRole(role: string): string | null {
+  const labeled = String(role || "").match(/^\s*(.+?)\s+signer(?:\s+email)?\s*$/i);
+  if (labeled?.[1]) return labeled[1].toLowerCase().replace(/\s+/g, " ").trim();
   const m = String(role || "").match(
     /\b(consultant|client|customer|provider|service\s+provider|contractor)\b/i,
   );
@@ -91,6 +112,22 @@ export function extractRoleSignerInstructions(
   return out;
 }
 
+export function extractEntitySignerInstructions(
+  intake: string,
+): Array<{ entity: string; signerName: string; email: string }> {
+  const out: Array<{ entity: string; signerName: string; email: string }> = [];
+  const re = new RegExp(ENTITY_SIGNER_LINE_RE.source, "g");
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(intake || "")) !== null) {
+    out.push({
+      entity: (match[1] || "").replace(/\s+/g, " ").trim(),
+      signerName: (match[2] || "").replace(/\s+/g, " ").trim(),
+      email: (match[3] || "").trim(),
+    });
+  }
+  return out;
+}
+
 function intakeRoleHints(intake: string, entities: readonly string[]): Record<string, string> {
   const structured = parseIntakeToStructuredAgreement(intake);
   const between = extractBetweenPartySegmentRoleHints(intake);
@@ -104,7 +141,7 @@ function intakeRoleHints(intake: string, entities: readonly string[]): Record<st
       continue;
     }
     for (const [hintKey, role] of Object.entries(merged)) {
-      if (key.includes(hintKey) || hintKey.includes(key)) {
+      if (key === hintKey || key.replace(/\.$/, "") === hintKey.replace(/\.$/, "")) {
         out[key] = role;
         break;
       }
@@ -113,25 +150,38 @@ function intakeRoleHints(intake: string, entities: readonly string[]): Record<st
   return out;
 }
 
-function entityForRoleHint(entities: readonly string[], hints: Record<string, string>, role: string): string | null {
+function entityForRoleHint(
+  entities: readonly string[],
+  hints: Record<string, string>,
+  role: string,
+  slotRoles?: Record<string, string>,
+): string | null {
   const want = role.toLowerCase().replace(/\s+/g, " ");
-  if (!want) return null;
+  if (!want || want.length < 3) return null;
   for (const entity of entities) {
-    const hint = (hints[normKey(entity)] || "").toLowerCase().replace(/\s+/g, " ");
+    const hint = (hints[normKey(entity)] || slotRoles?.[normKey(entity)] || "").toLowerCase().replace(/\s+/g, " ");
     if (hint && (hint === want || hint.includes(want) || want.includes(hint))) return entity;
   }
   return null;
 }
 
-function individualContractingNames(intake: string): string[] {
-  const names: string[] = [];
-  const re = new RegExp(INDIVIDUAL_CONTRACTING_RE.source, "gi");
+function individualContracting(intake: string): Record<string, string> {
+  const found: Record<string, string> = {};
+  const individualRe = new RegExp(INDIVIDUAL_CONTRACTING_RE.source, "g");
   let match: RegExpExecArray | null;
-  while ((match = re.exec(intake || "")) !== null) {
+  while ((match = individualRe.exec(intake || "")) !== null) {
     const name = (match[1] || "").replace(/\s+/g, " ").trim();
-    if (name && isLikelyHumanSignerName(name)) names.push(name);
+    const role = (match[2] || "").replace(/\s+/g, " ").trim();
+    if (name && isLikelyHumanSignerName(name)) found[name] = role ? titleCaseRole(role) : "Individual";
   }
-  return names;
+  const contractingRe = new RegExp(CONTRACTING_PARTY_RE.source, "gi");
+  while ((match = contractingRe.exec(intake || "")) !== null) {
+    const name = (match[1] || "").replace(/\s+/g, " ").trim();
+    if (name && isLikelyHumanSignerName(name) && !Object.keys(found).some((prev) => personNamesMatch(prev, name))) {
+      found[name] = "Individual";
+    }
+  }
+  return found;
 }
 
 export function applyExplicitIntakeRolesToParties<T extends BindableParty>(
@@ -140,16 +190,22 @@ export function applyExplicitIntakeRolesToParties<T extends BindableParty>(
 ): T[] {
   const names = parties.map((p) => String(p.name || "").trim()).filter(Boolean);
   const hints = intakeRoleHints(intake || "", names);
+  const individuals = individualContracting(intake || "");
   return parties.map((party) => {
     const hint = hints[normKey(party.name || "")];
-    if (!hint || !isPreservableIntakeRole(hint)) return party;
-    return { ...party, role: titleCaseRole(hint) };
+    if (hint && isPreservableIntakeRole(hint)) return { ...party, role: titleCaseRole(hint) };
+    const individualRole = Object.entries(individuals).find(([name]) => personNamesMatch(name, party.name || ""))?.[1];
+    if (individualRole && (!party.role || party.role === "party" || isRepresentativeRole(party.role))) {
+      return { ...party, role: individualRole };
+    }
+    return party;
   });
 }
 
 /**
  * Collapse signer/email rows onto the represented legal parties.
  * Does not drop people who are explicitly contracting as individuals.
+ * Email resemblance never establishes representation.
  */
 export function bindRepresentativesToLegalParties(
   parties: readonly BindableParty[],
@@ -174,10 +230,20 @@ export function bindRepresentativesToLegalParties(
 
   const hints = intakeRoleHints(intake, entities);
   const roleSigners = extractRoleSignerInstructions(intake);
-  const entitySigners = matchSignerForEntityIsClauses(intake);
-  const individuals = individualContractingNames(intake);
+  const entityLineSigners = extractEntitySignerInstructions(intake);
+  const entitySigners = [
+    ...matchSignerForEntityIsClauses(intake),
+    ...entityLineSigners.map((item) => ({
+      entity: item.entity,
+      signerName: item.signerName,
+      signerTitle: "",
+    })),
+  ];
+  const slotRoles: Record<string, string> = {};
+  const individuals = individualContracting(intake);
   const bound: BoundRepresentative[] = [];
-  const extras: BindableParty[] = [];
+  const confirmedIndividuals: BindableParty[] = [];
+  const unresolved: BindableParty[] = [];
 
   const slots = new Map<string, BindableParty>();
   for (const entity of entities) {
@@ -189,6 +255,7 @@ export function bindRepresentativesToLegalParties(
       signerName: row?.signerName && isLikelyHumanSignerName(row.signerName) ? row.signerName : "",
       signerTitle: row?.signerTitle || "",
     });
+    slotRoles[normKey(entity)] = slots.get(normKey(entity))!.role;
   }
 
   const bindTo = (entityName: string, patch: Partial<BindableParty>, sourceName: string, kind: BoundRepresentative["kind"]) => {
@@ -212,33 +279,36 @@ export function bindRepresentativesToLegalParties(
     if (!row.name) continue;
     if (entities.some((entity) => partyLegalNamesMatch(entity, row.name))) continue;
 
-    if (looksLikeEmail(row.name) || looksLikeEmail(row.email)) {
-      const email = looksLikeEmail(row.name) ? row.name : row.email;
-      const domainEntity = entities.find((entity) => {
-        const lead = entity.split(/\s+/)[0]?.toLowerCase() || "";
-        return lead.length >= 4 && email.toLowerCase().includes(lead);
-      });
-      const roleEntity = entityForRoleHint(entities, hints, parentRoleFromRepresentativeRole(row.role) || "");
-      const target = domainEntity || roleEntity;
-      if (target && bindTo(target, { email }, email, "email")) continue;
-      extras.push({ ...row, name: row.name, email });
+    const emailOnly = looksLikeEmail(row.name) && !isLikelyHumanSignerName(row.name);
+    if (emailOnly) {
+      const roleEntity = entityForRoleHint(
+        entities,
+        hints,
+        parentRoleFromRepresentativeRole(row.role) || "",
+        slotRoles,
+      );
+      if (roleEntity && bindTo(roleEntity, { email: row.name }, row.name, "email")) continue;
+      unresolved.push({ ...row, email: row.name });
       continue;
     }
 
     if (isLikelyHumanSignerName(row.name) || isRepresentativeRole(row.role)) {
-      if (individuals.some((name) => partyLegalNamesMatch(name, row.name))) {
-        extras.push({
+      const individualEntry = Object.entries(individuals).find(([name]) => personNamesMatch(name, row.name));
+      if (individualEntry) {
+        confirmedIndividuals.push({
           ...row,
-          role: row.role && !isRepresentativeRole(row.role) ? row.role : "Individual",
+          role: row.role && !isRepresentativeRole(row.role) ? row.role : individualEntry[1],
         });
         continue;
       }
-      const instruction = roleSigners.find((item) => partyLegalNamesMatch(item.signerName, row.name));
-      const entityInstruction = entitySigners.find((item) => partyLegalNamesMatch(item.signerName, row.name));
+      const instruction = roleSigners.find((item) => personNamesMatch(item.signerName, row.name));
+      const entityInstruction = entitySigners.find((item) => personNamesMatch(item.signerName, row.name));
+      const entityLine = entityLineSigners.find((item) => personNamesMatch(item.signerName, row.name));
       const roleEntity = entityForRoleHint(
         entities,
         hints,
         instruction?.role || parentRoleFromRepresentativeRole(row.role) || "",
+        slotRoles,
       );
       const target = entityInstruction?.entity || roleEntity;
       if (
@@ -247,7 +317,7 @@ export function bindRepresentativesToLegalParties(
           target,
           {
             signerName: row.name,
-            email: instruction?.email || row.email,
+            email: instruction?.email || entityLine?.email || row.email,
             role: instruction?.role ? titleCaseRole(instruction.role) : undefined,
           },
           row.name,
@@ -256,33 +326,32 @@ export function bindRepresentativesToLegalParties(
       ) {
         continue;
       }
-      extras.push(row);
+      unresolved.push(row);
       continue;
     }
 
-    extras.push(row);
+    unresolved.push(row);
   }
 
   for (const item of roleSigners) {
-    const target = entityForRoleHint(entities, hints, item.role);
+    const target = entityForRoleHint(entities, hints, item.role, slotRoles);
     if (target) bindTo(target, { signerName: item.signerName, email: item.email }, item.signerName, "signer");
   }
   for (const item of entitySigners) {
     const target = entities.find((entity) => partyLegalNamesMatch(entity, item.entity));
     if (target) bindTo(target, { signerName: item.signerName, signerTitle: item.signerTitle }, item.signerName, "signer");
   }
+  for (const item of entityLineSigners) {
+    const target = entities.find((entity) => partyLegalNamesMatch(entity, item.entity));
+    if (target) bindTo(target, { signerName: item.signerName, email: item.email }, item.signerName, "signer");
+  }
 
-  let partiesOut = applyExplicitIntakeRolesToParties(
-    [...entities.map((entity) => slots.get(normKey(entity))!).filter(Boolean), ...extras],
+  const partiesOut = applyExplicitIntakeRolesToParties(
+    [...entities.map((entity) => slots.get(normKey(entity))!).filter(Boolean), ...confirmedIndividuals],
     intake,
   );
 
-  const unresolvedHumans = extras.filter(
-    (row) =>
-      isLikelyHumanSignerName(row.name) &&
-      !individuals.some((name) => partyLegalNamesMatch(name, row.name)) &&
-      !entities.some((entity) => partyLegalNamesMatch(entity, row.name)),
-  );
+  const unresolvedHumans = unresolved.filter((row) => isLikelyHumanSignerName(row.name));
   const clarificationQuestion =
     unresolvedHumans.length > 0 && entities.length >= 2
       ? `Is ${unresolvedHumans[0]!.name} signing for one of the named companies, or contracting as their own legal party?`
@@ -291,6 +360,7 @@ export function bindRepresentativesToLegalParties(
   return {
     parties: partiesOut,
     boundRepresentatives: bound,
+    unresolvedExtractionRows: unresolved,
     clarificationQuestion,
   };
 }

@@ -1155,6 +1155,11 @@ import {
   applyExplicitIntakeRolesToParties,
   bindRepresentativesToLegalParties,
 } from "./legalPartyRepresentativeBind";
+import {
+  appendIdentityQuestionToMaterialAsks,
+  applyIdentityClarificationAnswers,
+  persistableIdentityResolution,
+} from "./legalPartyIdentityClarification";
 import { getOrInitSessionAgreementGenerationId, shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
   PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_COPY_MS,
@@ -5762,8 +5767,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
       }
     }
-    const boundParse = bindRepresentativesToLegalParties(parties, String(intakeFallback || ""));
-    const boundParties = applyExplicitIntakeRolesToParties(boundParse.parties, String(intakeFallback || ""));
+    const priorAdditional = typeof o.additional_terms === "string" ? String(o.additional_terms) : "";
+    const intakeForBind = [String(intakeFallback || ""), priorAdditional].filter(Boolean).join("\n");
+    const boundParse = bindRepresentativesToLegalParties(parties, intakeForBind);
+    const boundParties = applyExplicitIntakeRolesToParties(boundParse.parties, intakeForBind);
     const dueRaw = o.due_date != null ? String(o.due_date).trim() : "";
     const durationRaw = o.duration != null ? String(o.duration).trim() : "";
     const apiGovRaw = String(o.jurisdiction ?? "").trim();
@@ -5790,6 +5797,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const at = String(o.additional_terms).trim();
       if (at) out.additional_terms = at;
     }
+    const identityAsks = appendIdentityQuestionToMaterialAsks(
+      Array.isArray(o.material_asks) ? o.material_asks.map((x) => String(x)) : [],
+      boundParse.clarificationQuestion,
+    );
+    if (identityAsks.length) out.material_asks = identityAsks;
     const purposeTrim = (out.purpose || "").trim();
     const addTrim = (out.additional_terms || "").trim();
     if (purposeTrim.includes(FULL_DRAFT_EXPANSION_MARKER) && !addTrim.includes(FULL_DRAFT_EXPANSION_MARKER)) {
@@ -5980,7 +5992,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const reviewFirstHandoffPersist = Boolean(options?.reviewFirstHandoffPersist);
     const merged = mergeParsedForApiPersist(parsed);
     const intakeForPersist = intakeCombinedRef.current || intakeCombined;
-    const boundPersist = bindRepresentativesToLegalParties(merged.parties ?? [], intakeForPersist);
+    const persistAdditional = String(merged.additional_terms || "");
+    const boundPersist = bindRepresentativesToLegalParties(
+      merged.parties ?? [],
+      [intakeForPersist, persistAdditional].filter(Boolean).join("\n"),
+    );
     const persistDraft = {
       ...merged,
       parties: applyExplicitIntakeRolesToParties(boundPersist.parties, intakeForPersist),
@@ -18286,6 +18302,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (!paymentApplyPrerequisitesReady({ intakeText, structured }) || !structured) {
         throw new Error("payment_clarification_apply_unavailable");
       }
+      const identityApplied = applyIdentityClarificationAnswers({
+        parties: structured.parties || [],
+        intake: [intakeText, structured.additional_terms || ""].filter(Boolean).join("\n"),
+        answers: userGapAnswers,
+      });
+      const identityLines = String(userGapAnswers || "")
+        .split(/\n+/)
+        .map((line) => persistableIdentityResolution(line))
+        .filter((line): line is string => Boolean(line));
+      structured = {
+        ...structured,
+        parties: applyExplicitIntakeRolesToParties(identityApplied.parties, intakeText),
+        additional_terms: identityLines.length
+          ? [structured.additional_terms || "", ...identityLines].filter(Boolean).join("\n").trim()
+          : structured.additional_terms,
+        material_asks: (structured.material_asks || []).filter(
+          (ask) => !identityApplied.clarificationQuestion || ask !== identityApplied.clarificationQuestion,
+        ),
+      };
       const authorizedPaper = (
         getPaidProSourceOfTruthText().trim() ||
         selectVerifiedPaidReviewPaper({ agreementId: captured.agreementId })?.plain ||

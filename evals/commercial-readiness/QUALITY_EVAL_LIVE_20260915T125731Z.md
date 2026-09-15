@@ -158,7 +158,10 @@ intake only. Clarification/repair UI was not shown. Timing: live run
 - Two-to-four-party U.S.-law release scope remains **not** established by
   fresh-model evidence.
 - Local stub/offline rematches on `bb66046c` still stand; they are not this
-  increment’s quality result.
+  increment’s quality result. A later local correction on `4742fa2c` (six-row
+  parse persist `20260915T153058Z-80080`, official stub rematch `src-2b158629`,
+  three-/four-party stub journeys) is also **not** this increment’s quality
+  result and does not authorize another `--live`.
 
 ## Stop
 

@@ -9,6 +9,12 @@ import {
 import { isConsultingDevIntake } from "../guidedDealCompletion/consultingGuidedIntake";
 import { isServicesMigrationIntake } from "../guidedDealCompletion/servicesMigrationGuidedIntake";
 import { dateMeaningMaterialItem, isDateMeaningQuestion } from "../paidProDateMeaning";
+import {
+  identityClarificationMaterialItem,
+  isIdentityClarificationQuestion,
+  identityClarificationResolved,
+} from "../legalPartyIdentityClarification";
+import type { BindableParty } from "../legalPartyRepresentativeBind";
 import { completionCriteriaMaterialItem, isCompletionCriteriaQuestion } from "../paidProCompletionCriteria";
 import {
   intakeHasNamedMilestoneRecipients,
@@ -766,6 +772,8 @@ export function buildMaterialMissingItems(args: {
   structuralIssues?: readonly { code: string; message: string }[];
   serverMissing?: readonly string[];
   userGapAnswers?: string | null;
+  parsedParties?: readonly BindableParty[] | null;
+  additionalTerms?: string | null;
 }): MaterialMissingItem[] {
   const intake = [args.intakeRaw || "", args.userGapAnswers || ""].join("\n").trim();
   const body = (args.body || "").trim();
@@ -795,6 +803,15 @@ export function buildMaterialMissingItems(args: {
   });
   if (payerItem) {
     pushItem(items, seen, payerItem, family);
+  }
+  const identityItem = identityClarificationMaterialItem({
+    intakeRaw: args.intakeRaw,
+    userGapAnswers: args.userGapAnswers,
+    parsedParties: args.parsedParties,
+    additionalTerms: args.additionalTerms,
+  });
+  if (identityItem) {
+    pushItem(items, seen, identityItem, family);
   }
 
   for (const bodyItem of scanBodyMaterialPlaceholders(body, family)) {
@@ -844,7 +861,13 @@ export function buildMaterialMissingItems(args: {
       t === UNCONFIRMED_PAYMENT_DUE_QUESTION ||
       isDateMeaningQuestion(t) ||
       isCompletionCriteriaQuestion(t) ||
-      isMilestonePayerQuestion(t)
+      isMilestonePayerQuestion(t) ||
+      (isIdentityClarificationQuestion(t) &&
+        (identityClarificationResolved(
+          [args.userGapAnswers, args.additionalTerms, args.intakeRaw].filter(Boolean).join("\n"),
+          t,
+        ) ||
+          items.some((item) => item.id === "identity_signing_or_party" || item.question === t)))
     ) {
       continue;
     }
