@@ -18496,6 +18496,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         selectVerifiedPaidReviewPaper({ agreementId: captured.agreementId })?.plain ||
         ""
       ).trim();
+      if (identityLines.length) {
+        await persistConfirmedIdentityIntoLiveDraft({
+          agreementId: captured.agreementId,
+          parties: structured.parties || [],
+          unresolvedSubjects: identityApplied.unresolvedSubjects,
+          additionalTerms: structured.additional_terms,
+        });
+      }
       if (authorizedPaper.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
         const afterPayment = applySuppliedPaymentFactsToAuthorizedPaper(
           authorizedPaper,
@@ -18518,64 +18526,62 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             userGapAnswers,
           );
           const outcome = resolveOwnerApprovedRevisionCallerOutcome(committed);
-          if (!outcome.applied) {
+          if (outcome.applied) {
+            applyOwnerApprovedRevisionCallerDisplay({
+              result: committed,
+              captured,
+              live: {
+                userId: resolveCurrentUser().id,
+                organizationId: (getOrgId() || "").trim(),
+                agreementId:
+                  parseCreateAgreementIdFromSearch() ||
+                  reviewAgreementIdRef.current ||
+                  captured.agreementId,
+                revisionId: captured.revisionId,
+              },
+              activeRequestId: readActivePaidProRevisionOperation(captured.agreementId)?.requestId,
+              paint: (corpus) => {
+                setAgreementDocumentText(corpus);
+                setReviewDocRefreshTick((n) => n + 1);
+              },
+            });
+            const newRevision = authorizedPaidProRevisionId(outcome.corpus) || hashPaidProCorpus(outcome.corpus);
+            markPaymentClarificationApplied(
+              {
+                userId: captured.userId,
+                organizationId: captured.organizationId,
+                agreementId: captured.agreementId,
+                revisionId: captured.revisionId,
+              },
+              userGapAnswers,
+              newRevision,
+              captured.requestId,
+            );
+            if (!identityLines.length) {
+              await persistConfirmedIdentityIntoLiveDraft({
+                agreementId: captured.agreementId,
+                parties: structured.parties || [],
+                unresolvedSubjects: identityApplied.unresolvedSubjects,
+                additionalTerms: structured.additional_terms,
+              });
+            }
+            if (
+              samePaymentApplyOwner(captured, {
+                userId: resolveCurrentUser().id,
+                organizationId: getOrgId(),
+                agreementId: reviewAgreementIdRef.current || undefined,
+              })
+            ) {
+              premiumLastGapAnswersRef.current = userGapAnswers;
+            }
+            return;
+          }
+          if (!identityLines.length) {
             throw new Error("payment_clarification_apply_unavailable");
           }
-          applyOwnerApprovedRevisionCallerDisplay({
-            result: committed,
-            captured,
-            live: {
-              userId: resolveCurrentUser().id,
-              organizationId: (getOrgId() || "").trim(),
-              agreementId:
-                parseCreateAgreementIdFromSearch() ||
-                reviewAgreementIdRef.current ||
-                captured.agreementId,
-              revisionId: captured.revisionId,
-            },
-            activeRequestId: readActivePaidProRevisionOperation(captured.agreementId)?.requestId,
-            paint: (corpus) => {
-              setAgreementDocumentText(corpus);
-              setReviewDocRefreshTick((n) => n + 1);
-            },
-          });
-          const newRevision = authorizedPaidProRevisionId(outcome.corpus) || hashPaidProCorpus(outcome.corpus);
-          markPaymentClarificationApplied(
-            {
-              userId: captured.userId,
-              organizationId: captured.organizationId,
-              agreementId: captured.agreementId,
-              revisionId: captured.revisionId,
-            },
-            userGapAnswers,
-            newRevision,
-            captured.requestId,
-          );
-          await persistConfirmedIdentityIntoLiveDraft({
-            agreementId: captured.agreementId,
-            parties: structured.parties || [],
-            unresolvedSubjects: identityApplied.unresolvedSubjects,
-            additionalTerms: structured.additional_terms,
-          });
-          if (
-            samePaymentApplyOwner(captured, {
-              userId: resolveCurrentUser().id,
-              organizationId: getOrgId(),
-              agreementId: reviewAgreementIdRef.current || undefined,
-            })
-          ) {
-            premiumLastGapAnswersRef.current = userGapAnswers;
-          }
-          return;
         }
       }
       if (identityLines.length) {
-        await persistConfirmedIdentityIntoLiveDraft({
-          agreementId: captured.agreementId,
-          parties: structured.parties || [],
-          unresolvedSubjects: identityApplied.unresolvedSubjects,
-          additionalTerms: structured.additional_terms,
-        });
         markPaymentClarificationApplied(
           {
             userId: captured.userId,

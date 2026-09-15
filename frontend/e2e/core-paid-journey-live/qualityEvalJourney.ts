@@ -679,9 +679,9 @@ export async function applyIdentityClarificationAnswer(
   });
   await expect(panel.getByTestId("identity-clarification-question")).toContainText(IDENTITY_QUESTION);
   await expect(panel).toContainText(/Optional — you can review or sign without answering/i);
-  await page.getByTestId("paid-draft-content-clarification-answer").fill(answer);
+  await panel.getByTestId("paid-draft-content-clarification-answer").fill(answer);
   if (opts?.expectUnresolved) {
-    await page.getByTestId("paid-draft-content-clarification-apply").click();
+    await panel.getByTestId("paid-draft-content-clarification-apply").click();
     await expect(panel.getByTestId("identity-clarification-question")).toContainText(IDENTITY_QUESTION, {
       timeout: 20_000,
     });
@@ -706,8 +706,8 @@ export async function applyIdentityClarificationAnswer(
       return false;
     }
   }, { timeout: 90_000 });
-  await page.getByTestId("paid-draft-content-clarification-apply").click();
-  const applyAlert = page.getByTestId("paid-draft-content-clarification-panel").locator("[role='alert']");
+  await panel.getByTestId("paid-draft-content-clarification-apply").click();
+  const applyAlert = panel.locator("[role='alert']");
   const persistOrError = await Promise.race([
     snapshotPostDone.then((res) => ({ kind: "snapshot" as const, res })),
     partiesUpdateDone.then(() => ({ kind: "parties" as const })),
