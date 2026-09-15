@@ -4,6 +4,7 @@
  */
 
 import { applySignerPartyIdentityToAuthoritativeAgreement } from "./guidedDealCompletion/signerPartyIdentity";
+import { shouldPreserveApprovedAddedPartyExecutionTail } from "./paidProDeclaredConsultantClientPaper";
 import {
   authorityPartiesToCanonicalPartyIdentities,
   type PaidProPartyRoleContext,
@@ -149,6 +150,10 @@ export function finalizePaidProSigningCorpusText(
   // Signature-region hydration may fill existing notice contacts / execution fields, but must
   // not invent a Notices section or reflow operative headings (operative fingerprint stable).
   const signatureRegionOnly = opts?.signatureRegionOnly === true;
+  const partyNames = parties?.map((party) => party.partyLegalName) ?? [];
+  if (shouldPreserveApprovedAddedPartyExecutionTail(text, partyNames)) {
+    return { text: text.trimEnd() + (text.endsWith("\n") ? "" : "\n"), repairs };
+  }
 
   const stripped = stripPaidProSignerSummaryBlocksFromCorpus(text);
   if (stripped.removed > 0) {

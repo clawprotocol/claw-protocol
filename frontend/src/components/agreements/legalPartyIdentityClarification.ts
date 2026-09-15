@@ -704,6 +704,15 @@ export function applyIdentityResolutionToAuthorizedPaper(
   }
   const individuals = parties.filter((party) => isLikelyHumanSignerName(party.name));
   for (const person of individuals) {
+    doc = doc.replace(
+      new RegExp(
+        `((?:Consultant|Client|[A-Z][A-Za-z]+(?:\\s+[A-Z][A-Za-z]+)*)'s authorized signer is )${escapeRe(person.name)}`,
+        "gi",
+      ),
+      "$1________",
+    );
+  }
+  for (const person of individuals) {
     const role = displayRoleForParty(person);
     if (!new RegExp(`\\b${escapeRe(person.name)}\\b`, "i").test(doc)) {
       doc = doc.replace(

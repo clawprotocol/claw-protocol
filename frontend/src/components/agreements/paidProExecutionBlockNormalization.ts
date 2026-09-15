@@ -228,7 +228,9 @@ function overlayDeclaredCorpusRolesOntoManifest(
 
 function existingConsultantClientTailMatchesDeclared(text: string): boolean {
   if (!corpusDeclaresConsultantClientOpening(text)) return false;
-  const declared = resolvePaidProPartyRolesFromAcceptedCorpus(text);
+  const declared = resolvePaidProPartyRolesFromAcceptedCorpus(text).filter(
+    (row) => row.roleLabel === "Consultant" || row.roleLabel === "Client",
+  );
   if (declared.length < 2) return false;
   const witnessIdx = resolveAuthoritativeWitnessIndex(text);
   if (witnessIdx < 0) return false;
@@ -637,9 +639,8 @@ export function enforcePaidProSingleExecutionBlock(
     }
   }
   if (
-    existingConsultantClientTailMatchesDeclared(text) &&
-    (manifestLegalNames.length <= 2 ||
-      shouldPreserveApprovedAddedPartyExecutionTail(text, manifestLegalNames))
+    shouldPreserveApprovedAddedPartyExecutionTail(text, manifestLegalNames) ||
+    (existingConsultantClientTailMatchesDeclared(text) && manifestLegalNames.length <= 2)
   ) {
     text = stripRecitalFragmentExecutionLinesFromTail(text, repairs);
     const truncated = truncatePostCanonicalExecutionPollution(text, {

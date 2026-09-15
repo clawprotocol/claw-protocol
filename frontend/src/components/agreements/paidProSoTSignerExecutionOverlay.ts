@@ -2,6 +2,7 @@
  * Render-time signature-region overlay on frozen Paid Pro SoT — does not mutate stored SoT bytes.
  */
 
+import { shouldPreserveApprovedAddedPartyExecutionTail } from "./paidProDeclaredConsultantClientPaper";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import {
   mergeLabeledPartyAuthorityIntoParties,
@@ -33,6 +34,10 @@ export function applyPaidProSoTSignerExecutionOverlay(
 ): string {
   const intake = roleContext?.intakeText ?? "";
   const hydrationParties = mergeLabeledPartyAuthorityIntoParties(parties, intake);
+  const hydrationNames = hydrationParties.map((party) => party.partyLegalName);
+  if (shouldPreserveApprovedAddedPartyExecutionTail(frozenCorpus, hydrationNames)) {
+    return frozenCorpus;
+  }
   if (
     !hydrationParties.length ||
     !shouldApplyExecutionBlockSignerOverlay({ parties: hydrationParties, intakeText: intake })

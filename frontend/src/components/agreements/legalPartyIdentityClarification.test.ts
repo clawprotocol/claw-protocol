@@ -17,7 +17,10 @@ import {
 import { bindRepresentativesToLegalParties } from "./legalPartyRepresentativeBind";
 import { applySignerPartyIdentityToAuthoritativeAgreement } from "./guidedDealCompletion/signerPartyIdentity";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
+import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
+import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
+import { shouldPreserveApprovedAddedPartyExecutionTail } from "./paidProDeclaredConsultantClientPaper";
 
 const HARBOR = "Harbor Peak Analytics LLC";
 const IRONVALE = "Ironvale Manufacturing Inc.";
@@ -423,6 +426,104 @@ describe("legal party identity clarification", () => {
     expect(overlaid).toMatch(/ADVISOR:\s*\nAlex Rivera/);
     expect(overlaid).not.toMatch(/CLIENT:\s*\nHarbor Peak Analytics LLC/);
     expect(overlaid.match(/Name: Delaware\. Alex Rivera/g)).toBeNull();
+  });
+
+  it("keeps the accepted Advisor tail through the production freeze overlay", () => {
+    const generated = [
+      `This Services Agreement (this "Agreement") is entered into by and between ${HARBOR} ("Consultant") and ${IRONVALE} ("Client"). Consultant and Client may be referred to individually as a "Party" and collectively as the "Parties."`,
+      "",
+      "1. PARTIES AND ROLES",
+      "",
+      "Consultant is an independent professional services firm. Client is retaining Consultant to perform the services described in this Agreement. The Provider (\"Provider\") will not become a party by that recitation.",
+      "",
+      "Consultant's authorized signer is Alex Rivera.",
+      "",
+      "11. NOTICES",
+      "",
+      `If to ${HARBOR}:`,
+      HARBOR,
+      "Email: alex.rivera@advisor.test",
+      "",
+      `If to ${IRONVALE}:`,
+      IRONVALE,
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      HARBOR,
+      "By: __________________________",
+      "Name: __________________________",
+      "Title: _________________________",
+      "Date: _____________________________",
+      "",
+      "SERVICE PROVIDER:",
+      IRONVALE,
+      "By: __________________________",
+      "Name: __________________________",
+      "Title: _________________________",
+      "Date: _____________________________",
+    ].join("\n");
+    const accepted = applyIdentityResolutionToAuthorizedPaper(generated, [
+      { name: HARBOR, role: "Consultant" },
+      { name: IRONVALE, role: "Client" },
+      { name: "Alex Rivera", role: "Advisor", email: "alex.rivera@advisor.test" },
+    ]);
+    expect(accepted).toMatch(/CONSULTANT:\s*\nHarbor Peak Analytics LLC/);
+    expect(accepted).toMatch(/CLIENT:\s*\nIronvale Manufacturing Inc/);
+    expect(accepted).toMatch(/ADVISOR:\s*\nAlex Rivera/);
+    expect(accepted).not.toContain("Consultant's authorized signer is Alex Rivera");
+    expect(shouldPreserveApprovedAddedPartyExecutionTail(accepted, [HARBOR, IRONVALE, "Alex Rivera"])).toBe(
+      true,
+    );
+    const parties = [
+      {
+        partyIndex: 0,
+        partyLegalName: HARBOR,
+        signerEmail: "pat.harbor@harbor.test",
+        signerName: "Pat Harbor",
+        signerTitle: "",
+        partyAddress: "",
+      },
+      {
+        partyIndex: 1,
+        partyLegalName: IRONVALE.replace(/\.$/, ""),
+        signerEmail: "sam.ironvale@ironvale.test",
+        signerName: "Sam Ironvale",
+        signerTitle: "",
+        partyAddress: "",
+      },
+      {
+        partyIndex: 2,
+        partyLegalName: "Alex Rivera",
+        signerEmail: "alex.rivera@advisor.test",
+        signerName: "Alex Rivera",
+        signerTitle: "",
+        partyAddress: "",
+      },
+    ];
+    const roleContext = {
+      intakeText: INTAKE,
+      acceptedCorpus: accepted,
+      draftPartyNames: parties.map((party) => party.partyLegalName),
+    };
+    const enforced = enforcePaidProSingleExecutionBlock(accepted, {
+      authorityParties: parties,
+      intakeText: INTAKE,
+      draftPartyNames: roleContext.draftPartyNames,
+    }).text;
+    const finalized = finalizePaidProSigningCorpusText(enforced, parties, roleContext, {
+      signatureRegionOnly: true,
+    }).text;
+    const overlaid = applyPaidProSoTSignerExecutionOverlay(accepted, parties, roleContext);
+    expect(enforced).toMatch(/CLIENT:\s*\nIronvale Manufacturing Inc/);
+    expect(enforced).toMatch(/CONSULTANT:\s*\nHarbor Peak Analytics LLC/);
+    expect(finalized).toMatch(/CLIENT:\s*\nIronvale Manufacturing Inc/);
+    expect(finalized).not.toMatch(/CLIENT:\s*\nHarbor Peak Analytics LLC/);
+    expect(overlaid).toMatch(/CLIENT:\s*\nIronvale Manufacturing Inc/);
+    expect(overlaid).toMatch(/CONSULTANT:\s*\nHarbor Peak Analytics LLC/);
+    expect(overlaid).toMatch(/ADVISOR:\s*\nAlex Rivera/);
+    expect(overlaid).not.toMatch(/CLIENT:\s*\nHarbor Peak Analytics LLC/);
+    expect(overlaid).not.toMatch(/CONSULTANT:[\s\S]{0,160}Name: Alex Rivera/);
   });
 
   it("does not invent a numbered party when applying a representative to existing paper", () => {
