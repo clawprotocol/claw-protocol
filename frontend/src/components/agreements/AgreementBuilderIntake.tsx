@@ -18496,14 +18496,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         selectVerifiedPaidReviewPaper({ agreementId: captured.agreementId })?.plain ||
         ""
       ).trim();
-      if (identityLines.length) {
+      const persistIdentityAndClose = async (revisionId: string) => {
         await persistConfirmedIdentityIntoLiveDraft({
           agreementId: captured.agreementId,
           parties: structured.parties || [],
           unresolvedSubjects: identityApplied.unresolvedSubjects,
           additionalTerms: structured.additional_terms,
         });
-      }
+        markPaymentClarificationApplied(
+          {
+            userId: captured.userId,
+            organizationId: captured.organizationId,
+            agreementId: captured.agreementId,
+            revisionId: captured.revisionId,
+          },
+          userGapAnswers,
+          revisionId,
+          captured.requestId,
+        );
+        setReviewDocRefreshTick((n) => n + 1);
+        if (
+          samePaymentApplyOwner(captured, {
+            userId: resolveCurrentUser().id,
+            organizationId: getOrgId(),
+            agreementId: reviewAgreementIdRef.current || undefined,
+          })
+        ) {
+          premiumLastGapAnswersRef.current = userGapAnswers;
+        }
+      };
       if (authorizedPaper.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
         const afterPayment = applySuppliedPaymentFactsToAuthorizedPaper(
           authorizedPaper,
@@ -18546,63 +18567,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               },
             });
             const newRevision = authorizedPaidProRevisionId(outcome.corpus) || hashPaidProCorpus(outcome.corpus);
-            markPaymentClarificationApplied(
-              {
-                userId: captured.userId,
-                organizationId: captured.organizationId,
-                agreementId: captured.agreementId,
-                revisionId: captured.revisionId,
-              },
-              userGapAnswers,
-              newRevision,
-              captured.requestId,
-            );
-            if (!identityLines.length) {
-              await persistConfirmedIdentityIntoLiveDraft({
-                agreementId: captured.agreementId,
-                parties: structured.parties || [],
-                unresolvedSubjects: identityApplied.unresolvedSubjects,
-                additionalTerms: structured.additional_terms,
-              });
-            }
-            if (
-              samePaymentApplyOwner(captured, {
-                userId: resolveCurrentUser().id,
-                organizationId: getOrgId(),
-                agreementId: reviewAgreementIdRef.current || undefined,
-              })
-            ) {
-              premiumLastGapAnswersRef.current = userGapAnswers;
-            }
+            await persistIdentityAndClose(newRevision);
             return;
           }
-          if (!identityLines.length) {
-            throw new Error("payment_clarification_apply_unavailable");
+          if (identityLines.length) {
+            setAgreementDocumentText(patched);
+            await persistIdentityAndClose(captured.revisionId);
+            return;
           }
+          throw new Error("payment_clarification_apply_unavailable");
         }
       }
       if (identityLines.length) {
-        markPaymentClarificationApplied(
-          {
-            userId: captured.userId,
-            organizationId: captured.organizationId,
-            agreementId: captured.agreementId,
-            revisionId: captured.revisionId,
-          },
-          userGapAnswers,
-          captured.revisionId,
-          captured.requestId,
-        );
-        setReviewDocRefreshTick((n) => n + 1);
-        if (
-          samePaymentApplyOwner(captured, {
-            userId: resolveCurrentUser().id,
-            organizationId: getOrgId(),
-            agreementId: reviewAgreementIdRef.current || undefined,
-          })
-        ) {
-          premiumLastGapAnswersRef.current = userGapAnswers;
-        }
+        await persistIdentityAndClose(captured.revisionId);
         return;
       }
       const currentTarget = () => ({
