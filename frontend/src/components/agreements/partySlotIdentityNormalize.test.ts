@@ -140,6 +140,41 @@ describe("partySlotIdentityNormalize", () => {
     expect(isInvalidPartySlotLegalEntity(RED_MESA)).toBe(false);
   });
 
+  it("collapseDraftPartyRows keeps a durable added individual when intake is still two-party", () => {
+    const collapsed = collapseDraftPartyRows(
+      [
+        {
+          id: "harbor-uuid",
+          name: "Harbor Peak Analytics LLC",
+          role: "Consultant",
+          email: "pat.harbor@harbor.test",
+          signerName: "Pat Harbor",
+        },
+        {
+          id: "ironvale-uuid",
+          name: "Ironvale Manufacturing Inc.",
+          role: "Client",
+          email: "sam.ironvale@ironvale.test",
+          signerName: "Sam Ironvale",
+        },
+        {
+          id: "alex-uuid",
+          name: "Alex Rivera",
+          role: "Advisor",
+          email: "alex.rivera@advisor.test",
+          signerName: "Alex Rivera",
+        },
+      ],
+      "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client).",
+    );
+    expect(collapsed.map((row) => row.name)).toEqual([
+      "Harbor Peak Analytics LLC",
+      "Ironvale Manufacturing Inc",
+      "Alex Rivera",
+    ]);
+    expect(collapsed[2]?.id).toBe("alex-uuid");
+  });
+
   it("collapseDraftPartyRows repairs three-row draft with standalone LLC slot", () => {
     const collapsed = collapseDraftPartyRows(
       [

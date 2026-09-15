@@ -716,6 +716,33 @@ export function partySlotListHasDriftFragments(
   return false;
 }
 
+const SYNTHETIC_COLLAPSE_PARTY_ID = /^(?:party_\d+|legacy_.+|party_[0-9a-f]+:[0-9a-f]+)$/i;
+
+function isKeepableAddedPartyRow(party: DraftPartyRowLike | undefined): boolean {
+  if (!party) return false;
+  const name = normalizeAgreementPartyName(party.name);
+  if (!name || isInvalidPartySlotLegalEntity(name)) return false;
+  if (!isAuthoritativeLegalEntityName(name) && name.split(/\s+/).filter(Boolean).length < 2) return false;
+  const id = String(party.id || "").trim();
+  if (!id || SYNTHETIC_COLLAPSE_PARTY_ID.test(id)) return false;
+  return true;
+}
+
+function appendKeptAddedPartyRows(
+  collapsed: DraftPartyRowLike[],
+  parties: readonly DraftPartyRowLike[],
+): DraftPartyRowLike[] {
+  const extras = parties.filter((party) => {
+    if (!isKeepableAddedPartyRow(party)) return false;
+    return !collapsed.some(
+      (row) =>
+        partyLegalNamesMatch(row.name, party.name) ||
+        (Boolean(row.id) && Boolean(party.id) && String(row.id) === String(party.id)),
+    );
+  });
+  return extras.length ? [...collapsed, ...extras] : collapsed;
+}
+
 export function collapseDraftPartyRows(
   parties: readonly DraftPartyRowLike[],
   intakeContext?: string | null,
@@ -729,7 +756,7 @@ export function collapseDraftPartyRows(
   const authoritativeIntake =
     quoted.length >= labeled.length ? quoted : labeled.length >= 3 ? labeled : quoted.length >= 3 ? quoted : labeled;
   if (authoritativeIntake.length >= 3 && parties.length !== authoritativeIntake.length) {
-    return authoritativeIntake.map((name, index) => {
+    return appendKeptAddedPartyRows(authoritativeIntake.map((name, index) => {
       const matched = parties.find((p) => partyLegalNamesMatch(p.name, name));
       const prev = matched ?? parties[index];
       const role = isInternalPartyAliasRole(prev?.role) ? undefined : prev?.role;
@@ -741,7 +768,7 @@ export function collapseDraftPartyRows(
         signerName: matched?.signerName,
         signerTitle: matched?.signerTitle,
       };
-    });
+    }), parties);
   }
 
   const fromIntake = intake ? extractBetweenPartyNameList(intake) : [];
@@ -770,19 +797,22 @@ export function collapseDraftPartyRows(
   }
 
   if (collapsedNames.length >= 2 && parties.length > collapsedNames.length) {
-    return collapsedNames.map((name, index) => {
-      const matched = parties.find((p) => partyLegalNamesMatch(p.name, name));
-      const prev = matched ?? parties[index];
-      const role = isInternalPartyAliasRole(prev?.role) ? undefined : prev?.role;
-      return {
-        name,
-        role: role || (index === 0 ? "Client" : index === 1 ? "Service Provider" : "party"),
-        email: matched?.email,
-        id: matched?.id ?? prev?.id,
-        signerName: matched?.signerName,
-        signerTitle: matched?.signerTitle,
-      };
-    });
+    return appendKeptAddedPartyRows(
+      collapsedNames.map((name, index) => {
+        const matched = parties.find((p) => partyLegalNamesMatch(p.name, name));
+        const prev = matched ?? parties[index];
+        const role = isInternalPartyAliasRole(prev?.role) ? undefined : prev?.role;
+        return {
+          name,
+          role: role || (index === 0 ? "Client" : index === 1 ? "Service Provider" : "party"),
+          email: matched?.email,
+          id: matched?.id ?? prev?.id,
+          signerName: matched?.signerName,
+          signerTitle: matched?.signerTitle,
+        };
+      }),
+      parties,
+    );
   }
 
   return parties

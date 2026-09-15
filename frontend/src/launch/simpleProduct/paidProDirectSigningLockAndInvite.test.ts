@@ -7,6 +7,7 @@ import * as reviewEmailPartyRoles from "./reviewEmailPartyRoles";
 import {
   isDurableSigningParticipantId,
   lockAuthoritativeVersionAndMintSigningInvites,
+  richerSigningPartyDraft,
   requiredDirectSigningParticipantIds,
   resolveDirectSigningLockedVersionId,
 } from "./paidProDirectSigningLockAndInvite";
@@ -171,5 +172,49 @@ describe("paidProDirectSigningLockAndInvite", () => {
       "vanguard-uuid",
     ]);
     expect(fourParty.parties.some((party) => party.role === "owner")).toBe(false);
+  });
+
+  it("prefers the draft that still has the durable added party after a two-party GET collapse", async () => {
+    const threeParty = draft({
+      parties: [
+        { id: "harbor-uuid", name: "Harbor Peak Analytics LLC", role: "Consultant" },
+        { id: "ironvale-uuid", name: "Ironvale Manufacturing Inc.", role: "Client" },
+        { id: "alex-uuid", name: "Alex Rivera", role: "Advisor" },
+      ],
+    });
+    const collapsed = draft({
+      parties: [
+        { id: "harbor-uuid", name: "Harbor Peak Analytics LLC", role: "Consultant" },
+        { id: "ironvale-uuid", name: "Ironvale Manufacturing Inc.", role: "Client" },
+      ],
+    });
+    expect(richerSigningPartyDraft(collapsed, threeParty)).toBe(threeParty);
+
+    vi.spyOn(ownerDeliveryTrack, "persistOwnerDeliveryTrack").mockResolvedValue(true);
+    vi.spyOn(reviewEmailPartyRoles, "persistReviewEmailPartyRolesOnServer").mockResolvedValue({
+      ok: true,
+      draft: collapsed,
+      rolesPersisted: true,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: collapsed,
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: threeParty,
+    });
+    const lockSpy = vi.spyOn(recipientAccessApi, "putSigningLock").mockResolvedValue({ ok: true });
+
+    const result = await lockAuthoritativeVersionAndMintSigningInvites({
+      agreementId: "ag-direct",
+      draft: threeParty,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mintAllRequiredSignTokens).toBe(true);
+    expect(result.requiredParticipantIds).toEqual(["harbor-uuid", "ironvale-uuid", "alex-uuid"]);
+    expect(lockSpy).toHaveBeenCalled();
   });
 });

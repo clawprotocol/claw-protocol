@@ -142,5 +142,8 @@ export async function persistReviewEmailPartyRolesOnServer(
   if (!ok) return { ok: false, draft: nextDraft, rolesPersisted: false };
   const refreshed = await fetchAgreementDraft(id);
   const persistedDraft = refreshed.ok && refreshed.draft ? refreshed.draft : nextDraft;
+  if (namedLegalPartyCount(persistedDraft.parties ?? []) < namedLegalPartyCount(nextDraft.parties ?? [])) {
+    return { ok: true, draft: nextDraft, rolesPersisted: true };
+  }
   return { ok: true, draft: persistedDraft, rolesPersisted: true };
 }

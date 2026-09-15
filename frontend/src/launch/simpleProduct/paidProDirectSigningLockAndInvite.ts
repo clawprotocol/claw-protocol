@@ -25,6 +25,17 @@ export function namedLegalSigningPartyCount(draft: AgreementDraft | null | undef
   return parties.filter((party) => String(party.name || "").trim().length >= 2).length;
 }
 
+export function richerSigningPartyDraft(
+  left: AgreementDraft | null | undefined,
+  right: AgreementDraft | null | undefined,
+): AgreementDraft | null {
+  if (!left) return right ?? null;
+  if (!right) return left;
+  const score = (draft: AgreementDraft) =>
+    requiredDirectSigningParticipantIds(draft).length * 10 + namedLegalSigningPartyCount(draft);
+  return score(right) > score(left) ? right : left;
+}
+
 /** Three- and four-party deals have no workspace-owner legal-party role; every named party signs. */
 export function shouldMintSignTokenForEveryRequiredParticipant(
   draft: AgreementDraft | null | undefined,
@@ -111,7 +122,11 @@ export async function lockAuthoritativeVersionAndMintSigningInvites(options: {
   const workingDraft = roles.draft;
 
   const server = await fetchAgreementDraftWithSigningLock(id);
-  const authoritative = server.ok && server.draft ? server.draft : workingDraft;
+  const authoritative =
+    richerSigningPartyDraft(
+      richerSigningPartyDraft(options.draft, workingDraft),
+      server.ok && server.draft ? server.draft : null,
+    ) ?? workingDraft;
   const namedLegal = namedLegalSigningPartyCount(authoritative);
   const mintAllRequiredSignTokens = namedLegal >= 3;
   const ownerPartyId = ownerSigningPartyId(authoritative);
