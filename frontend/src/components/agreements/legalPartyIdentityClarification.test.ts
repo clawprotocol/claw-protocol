@@ -388,6 +388,29 @@ describe("legal party identity clarification", () => {
     expect(after).not.toMatch(/Advisor shall/);
   });
 
+  it("keeps opening Consultant/Client collective roles when stored parties say Client/Service Provider", () => {
+    const before = [
+      `This Services Agreement (this "Agreement") is entered into by and between ${HARBOR} ("Consultant") and ${IRONVALE} ("Client"). Client, Service Provider, and Advisor may be referred to individually as a "Party" and collectively as the "Parties".`,
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      IRONVALE,
+      "By: __________________________",
+      "",
+      "CONSULTANT:",
+      HARBOR,
+      "By: __________________________",
+    ].join("\n");
+    const after = applyIdentityResolutionToAuthorizedPaper(before, [
+      { name: HARBOR, role: "Client" },
+      { name: IRONVALE, role: "Service Provider" },
+      { name: "Alex Rivera", role: "Advisor", email: "alex.rivera@advisor.test" },
+    ]);
+    expect(after).toMatch(/Consultant, Client, and Advisor may be referred to individually as a "Party"/);
+    expect(after).not.toMatch(/Client, Service Provider, and Advisor may be referred to/);
+  });
+
   it("does not treat a governing-law state as Harbor's authorized signer", () => {
     const before =
       'This Services Agreement is entered into by and between Harbor Peak Analytics LLC ("Consultant") and Ironvale Manufacturing Inc. ("Client"). Consultant\'s authorized signer is ________.';

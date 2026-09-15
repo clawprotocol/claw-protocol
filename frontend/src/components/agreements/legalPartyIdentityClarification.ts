@@ -601,7 +601,17 @@ function oxfordRoleList(roles: readonly string[]): string {
   return `${roles.slice(0, -1).join(", ")}, and ${roles[roles.length - 1]}`;
 }
 
-function displayRoleForParty(party: BindableParty): string {
+function openingQuotedRole(doc: string, name: string): string | null {
+  const match = doc.match(new RegExp(`${escapeRe(name)}\\s*\\(\\s*["“']([^"”']+)["”']\\s*\\)`, "i"));
+  const role = match?.[1]?.trim() || "";
+  return role && !/^party$/i.test(role) ? role : null;
+}
+
+function displayRoleForParty(party: BindableParty, paper?: string): string {
+  if (paper && !isLikelyHumanSignerName(party.name)) {
+    const quoted = openingQuotedRole(paper, party.name);
+    if (quoted) return quoted;
+  }
   const role = String(party.role || "").trim();
   if (role && !/^party$/i.test(role)) return role;
   return isLikelyHumanSignerName(party.name) ? "Advisor" : "Party";
@@ -734,7 +744,7 @@ export function applyIdentityResolutionToAuthorizedPaper(
     );
   }
   for (const person of individuals) {
-    const role = displayRoleForParty(person);
+    const role = displayRoleForParty(person, doc);
     if (!new RegExp(`\\b${escapeRe(person.name)}\\b`, "i").test(doc)) {
       doc = doc.replace(
         /(entered into by and between\s+)([\s\S]*?)(\.\s+(?:Consultant|Client|The |This |[A-Z][a-z]+ and ))/,
@@ -745,11 +755,11 @@ export function applyIdentityResolutionToAuthorizedPaper(
       );
     }
   }
-  const roleLabels = parties.map((party) => displayRoleForParty(party)).filter((role) => role !== "Party");
+  const roleLabels = parties.map((party) => displayRoleForParty(party, doc)).filter((role) => role !== "Party");
   if (roleLabels.length >= 2) {
     const collective = oxfordRoleList(roleLabels);
     doc = doc.replace(
-      /[A-Z][A-Za-z]+(?:\s+and\s+[A-Z][A-Za-z]+)+ may be referred to individually as a ["“]Party["”] and collectively as the ["“]Parties\.?["”]\.?/,
+      /[A-Z][A-Za-z]+(?:,\s+[A-Z][A-Za-z]+)*(?:,?\s+and\s+[A-Z][A-Za-z]+) may be referred to individually as a ["“]Party["”] and collectively as the ["“]Parties\.?["”]\.?/,
       `${collective} may be referred to individually as a "Party" and collectively as the "Parties".`,
     );
   }
