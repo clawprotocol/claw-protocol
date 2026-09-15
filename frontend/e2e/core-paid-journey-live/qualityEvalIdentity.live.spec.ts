@@ -90,8 +90,10 @@ async function freshReopenWithoutIdentityQuestion(
   extras: string[] = [],
   opts?: { keepOpen?: boolean },
 ) {
+  const origin = process.env.CORE_PAID_JOURNEY_LIVE_ORIGIN || new URL(page.url()).origin;
   const freshContext = await browser.newContext({
     viewport: page.viewportSize() ?? { width: 1280, height: 720 },
+    baseURL: origin,
   });
   const freshPage = await freshContext.newPage();
   await seedCorePaidJourneyOwner(freshPage);
