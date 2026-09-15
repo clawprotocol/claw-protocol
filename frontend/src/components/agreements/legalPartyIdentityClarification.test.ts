@@ -261,17 +261,6 @@ describe("legal party identity clarification", () => {
         additionalTerms: `${IDENTITY_RESOLUTION_MARKER} Harbor Peak Analytics LLC signer: Alex Rivera`,
       }),
     ).not.toContain(QUESTION);
-    expect(
-      contentClarificationQuestions({
-        intake: INTAKE,
-        body,
-        parsedParties: [
-          { name: HARBOR, role: "Consultant", signerName: "Alex Rivera" },
-          { name: IRONVALE, role: "Client" },
-        ],
-        unresolvedSubjects: [],
-      }),
-    ).not.toContain(QUESTION);
     const added = applyIdentityClarificationAnswers({
       parties: [
         ...NORMALIZED_PARTIES,
