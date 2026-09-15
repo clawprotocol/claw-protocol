@@ -539,11 +539,15 @@ export function identityClarificationMaterialItem(args: {
 }): MaterialMissingItem | null {
   const intake = [args.intakeRaw || "", args.additionalTerms || "", args.userGapAnswers || ""].filter(Boolean).join("\n");
   const parties = confirmedPartiesFromCustomerText(intake, args.parsedParties);
+  const unresolvedSubjects = [
+    ...(args.unresolvedSubjects || parseUnresolvedIdentity(intake)),
+    ...customerMentionedUnresolvedFromIntake(intake, parties),
+  ].filter((row, index, all) => all.findIndex((other) => samePerson(other.name, row.name)) === index);
   const applied = applyIdentityClarificationAnswers({
     parties,
     intake,
     answers: args.userGapAnswers,
-    unresolvedSubjects: args.unresolvedSubjects || parseUnresolvedIdentity(intake),
+    unresolvedSubjects,
   });
   const question = applied.clarificationQuestion;
   if (!question) return null;
