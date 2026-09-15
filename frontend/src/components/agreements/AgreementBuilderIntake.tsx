@@ -4599,6 +4599,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     async () => false,
   );
   const guidedSignatureTrackInFlightRef = useRef(false);
+  const enterGuidedSignatureTrackRouteRef = useRef<(() => Promise<void>) | null>(null);
   const guidedSignaturePersistFailureRef = useRef<{ httpStatus?: number | null; rawMessage?: string } | null>(
     null,
   );
@@ -15170,6 +15171,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       })
     ) {
       logGuidedSignatureGenericSendBypassed({ phase: createFlowPhase });
+      // Sticky/modal "Create signing links" must mint, not die on a second confirm.
+      void enterGuidedSignatureTrackRouteRef.current?.();
       return;
     }
     if (
@@ -32926,7 +32929,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           agreementCorpusText: corpusText,
           guidedSigningHandoff: vs01Handoff,
           relaxPaidSessionCorpusAssert: relaxPaidSessionSignatureGates,
-        }),
+        }).catch((err: unknown) => ({
+          ok: false as const,
+          failure: {
+            agreementId: id,
+            reason: "vs01_seed" as const,
+            userMessage:
+              err instanceof Error && err.message.trim()
+                ? err.message
+                : "We could not lock this version or create participant-bound signing invitations. Confirm the required signer details and try again.",
+            premiumSendIntent: "signature" as const,
+          },
+        })),
       );
       if (!timedHandoff.ok) {
         logPaymentFlowStage("signing_prepare_failed", {
@@ -33007,9 +33021,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     simpleProFinalReviewDisplayPlain,
     simpleProFinalReviewCorpus.plainText,
   ]);
+  enterGuidedSignatureTrackRouteRef.current = enterGuidedSignatureTrackRoute;
 
   const completeGuidedSigningHandoff = React.useCallback(
-    (intent: FinalReviewSendIntent, opts?: { openConfirmModal?: boolean }) => {
+    (intent: FinalReviewSendIntent) => {
       const sendMode: PremiumSendIntent = intent === "review_only" ? "review" : "signature";
       const transition = assertGuidedTransitionReady("signing_confirm");
       if (!transition.ok) return;
@@ -33029,7 +33044,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       finalReviewSendPathChosenRef.current = true;
       setGuidedSendIntentSelected(true);
       handlePremiumSendModePick(sendMode);
-      devPremiumSendRoute(sendMode, peekPremiumSenderSignFirst(), opts?.openConfirmModal ? "send_confirm" : "sign_now");
+      devPremiumSendRoute(sendMode, peekPremiumSenderSignFirst(), "sign_now");
       const paidProReview = getPaidProDocumentForSurface("review", {
         ...paidProReviewSurfaceOpts,
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
@@ -33056,9 +33071,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         void completeGuidedPaidProReviewFirstHandoff("complete_guided_signing_handoff");
         return;
       }
-      if (opts?.openConfirmModal) {
-        setPremiumSendConfirmOpen(true);
-      } else if (sendMode === "signature") {
+      if (sendMode === "signature") {
         void enterGuidedSignatureTrackRoute();
       }
     },
@@ -33499,7 +33512,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       void completeGuidedPaidProReviewFirstHandoff("guided_signing_confirmation_continue");
       return;
     }
-    completeGuidedSigningHandoff(intent, { openConfirmModal: true });
+    completeGuidedSigningHandoff(intent);
   }, [completeGuidedSigningHandoff, completeGuidedPaidProReviewFirstHandoff]);
 
   const handlePremiumReviewFirstContinueToSigners = React.useCallback((opts?: { telemetryMode?: PremiumSendIntent }) => {
@@ -34009,6 +34022,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     // Names, emails, durable participant bindings, and agreement authority are all
     // required. Emails alone never count as namesAndEmailsComplete.
+    const startSignatureTrackAfterOptionalFinalize = async () => {
+      markSigningPreparationRequested();
+      setSignaturePreparationRequested(true);
+      setPaidProInlineSignerSetupLatched(false);
+      finalReviewSendIntentRef.current = "signature";
+      handlePremiumSendModePick("signature");
+      setJourneyActionFeedback(feedbackCreatingLinks("signing"));
+      if (!hasAuthoritativeSigningSnapshot() && !paidProSignerMetadataFinalizedLatch) {
+        traceSigningAdvance("handleProSendForSignature:finalize_incomplete");
+        const finalized = await finalizePaidProSignerMetadataAndOpenReviewDecision();
+        if (finalized) return;
+      }
+      await enterGuidedSignatureTrackRoute();
+    };
     if (
       signatureConfirmation.ok &&
       canStartPaidSessionSignatureTrackFromFinalReview({
@@ -34016,16 +34043,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       })
     ) {
       traceSigningAdvance("handleProSendForSignature:names_emails_complete");
-      if (!hasAuthoritativeSigningSnapshot() && !paidProSignerMetadataFinalizedLatch) {
-        void finalizePaidProSignerMetadataAndOpenReviewDecision();
-      }
-      markSigningPreparationRequested();
-      setSignaturePreparationRequested(true);
-      setPaidProInlineSignerSetupLatched(false);
-      finalReviewSendIntentRef.current = "signature";
-      handlePremiumSendModePick("signature");
-      setJourneyActionFeedback(feedbackCreatingLinks("signing"));
-      void enterGuidedSignatureTrackRoute();
+      void startSignatureTrackAfterOptionalFinalize();
       return;
     }
     if (!signatureConfirmation.ok) {
@@ -34063,29 +34081,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         enterFinalReviewRecipientSetup("signature");
         return;
       }
-      if (
-        !hasAuthoritativeSigningSnapshot() &&
-        !paidProSignerMetadataFinalizedLatch &&
-        paidProSignatureDetailsReady
-      ) {
-        void finalizePaidProSignerMetadataAndOpenReviewDecision();
-      }
-      const signingReadyNow = postFinalizeSigningReady || stickySigningFinalized;
-      if (!signingReadyNow) {
-        traceSigningAdvance("handleProSendForSignature:finalize_incomplete");
-        void enterGuidedSignatureTrackRoute();
-        return;
-      }
       traceSigningAdvance("handleProSendForSignature:post_finalize_advance");
-      if (!hasAuthoritativeSigningSnapshot()) {
-        void finalizePaidProSignerMetadataAndOpenReviewDecision();
-      }
-      markSigningPreparationRequested();
-      setSignaturePreparationRequested(true);
-      setPaidProInlineSignerSetupLatched(false);
-      finalReviewSendIntentRef.current = "signature";
-      handlePremiumSendModePick("signature");
-      void enterGuidedSignatureTrackRoute();
+      void startSignatureTrackAfterOptionalFinalize();
       return;
     }
     if (guidedCompletionActive) {

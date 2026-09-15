@@ -134,12 +134,19 @@ export async function lockAuthoritativeVersionAndMintSigningInvites(options: {
   let lockedVersionId = String(server.lockedVersionId || "").trim();
   if (!lockedVersionId) {
     lockedVersionId = resolveDirectSigningLockedVersionId(authoritative, id);
-    const lockRes = await putSigningLock(id, {
-      locked_version_id: lockedVersionId,
-      locked_at: new Date().toISOString(),
-      locked_by: "owner",
-    });
-    if (!lockRes.ok) return { ok: false, reason: lockRes.error || "signing_lock_failed" };
+    try {
+      const lockRes = await putSigningLock(id, {
+        locked_version_id: lockedVersionId,
+        locked_at: new Date().toISOString(),
+        locked_by: "owner",
+      });
+      if (!lockRes.ok) return { ok: false, reason: lockRes.error || "signing_lock_failed" };
+    } catch (err) {
+      return {
+        ok: false,
+        reason: err instanceof Error && err.message.trim() ? err.message : "signing_lock_failed",
+      };
+    }
   }
 
   const refreshed = await fetchAgreementDraft(id);

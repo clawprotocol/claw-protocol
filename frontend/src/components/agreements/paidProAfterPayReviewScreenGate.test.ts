@@ -965,11 +965,15 @@ describe("after-pay Send for signature — names+emails start the existing signi
     expect(sendBlock).toContain("feedbackCreatingLinks(\"signing\")");
     expect(sendBlock).toContain("publishJourneyActionFlash(creatingSigningLinks)");
     expect(sendBlock).toContain("enterGuidedSignatureTrackRoute");
+    expect(sendBlock).toContain("startSignatureTrackAfterOptionalFinalize");
     expect(sendBlock).not.toContain("authorized-signer-name");
-    const namesAt = sendBlock.indexOf("handleProSendForSignature:names_emails_complete");
+    const helperAt = sendBlock.indexOf("const startSignatureTrackAfterOptionalFinalize = async");
     const incompleteAt = sendBlock.indexOf("handleProSendForSignature:finalize_incomplete");
-    expect(namesAt).toBeGreaterThan(-1);
-    expect(incompleteAt).toBeGreaterThan(namesAt);
+    const namesAt = sendBlock.indexOf("handleProSendForSignature:names_emails_complete");
+    expect(helperAt).toBeGreaterThan(-1);
+    expect(incompleteAt).toBeGreaterThan(helperAt);
+    expect(namesAt).toBeGreaterThan(incompleteAt);
+    expect(sendBlock.indexOf("void startSignatureTrackAfterOptionalFinalize()", namesAt)).toBeGreaterThan(namesAt);
 
     const screenMount = intakeSrc.slice(
       intakeSrc.indexOf("<SimpleProFinalReviewScreen"),

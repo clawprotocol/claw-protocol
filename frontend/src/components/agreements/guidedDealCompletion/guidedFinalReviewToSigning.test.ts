@@ -487,6 +487,13 @@ Date: _________________________
     expect(handoffBlock).toContain("mergeDraftPartiesFromCanonicalIdentities");
     expect(handoffBlock).toContain("enterGuidedSignatureTrackRoute");
     expect(handoffBlock).not.toContain("void onGenerate()");
+    expect(handoffBlock).not.toContain("openConfirmModal");
+    expect(handoffBlock).not.toContain("setPremiumSendConfirmOpen(true)");
+    expect(intake).toContain("enterGuidedSignatureTrackRouteRef.current?.()");
+    const confirmIdx = intake.indexOf("const handleGuidedSigningConfirmationContinue = React.useCallback");
+    const confirmBlock = intake.slice(confirmIdx, confirmIdx + 700);
+    expect(confirmBlock).toContain("completeGuidedSigningHandoff(intent)");
+    expect(confirmBlock).not.toContain("openConfirmModal");
     const signingIdx = intake.indexOf("const continueGuidedFinalReviewToSigning = React.useCallback");
     const signingEnd = intake.indexOf("const handleProSendForReview = React.useCallback", signingIdx);
     const signingBlock = intake.slice(

@@ -892,7 +892,11 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(signing).toContain("[guided-signing-confirmation-mounted]");
     expect(intake).toContain("logGuidedFinalReviewSendSignatureStart");
     expect(intake).toContain("handleGuidedSigningConfirmationContinue");
-    expect(intake).toContain("openConfirmModal: true");
+    const continueIdx = intake.indexOf("const handleGuidedSigningConfirmationContinue = React.useCallback");
+    const continueBlock = intake.slice(continueIdx, continueIdx + 700);
+    expect(continueBlock).toContain("completeGuidedSigningHandoff(intent)");
+    expect(continueBlock).not.toContain("openConfirmModal");
+    expect(continueBlock).not.toContain("setPremiumSendConfirmOpen(true)");
     expect(intake).toContain("enterGuidedSignatureTrackRoute");
     expect(intake).toContain("resolveGuidedSigningPersistAgreementId");
     expect(intake).toContain("pinnedFinalizedSignerCorpusHashRef");
@@ -905,7 +909,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("adding_signature_fields");
     expect(intake).toContain("signing_packet_ready");
     const sendIdx = intake.indexOf("const handleProSendForSignature = React.useCallback");
-    const sendBlock = intake.slice(sendIdx, sendIdx + 5500);
+    const sendBlock = intake.slice(sendIdx, sendIdx + 7500);
     expect(sendBlock).toContain('continueGuidedFinalReviewToSigning({ intent: "signature" })');
     expect(sendBlock).toContain("canProceedGuidedFinalReviewToSigning");
     expect(sendBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
