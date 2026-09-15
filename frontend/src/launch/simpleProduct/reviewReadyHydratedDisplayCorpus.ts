@@ -36,7 +36,10 @@ import {
 } from "../../components/agreements/premiumPartyNamesHandoff";
 import { signerMetadataInputRaw } from "../../agreement/signerMetadataNormalize";
 import { peekReviewFirstPinnedCorpus } from "./reviewFirstSendSurface";
-import { restoreDeclaredConsultantClientPaper } from "../../components/agreements/paidProDeclaredConsultantClientPaper";
+import {
+  fillBlankPreservedAddedPartySignerNames,
+  restoreDeclaredConsultantClientPaper,
+} from "../../components/agreements/paidProDeclaredConsultantClientPaper";
 
 const BLANK_SIG_ADDRESS_RE = /^address\s+for\s+notices?\s*:\s*(?:_{2,}\s*)?$/im;
 const BLANK_SIG_NAME_RE = /^name\s*:\s*(?:_{2,}\s*)?$/im;
@@ -922,7 +925,10 @@ export function applyReviewReadyMetadataBackfill(
       beforeHash,
       afterHash: beforeHash,
     });
-    return restoreDeclaredConsultantClientPaper(before, before);
+    return fillBlankPreservedAddedPartySignerNames(
+      restoreDeclaredConsultantClientPaper(before, before),
+      draft?.parties ?? [],
+    );
   }
 
   let working = before;
@@ -987,7 +993,10 @@ export function applyReviewReadyMetadataBackfill(
     afterHash: hashPaidProCorpus(working),
   });
 
-  return restoreDeclaredConsultantClientPaper(working, before);
+  return fillBlankPreservedAddedPartySignerNames(
+    restoreDeclaredConsultantClientPaper(working, before),
+    draft?.parties ?? [],
+  );
 }
 
 /** @deprecated Use applyReviewReadyMetadataBackfill — kept for call-site compatibility. */

@@ -587,6 +587,9 @@ describe("legal party identity clarification", () => {
     expect(overlaid).toMatch(/CLIENT:\s*\nIronvale Manufacturing Inc/);
     expect(overlaid).toMatch(/CONSULTANT:\s*\nHarbor Peak Analytics LLC/);
     expect(overlaid).toMatch(/ADVISOR:\s*\nAlex Rivera/);
+    expect(overlaid).toMatch(/CONSULTANT:[\s\S]{0,220}Name: Pat Harbor/);
+    expect(overlaid).toMatch(/CLIENT:[\s\S]{0,220}Name: Sam Ironvale/);
+    expect(overlaid).toMatch(/ADVISOR:[\s\S]{0,220}Name: Alex Rivera/);
     expect(overlaid).not.toMatch(/CLIENT:\s*\nHarbor Peak Analytics LLC/);
     expect(overlaid).not.toMatch(/CONSULTANT:[\s\S]{0,160}Name: Alex Rivera/);
   });

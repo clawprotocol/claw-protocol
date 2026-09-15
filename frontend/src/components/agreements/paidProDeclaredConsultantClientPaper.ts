@@ -4,7 +4,7 @@
  * Does not invent parties or rewrite frozen operative clauses.
  */
 
-import { executionTailBindsPartyNames } from "./paidProAcceptedCorpusPartyRoles";
+import { executionTailBindsPartyNames, partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 
 export function corpusDeclaresConsultantClientOpening(text: string): boolean {
   const head = openingSlice((text || "").replace(/\r\n/g, "\n"));
@@ -87,6 +87,45 @@ export function shouldPreserveApprovedAddedPartyExecutionTail(
   }
   if (names.length >= 2 && !executionTailBindsPartyNames(corpus, names)) return false;
   return true;
+}
+
+/**
+ * Display-only: fill blank execution-tail Name: lines from persisted signer names.
+ * Matches the entity line already on the paper — does not rebuild headings or
+ * rewrite the accepted digest.
+ */
+export function fillBlankPreservedAddedPartySignerNames(
+  corpus: string,
+  parties: readonly { partyLegalName?: string; signerName?: string; name?: string }[],
+): string {
+  const witnessIdx = (corpus || "").search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return corpus;
+  const named = parties
+    .map((party) => ({
+      legal: String(party.partyLegalName ?? party.name ?? "").trim(),
+      signer: String(party.signerName ?? "").trim(),
+    }))
+    .filter((party) => party.legal.length >= 2 && party.signer.length >= 2);
+  if (!named.length) return corpus;
+
+  const head = corpus.slice(0, witnessIdx);
+  const lines = corpus.slice(witnessIdx).split("\n");
+  let currentSigner = "";
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = (lines[i] ?? "").trim();
+    const entity = trimmed.replace(/:\s*$/, "");
+    const match = named.find((party) => partyLegalNamesMatch(entity, party.legal));
+    if (match) {
+      currentSigner = match.signer;
+      continue;
+    }
+    const nameLine = (lines[i] ?? "").match(/^(\s*)Name:\s*(.*)$/i);
+    if (!nameLine || !currentSigner) continue;
+    const value = (nameLine[2] ?? "").trim();
+    if (value && !/^_{2,}$/.test(value)) continue;
+    lines[i] = `${nameLine[1]}Name: ${currentSigner}`;
+  }
+  return `${head}${lines.join("\n")}`;
 }
 
 /** Keep a declared Consultant/Client opening and CONSULTANT execution tail when a later pass rebuilt Client/SP. */

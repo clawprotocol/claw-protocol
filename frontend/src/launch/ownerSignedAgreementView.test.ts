@@ -156,4 +156,80 @@ describe("loadOwnerSignedAgreementPreview (Test362)", () => {
     expect(loaded!.corpusSource).toBe("reconstructed");
     expect(loaded!.corpusText).toContain("Jordan Hale");
   });
+
+  it("stamps persisted signer names on owner-final display without rewriting the accepted digest", async () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc.";
+    const accepted = [
+      `This Consulting Services Agreement is entered into by and between ${harbor} ("Consultant") and ${ironvale} ("Client").`,
+      "",
+      "1. SERVICES",
+      "Consultant will provide implementation support.",
+      "",
+      ...Array.from({ length: 40 }, (_, i) => `${i + 2}. Reserved clause for length.`),
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CONSULTANT:",
+      harbor,
+      "By: __________________________",
+      "Name: __________________________",
+      "Title: _________________________",
+      "Date: _____________________________",
+      "",
+      "CLIENT:",
+      ironvale,
+      "By: __________________________",
+      "Name: __________________________",
+      "Title: _________________________",
+      "Date: _____________________________",
+      "",
+      "ADVISOR:",
+      "Alex Rivera",
+      "By: __________________________",
+      "Name: Alex Rivera",
+      "Title: _________________________",
+      "Date: _____________________________",
+    ].join("\n");
+    const digest = await sha256Hex(accepted);
+    const draft = {
+      id: AG,
+      title: "Consulting Services Agreement",
+      parties: [
+        { id: "p1", name: harbor, role: "Consultant", signerName: "Pat Harbor", email: "pat.harbor@harbor.test" },
+        { id: "p2", name: ironvale, role: "Client", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+        { id: "p3", name: "Alex Rivera", role: "Advisor", signerName: "Alex Rivera", email: "alex.rivera@advisor.test" },
+      ],
+      accepted_review_snapshot_v1: {
+        status: "accepted",
+        snapshotId: "crs_locked",
+        corpusSha256: digest,
+        corpusLength: accepted.length,
+        corpusPlain: accepted,
+      },
+    } as unknown as AgreementDraft;
+
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft,
+      lockedVersionId: "lv-1",
+      signingLock: {
+        locked_version_id: "lv-1",
+        accepted_snapshot_id: "crs_locked",
+        accepted_snapshot_digest: digest,
+        accepted_snapshot_length: accepted.length,
+      },
+    });
+
+    const loaded = await loadOwnerSignedAgreementPreview(AG);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.corpusSource).toBe("accepted_snapshot");
+    expect(loaded!.corpusText).toBe(accepted);
+    expect(loaded!.corpusText).toMatch(/CONSULTANT:[\s\S]{0,160}Name: _{10,}/);
+    expect(loaded!.corpusText).toMatch(/CLIENT:[\s\S]{0,160}Name: _{10,}/);
+    expect(loaded!.html).toContain("Pat Harbor");
+    expect(loaded!.html).toContain("Sam Ironvale");
+    expect(loaded!.html).toContain("Alex Rivera");
+    expect(await sha256Hex(loaded!.corpusText)).toBe(digest);
+  });
 });
