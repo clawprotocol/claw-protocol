@@ -1090,8 +1090,8 @@ import {
 import {
   auditPaidProPostFinalizeHydrationInvariant,
   canProceedPaidProReviewFirstHandoffAfterFinalize,
-  isPaidProSigningReadyHydratedCorpus,
   logPaidProPostFinalizeHydrationBlocked,
+  shouldRollbackSignerFinalizeUnreadyCorpus,
   resolvePaidProPostFinalizeReviewHash,
   resolvePaidProPostFinalizeReviewPlain,
   resolvePaidProSignerFinalizeSigningReadyPlain,
@@ -33259,7 +33259,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       authorityParties: authority.parties,
       replaceExisting: true,
       preserveFrozenServerFullHydratedCorpus:
-        rawCorpusResolution.source === "paid_pro_source_of_truth",
+        reusedAcceptedSnapshot || rawCorpusResolution.source === "paid_pro_source_of_truth",
       agreementId: durableAgreementId,
       // Await durable persist below — never advance into broken final review on 403/404.
       persistFrozenToBackend: false,
@@ -33272,7 +33272,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (reusedAcceptedSnapshot) {
       signingReadyPlain = acceptedPlain;
     }
-    if (!isPaidProSigningReadyHydratedCorpus(signingReadyPlain) || (hydrated.rejected && !reusedAcceptedSnapshot)) {
+    if (
+      shouldRollbackSignerFinalizeUnreadyCorpus({
+        reusedAcceptedSnapshot,
+        signingReadyPlain,
+        hydratedRejected: hydrated.rejected,
+      })
+    ) {
       rollbackFinalizeFailure(
         "Signer details could not be applied to the agreement. Update signer details and finalize again before preparing for signing.",
       );
@@ -33301,7 +33307,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       );
       return false;
     }
-    if (prepared.ok) {
+    if (
+      prepared.ok ||
+      (reusedAcceptedSnapshot && prepared.code === "accepted_snapshot_immutable")
+    ) {
       const freezePersist = await persistFrozenSigningAuthorityToBackendDetailed(
         durableAgreementId,
         frozenLocal,
