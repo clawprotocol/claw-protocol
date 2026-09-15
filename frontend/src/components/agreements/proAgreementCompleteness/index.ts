@@ -32,4 +32,10 @@ export {
   isHostedSaasDeal,
   unconfirmedCompletionCriteriaQuestion,
 } from "../paidProCompletionCriteria";
+export {
+  UNCONFIRMED_MILESTONE_PAYER_QUESTION,
+  isMilestonePayerQuestion,
+  milestonePayerMaterialItem,
+  unconfirmedMilestonePayerQuestion,
+} from "../paidProMilestonePayer";
 export { isCatastrophicStructuralFailure } from "./proStructuralDetection";

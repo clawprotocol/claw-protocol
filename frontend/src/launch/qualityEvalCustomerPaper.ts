@@ -11,6 +11,8 @@ import {
   RELEASE_SCOPE_SAMPLES,
   type ReleaseScopeCaseId,
 } from "./releaseScopeQualificationCampaign";
+import { cueAssignedToExpectedEntity } from "../components/agreements/paidProPartyEconomicRelationships";
+import { paperBindsMilestonePayer, textNamesExplicitPayer } from "../components/agreements/paidProMilestonePayer";
 
 export type PaperCheck = { ok: boolean; reasons: string[] };
 
@@ -234,6 +236,16 @@ function substitutedGoverningLaw(text: string, expected: string, forbidden: read
   return false;
 }
 
+const STONEBRIDGE = "Stonebridge Wellness LLC";
+const NOVAPATH = "NovaPath Learning Inc.";
+const CLEARSPRING = "ClearSpring Distribution LLC";
+const SHARE_45 = /\b45\s*%|\bforty[ -]?five\s+percent/i;
+const SHARE_35 = /\b35\s*%|\bthirty[ -]?five\s+percent/i;
+const SHARE_20 = /\b20\s*%|\btwenty\s+percent/i;
+const STONEBRIDGE_RIGHT = /original (?:content|materials)|wellness training/i;
+const NOVAPATH_OBLIGATION = /platform code|online training platform|adapt(?:s| and host)/i;
+const CLEARSPRING_OBLIGATION = /\b(?:billing|account management|market(?:s|ing)|sell(?:s|ing) subscriptions)\b/i;
+
 export function checkThreePartyCustomerMeaning(article: string): PaperCheck {
   const text = normalizeArticleWhitespace(article || "");
   const sample = RELEASE_SCOPE_SAMPLES.find((row) => row.id === "three_party");
@@ -248,13 +260,23 @@ export function checkThreePartyCustomerMeaning(article: string): PaperCheck {
   THREE_PARTY_SPLIT.forEach((pattern, index) => {
     if (!pattern.test(text)) reasons.push(`missing_revenue_share_${["45", "35", "20"][index]}`);
   });
-  if (!/original (?:content|materials)|wellness training/i.test(text)) {
+  const threeEntities = [STONEBRIDGE, NOVAPATH, CLEARSPRING];
+  if (!cueAssignedToExpectedEntity(text, STONEBRIDGE, threeEntities, SHARE_45)) {
+    reasons.push("reassigned_or_unbound_stonebridge_share");
+  }
+  if (!cueAssignedToExpectedEntity(text, NOVAPATH, threeEntities, SHARE_35)) {
+    reasons.push("reassigned_or_unbound_novapath_share");
+  }
+  if (!cueAssignedToExpectedEntity(text, CLEARSPRING, threeEntities, SHARE_20)) {
+    reasons.push("reassigned_or_unbound_clearspring_share");
+  }
+  if (!cueAssignedToExpectedEntity(text, STONEBRIDGE, threeEntities, STONEBRIDGE_RIGHT)) {
     reasons.push("missing_stonebridge_content_ownership");
   }
-  if (!/platform code|online training platform/i.test(text)) {
+  if (!cueAssignedToExpectedEntity(text, NOVAPATH, threeEntities, NOVAPATH_OBLIGATION)) {
     reasons.push("missing_novapath_platform_responsibility");
   }
-  if (!/\b(?:billing|account management|market(?:s|ing)|sell(?:s|ing) subscriptions)\b/i.test(text)) {
+  if (!cueAssignedToExpectedEntity(text, CLEARSPRING, threeEntities, CLEARSPRING_OBLIGATION)) {
     reasons.push("missing_clearspring_distribution_responsibility");
   }
   if (/\bI am only coordinating|Jane Coordinator\b/i.test(text)) {
@@ -267,7 +289,13 @@ export function checkThreePartyCustomerMeaning(article: string): PaperCheck {
   return fail(reasons);
 }
 
-export function checkFourPartyCustomerMeaning(article: string): PaperCheck {
+const LUMEN = "Lumen Bioinformatics Inc.";
+const THALASSA = "Thalassa Data Systems LLC";
+const COASTAL = "Coastal Meridian Analytics LLC";
+const VANGUARD = "Vanguard Regulatory Sciences Ltd.";
+const FOUR_ENTITIES = [LUMEN, THALASSA, COASTAL, VANGUARD];
+
+export function checkFourPartyCustomerMeaning(article: string, stage: "first" | "applied" = "first"): PaperCheck {
   const text = normalizeArticleWhitespace(article || "");
   const sample = RELEASE_SCOPE_SAMPLES.find((row) => row.id === "four_party");
   const reasons: string[] = [];
@@ -282,21 +310,37 @@ export function checkFourPartyCustomerMeaning(article: string): PaperCheck {
     reasons.push("missing_or_substituted_governing_law");
   }
   if (!TWENTY_FOUR_MONTHS.test(text)) reasons.push("missing_twenty_four_month_term");
-  const milestoneGroups = [
-    ["lumen", FOUR_PARTY_LUMEN],
-    ["thalassa", FOUR_PARTY_THALASSA],
-    ["coastal", FOUR_PARTY_COASTAL],
-    ["vanguard", FOUR_PARTY_VANGUARD],
-  ] as const;
-  for (const [label, patterns] of milestoneGroups) {
+  const milestoneBindings: Array<[string, readonly RegExp[], string]> = [
+    [LUMEN, FOUR_PARTY_LUMEN, "lumen"],
+    [THALASSA, FOUR_PARTY_THALASSA, "thalassa"],
+    [COASTAL, FOUR_PARTY_COASTAL, "coastal"],
+    [VANGUARD, FOUR_PARTY_VANGUARD, "vanguard"],
+  ];
+  for (const [entity, patterns, label] of milestoneBindings) {
     for (const pattern of patterns) {
       if (!pattern.test(text)) reasons.push(`missing_${label}_milestone_${pattern.source}`);
+      else if (!cueAssignedToExpectedEntity(text, entity, FOUR_ENTITIES, pattern)) {
+        reasons.push(`reassigned_${label}_milestone_${pattern.source}`);
+      }
     }
   }
-  if (!/Platform Developer/i.test(text)) reasons.push("missing_lumen_role");
-  if (!/Data Infrastructure Provider/i.test(text)) reasons.push("missing_thalassa_role");
-  if (!/Analytics Integrator/i.test(text)) reasons.push("missing_coastal_role");
-  if (!/Regulatory Compliance Advisor/i.test(text)) reasons.push("missing_vanguard_role");
+  if (!cueAssignedToExpectedEntity(text, LUMEN, FOUR_ENTITIES, /Platform Developer/i)) {
+    reasons.push("missing_lumen_role");
+  }
+  if (!cueAssignedToExpectedEntity(text, THALASSA, FOUR_ENTITIES, /Data Infrastructure Provider/i)) {
+    reasons.push("missing_thalassa_role");
+  }
+  if (!cueAssignedToExpectedEntity(text, COASTAL, FOUR_ENTITIES, /Analytics Integrator/i)) {
+    reasons.push("missing_coastal_role");
+  }
+  if (!cueAssignedToExpectedEntity(text, VANGUARD, FOUR_ENTITIES, /Regulatory Compliance Advisor/i)) {
+    reasons.push("missing_vanguard_role");
+  }
+  if (stage === "first") {
+    if (textNamesExplicitPayer(text)) reasons.push("invented_milestone_payer");
+  } else if (!paperBindsMilestonePayer(text, LUMEN)) {
+    reasons.push("missing_or_reassigned_milestone_payer");
+  }
   for (const name of sample.forbiddenParties) {
     if (text.includes(name)) reasons.push(`forbidden_party_${name}`);
   }
@@ -309,7 +353,11 @@ export function threePartyPaperReady(article: string): boolean {
 }
 
 export function fourPartyPaperReady(article: string): boolean {
-  return checkFourPartyCustomerMeaning(article).ok;
+  return checkFourPartyCustomerMeaning(article, "applied").ok;
+}
+
+export function fourPartyFirstDraftReady(article: string): boolean {
+  return checkFourPartyCustomerMeaning(article, "first").ok;
 }
 
 export function paperReadyForReleaseScopeCase(id: ReleaseScopeCaseId, article: string): boolean {

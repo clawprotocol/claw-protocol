@@ -22,7 +22,6 @@ import {
   type Test487PartyFixture,
 } from "../components/agreements/paidProTest487ProductionValidationFixtures";
 import {
-  TEST490_CLEARSPRING,
   TEST490_NOVAPATH,
   TEST490_STONEBRIDGE,
   TEST490_THREE_PARTY_REVENUE_SHARE_INTAKE,
@@ -268,6 +267,13 @@ export const RELEASE_SCOPE_SAMPLES: readonly ReleaseScopeSample[] = [
     ],
   },
 ];
+
+/**
+ * TEST DATA — synthetic customer answer, not part of the original four-party intake.
+ * Names one existing party as payer. Does not add a fifth legal party.
+ */
+export const RELEASE_SCOPE_FOUR_PARTY_PAYER_ANSWER_TEST_DATA =
+  "TEST DATA (synthetic customer answer; not part of the original intake): Lumen Bioinformatics Inc. pays each listed milestone amount to the named recipient. Do not add a fifth legal party.";
 
 export function releaseScopeSample(id: ReleaseScopeCaseId): ReleaseScopeSample {
   const sample = RELEASE_SCOPE_SAMPLES.find((row) => row.id === id);

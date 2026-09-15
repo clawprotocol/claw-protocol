@@ -59,6 +59,47 @@ describe("partySlotIdentityNormalize", () => {
     ]);
   });
 
+  it("collapse keeps name-matched signer fields and does not copy a sibling email", () => {
+    const collapsed = collapseDraftPartyRows(
+      [
+        {
+          name: "Lumen Bioinformatics Inc.",
+          role: "Platform Developer",
+          email: "elena.vasquez@lumenbio.com",
+          signerName: "Dr. Elena Vasquez",
+          signerTitle: "CSO",
+        },
+        {
+          name: "Thalassa Data Systems LLC",
+          role: "Data Infrastructure Provider",
+          email: "marcus.webb@thalassadata.com",
+          signerName: "Marcus Webb",
+        },
+        {
+          name: "Coastal Meridian Analytics LLC",
+          role: "Analytics Integrator",
+          email: "priya.nair@coastalmeridian.com",
+          signerName: "Priya Nair",
+        },
+        {
+          name: "Vanguard Regulatory Sciences Ltd.",
+          role: "Regulatory Compliance Advisor",
+          email: "marcus.webb@thalassadata.com",
+          signerName: "James O'Sullivan",
+        },
+      ],
+      [
+        "Parties: Lumen Bioinformatics Inc., Thalassa Data Systems LLC,",
+        "Coastal Meridian Analytics LLC, and Vanguard Regulatory Sciences Ltd.",
+      ].join(" "),
+    );
+    expect(collapsed).toHaveLength(4);
+    expect(collapsed[0]?.signerName).toBe("Dr. Elena Vasquez");
+    expect(collapsed[0]?.email).toBe("elena.vasquez@lumenbio.com");
+    expect(collapsed[3]?.signerName).toBe("James O'Sullivan");
+    expect(collapsed[3]?.signerTitle).toBeUndefined();
+  });
+
   it("four-party bullet intake does not promote list markers or drop Blue Harbor", () => {
     const intake = [
       "Draft a four-party Professional Services Agreement among:",

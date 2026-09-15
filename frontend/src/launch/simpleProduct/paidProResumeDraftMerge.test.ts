@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import type { ParsedDraftShape } from "../../components/agreements/intakeSmartDefaults";
 import {
+  liveSignerUiFieldsFromDraftParties,
   mergePaidProAuthoritativeDraftFieldsFromApi,
   retainAuthorizedApiPartiesAfterIntakeDefaults,
+  shouldKeepPersistedApiPartiesOnResume,
 } from "./paidProResumeDraftMerge";
 
 describe("mergePaidProAuthoritativeDraftFieldsFromApi", () => {
@@ -51,6 +53,85 @@ describe("mergePaidProAuthoritativeDraftFieldsFromApi", () => {
     expect(p0.id).toBe("p1");
     expect(p1.email).toBe("bob@example.com");
     expect(p1.id).toBe("p2");
+  });
+
+  it("copies persisted signer names onto coerced parties and keeps them after intake defaults", () => {
+    const apiDraft = {
+      parties: [
+        {
+          id: "p1",
+          name: "Lumen Bioinformatics Inc.",
+          role: "Platform Developer",
+          email: "elena.vasquez@lumenbio.com",
+          signerName: "Dr. Elena Vasquez",
+          signerTitle: "CSO",
+        },
+        {
+          id: "p2",
+          name: "Thalassa Data Systems LLC",
+          role: "Data Infrastructure Provider",
+          email: "marcus.webb@thalassadata.com",
+          signerName: "Marcus Webb",
+        },
+        {
+          id: "p3",
+          name: "Coastal Meridian Analytics LLC",
+          role: "Analytics Integrator",
+          email: "priya.nair@coastalmeridian.com",
+          signerName: "Priya Nair",
+        },
+        {
+          id: "p4",
+          name: "Vanguard Regulatory Sciences Ltd.",
+          role: "Regulatory Compliance Advisor",
+          email: "james.osullivan@vanguardregulatory.co",
+          signerName: "James O'Sullivan",
+        },
+      ],
+    } as AgreementDraft;
+    const coerced: ParsedDraftShape = {
+      title: "T",
+      jurisdiction: "MA",
+      parties: apiDraft.parties.map((party) => ({ name: party.name, role: party.role })),
+      purpose: "Scope",
+      payment_terms: "",
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      payment: { amount: null, cadence: null, valid: false },
+    };
+    const merged = mergePaidProAuthoritativeDraftFieldsFromApi(coerced, apiDraft);
+    expect(merged.parties.map((party) => (party as { signerName?: string }).signerName)).toEqual([
+      "Dr. Elena Vasquez",
+      "Marcus Webb",
+      "Priya Nair",
+      "James O'Sullivan",
+    ]);
+    const retained = retainAuthorizedApiPartiesAfterIntakeDefaults(
+      {
+        ...merged,
+        parties: merged.parties.map((party) => ({ name: party.name, role: party.role })),
+      },
+      apiDraft,
+    );
+    expect(retained.parties[3]).toMatchObject({
+      name: "Vanguard Regulatory Sciences Ltd.",
+      email: "james.osullivan@vanguardregulatory.co",
+      signerName: "James O'Sullivan",
+    });
+    expect(
+      shouldKeepPersistedApiPartiesOnResume({ signerSetupResume: false, apiParties: apiDraft.parties }),
+    ).toBe(true);
+    expect(
+      shouldKeepPersistedApiPartiesOnResume({
+        signerSetupResume: false,
+        apiParties: [
+          { name: "Harbor Peak Analytics LLC" },
+          { name: "Ironvale Manufacturing Inc." },
+        ],
+      }),
+    ).toBe(false);
+    expect(liveSignerUiFieldsFromDraftParties(apiDraft.parties).names[3]).toBe("James O'Sullivan");
   });
 
   it("restores GET counterparties dropped by intake defaults on a short shell", () => {

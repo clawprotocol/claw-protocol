@@ -1,4 +1,5 @@
 import type { ParsedDraftShape } from "../intakeSmartDefaults";
+import { stripRelationshipDisclaimerPhrases } from "../agreementLaunchFamilies";
 import { shouldApplyAiWorkflowServicesQualityFloor } from "../paidProDomainScopeGuard";
 
 export type CommercialFactGraph = {
@@ -70,7 +71,7 @@ function paymentTrigger(raw: string, amount: string | null): string | null {
 }
 
 export function isJointVentureEconomicsIntake(rawIntake: string): boolean {
-  const low = (rawIntake || "").toLowerCase();
+  const low = stripRelationshipDisclaimerPhrases(rawIntake || "").toLowerCase();
   const jvFrame = /\b(?:joint\s+venture|jv|partnership|profit[-\s]?share|revenue[-\s]?share)\b/.test(low);
   const economics =
     /\b(?:profit\s+split|waterfall|preferred\s+return|pref(?:erred)?\s+equity|capital\s+calls?|buy-sell|50\s*\/\s*50)\b/.test(

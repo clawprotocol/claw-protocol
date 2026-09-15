@@ -43,6 +43,10 @@ export function mergePaidProAuthoritativeDraftFieldsFromApi(
     if (ap.id) row.id = ap.id;
     const em = String(ap.email ?? "").trim();
     if (em) row.email = em;
+    const signerName = String(ap.signerName ?? "").trim();
+    if (signerName) row.signerName = signerName;
+    const signerTitle = String(ap.signerTitle ?? "").trim();
+    if (signerTitle) row.signerTitle = signerTitle;
     const ph = String(ap.phone ?? "").trim();
     if (ph) row.phone = ph;
     const nm = String(ap.name ?? "").trim();
@@ -81,6 +85,8 @@ export function retainAuthorizedApiPartiesAfterIntakeDefaults(
     const name = String(ap.name || "").trim().toLowerCase();
     const prev = (id && byId.get(id)) || (name && byName.get(name)) || ({} as AgreementParty);
     const email = String(ap.email || prev.email || "").trim();
+    const signerName = String(ap.signerName || prev.signerName || "").trim();
+    const signerTitle = String(ap.signerTitle || prev.signerTitle || "").trim();
     return {
       ...prev,
       ...ap,
@@ -88,7 +94,44 @@ export function retainAuthorizedApiPartiesAfterIntakeDefaults(
       name: String(ap.name || prev.name || "").trim(),
       role: ap.role || prev.role || "party",
       ...(email ? { email } : {}),
+      ...(signerName ? { signerName } : {}),
+      ...(signerTitle ? { signerTitle } : {}),
     };
   });
   return { ...next, parties: parties as ParsedDraftShape["parties"] };
+}
+
+export function namedLegalPartyCountFromParties(
+  parties: readonly { name?: string }[] | undefined | null,
+): number {
+  return (parties ?? []).filter((party) => String(party.name || "").trim().length >= 2).length;
+}
+
+export function shouldKeepPersistedApiPartiesOnResume(args: {
+  signerSetupResume: boolean;
+  apiParties: readonly { name?: string }[] | undefined | null;
+}): boolean {
+  return Boolean(args.signerSetupResume) || namedLegalPartyCountFromParties(args.apiParties) >= 3;
+}
+
+export function liveSignerUiFieldsFromDraftParties(
+  parties: readonly {
+    name?: string;
+    email?: string;
+    signerEmail?: string;
+    signerName?: string;
+    signerTitle?: string;
+  }[],
+): {
+  legal: string[];
+  names: string[];
+  titles: string[];
+  emails: string[];
+} {
+  return {
+    legal: parties.map((party) => String(party.name ?? "").trim()),
+    names: parties.map((party) => String(party.signerName ?? "").trim()),
+    titles: parties.map((party) => String(party.signerTitle ?? "").trim()),
+    emails: parties.map((party) => String(party.signerEmail ?? party.email ?? "").trim()),
+  };
 }

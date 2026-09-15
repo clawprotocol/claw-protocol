@@ -15,11 +15,11 @@ Campaign facts: `RELEASE_SCOPE_QUALIFICATION_CAMPAIGN_2026-09-14.md` and
 
 Matching no-spend evidence for a later live run of the **same product files**:
 
-- Offline Harbor/SaaS: `quality-eval-offline-journey/20260914T220448Z-23971` (`OFFLINE_JOURNEY_PASS`, `model_calls=0`)
-- Official stub: `core-paid-journey-acceptance/c179205829e0-src-60a08067992d-live-4188-4189-stub-model-run-20260914T220815Z-24500` (`gate_green=true`)
+- Offline Harbor/SaaS: `quality-eval-offline-journey/20260915T032105Z-61873` (`OFFLINE_JOURNEY_PASS`, `model_calls=0`). Older `20260914T220448Z-23971` is preserved and is not hash-identical to this candidate.
+- Official stub: `d261556bfcf99cb7b6b1eaf6966f4fb583af7f11+src-1ddff56f95efd470971acff04d43eae0b3a1b85c+run-20260915T030701Z-59511` (`gate_green=true`). Historical `src-60a08067992d` / `src-64516accffb1` do not certify these official hashed files.
 
-Campaign and runner files added after that rematch change quality-eval `source_files_sha256`.  
-Before any later `--live`, rematch `--offline-journey --case all` on the checkpoint tree and use **that** PASS dir. Do not treat the older offline dir as hash-identical after this checkpoint. Official fingerprint `src-60a08067992d` still maps the official hashed product files unless those files change.
+Campaign and register files added after that rematch change quality-eval `source_files_sha256`.  
+Before any later `--live`, rematch `--offline-journey --case all` on the checkpoint tree and use **that** PASS dir. Do not treat `61873` as hash-identical after this documentation checkpoint. Official fingerprint `src-1ddff56f95ef` still maps the official hashed product files unless those files change.
 
 ## Ledger (inspected only; not modified)
 

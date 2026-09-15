@@ -190,6 +190,15 @@ function titleWordSupportedInIntake(wordId: string, intake: string): boolean {
     case "revenue_share":
       return /\brevenue\s+shar(?:e|ing)\b/i.test(full);
     case "joint_venture":
+      if (
+        /\b(?:nothing(?:\s+in\s+this\s+agreement)?\s+creates|does\s+not\s+create|do\s+not\s+create|neither\s+party\s+is|not\s+(?:partners?\s+or\s+)?joint\s+ventur)/i.test(
+          full,
+        ) &&
+        !/\bjoint\s+venture\s+agreement\b/i.test(full) &&
+        !/\b(?:form(?:ing|ed)?|establish(?:ed|ing)?)\s+a\s+joint\s+venture\b/i.test(full)
+      ) {
+        return false;
+      }
       return /\bjoint\s+venture\b/i.test(full);
     case "consortium":
       return /\bconsortium\b/i.test(full);

@@ -1142,6 +1142,14 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
 describe("paid Pro runtime authority establishment (intake wiring)", () => {
   const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
 
+  it("production resume keeps persisted 3–4 party rows and hydrates signer UI from them", () => {
+    expect(intake).toContain("shouldKeepPersistedApiPartiesOnResume");
+    expect(intake).toContain("liveSignerUiFieldsFromDraftParties");
+    expect(intake).toContain("acceptedReviewCorpusRef.current = resumeCorpus");
+    expect(intake).toContain("finalizedSigningCorpusRef.current = resumeCorpus");
+    expect(intake).toContain("draftParties: draft?.parties ?? []");
+  });
+
   it("Prepare handoff fails closed without agreement id (cannot bypass Prepare authority)", () => {
     const frag = extractBalancedDecl(
       intake,
@@ -1207,6 +1215,15 @@ describe("paid Pro runtime authority establishment (intake wiring)", () => {
     expect(htmlBlock).toContain("hasPaidProSourceOfTruth() && !paidProDisplay?.text?.trim()");
     expect(htmlBlock).toContain('return ""');
     expect(htmlBlock).toMatch(/hasPaidProSourceOfTruth\(\)[\s\S]{0,200}return "";/);
+  });
+
+  it("does not read displayPolishedPaidProPlain before that binding is declared", () => {
+    const htmlIdx = intake.indexOf("const premiumReadonlyAgreementHtml = useMemo");
+    const polishedIdx = intake.indexOf("const displayPolishedPaidProPlain = useMemo");
+    expect(htmlIdx).toBeGreaterThan(-1);
+    expect(polishedIdx).toBeGreaterThan(htmlIdx);
+    const htmlBlock = extractBalancedDecl(intake, "const premiumReadonlyAgreementHtml = useMemo");
+    expect(htmlBlock).not.toContain("displayPolishedPaidProPlain");
   });
 });
 

@@ -2,7 +2,6 @@ import type { AgreementParty } from "./agreementTypes";
 
 const NON_SIGNING_ROLES = new Set([
   "viewer",
-  "reviewer",
   "coordinator",
   "fyi",
   "copy",
@@ -24,7 +23,7 @@ export function partyRequiresSignature(party: AgreementParty | null | undefined)
   return !NON_SIGNING_ROLES.has(wr);
 }
 
-/** Legal parties that sign by default (excludes reviewers/viewers/coordinators). */
+/** Legal parties that sign by default (excludes viewers/coordinators/FYI; review-email role still signs). */
 export function signingPartiesFromDraft(parties: readonly AgreementParty[] | null | undefined): AgreementParty[] {
   return (parties ?? []).filter((p) => partyRequiresSignature(p));
 }

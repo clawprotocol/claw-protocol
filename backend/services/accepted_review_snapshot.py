@@ -213,6 +213,7 @@ def create_pending_snapshot(
     registry: Optional[Dict[str, Any]] = None,
     expected_registry_version: Optional[int] = None,
     draft_for_immutability: Any = None,
+    customer_confirmed_answers: Optional[str] = None,
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """
     Persist an immutable pending snapshot.
@@ -291,6 +292,7 @@ def create_pending_snapshot(
         "acceptedAt": None,
         "acceptedByPrincipal": None,
         "acceptedBySession": None,
+        "customerConfirmedAnswers": _clean(customer_confirmed_answers) or None,
     }
     snaps[snap_id] = snap
     reg["schema"] = REGISTRY_SCHEMA_VERSION

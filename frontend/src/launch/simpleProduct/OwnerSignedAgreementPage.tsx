@@ -6,10 +6,12 @@ import {
   type PublicVerifyPayload,
 } from "../../agreement/agreementPublicVerify";
 import { downloadCompletedSignedAgreementPdf } from "../../agreement/completedSignedAgreementPdfDownload";
-import { resolveRequiredSignerCount } from "../../agreement/resolveRequiredSignerCount";
 import { PremiumAgreementReadonlyView } from "../../components/agreements/PremiumAgreementReadonlyView";
 import { useAuth } from "../../auth/AuthProvider";
-import { displayCreatorAgreementTitle } from "../creatorDashboardPresentation";
+import {
+  formatOwnerSignedSignatureSummary,
+  resolveSignedRecordDisplayTitle,
+} from "../ownerSignedAgreementPresentation";
 import { CREATOR_COMPLETED_PILL, CREATOR_DOWNLOAD_PDF_LABEL } from "../creatorDashboardCopy";
 import { useLaunchNav } from "../LaunchNavContext";
 import {
@@ -24,14 +26,18 @@ type Props = {
   agreementId: string;
 };
 
-function formatSignatureSummary(verify: PublicVerifyPayload | null): string | null {
+function formatSignatureSummary(
+  verify: PublicVerifyPayload | null,
+  parties: AgreementDraft["parties"] | null | undefined,
+): string | null {
   const sig = verify?.signature_status;
   if (!sig) return null;
-  const required = resolveRequiredSignerCount({ signerPartyCount: sig.signer_party_count });
-  const recorded = sig.signatures_recorded ?? 0;
-  if (sig.fully_executed) return `Fully signed (${required} of ${required})`;
-  if (recorded > 0) return `${recorded} of ${required} signed`;
-  return null;
+  return formatOwnerSignedSignatureSummary({
+    signerPartyCount: sig.signer_party_count,
+    signaturesRecorded: sig.signatures_recorded,
+    fullyExecuted: sig.fully_executed,
+    parties,
+  });
 }
 
 export function OwnerSignedAgreementPage(props: Props) {
@@ -81,7 +87,12 @@ export function OwnerSignedAgreementPage(props: Props) {
       return;
     }
     setDraft(loaded.draft);
-    setTitle(displayCreatorAgreementTitle(loaded.draft.title ?? ""));
+    setTitle(
+      resolveSignedRecordDisplayTitle({
+        draftTitle: loaded.draft.title,
+        corpusText: loaded.corpusText,
+      }).title,
+    );
     setPreviewHtml(loaded.html);
     setUsesPremiumDocument(loaded.usesPremiumDocument);
     setCorpusSource(loaded.corpusSource);
@@ -93,12 +104,13 @@ export function OwnerSignedAgreementPage(props: Props) {
     void load();
   }, [load]);
 
-  const signatureSummary = formatSignatureSummary(verify);
+  const signatureSummary = formatSignatureSummary(verify, draft?.parties);
   const proofHash = verify?.verification?.agreement_hash?.trim() || null;
 
   return (
     <AppShell
       title={title}
+      titleTestId="owner-signed-agreement-chrome-title"
       subtitle="Fully signed agreement — read-only proof copy with verification metadata."
       navMode={showBackToDashboard ? "default" : "public_completed"}
     >

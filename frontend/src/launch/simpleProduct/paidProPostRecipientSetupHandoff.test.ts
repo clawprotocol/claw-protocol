@@ -24,7 +24,15 @@ describe("paidProPostRecipientSetupHandoff", () => {
     expect(s).toContain("maybePostReviewSentAfterReviewFirstHandoff");
     expect(s).toContain("resolvePremiumSenderFirstSigningPath");
     expect(s).toContain("lockAuthoritativeVersionAndMintSigningInvites");
+    expect(s).toContain("mintedInvitesPreserved");
     expect(s).toContain("professional_sign");
+    const mintLoop = s.indexOf("for (const participantId of lockedInvite.requiredParticipantIds)");
+    const notReadyAfterMint = s.indexOf(
+      "The finalized agreement is not ready for signing yet",
+      mintLoop,
+    );
+    expect(mintLoop).toBeGreaterThan(0);
+    expect(notReadyAfterMint).toBe(-1);
     expect(s).not.toContain('path: "/app/done/');
     expect(s).not.toContain("/app/send/");
   });

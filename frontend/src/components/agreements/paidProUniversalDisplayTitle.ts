@@ -44,7 +44,7 @@ function pack(title: string, source: string): PaidProUniversalDisplayTitleResolu
   };
 }
 
-function extractTitleFromCorpusPlain(corpusPlain?: string | null): PaidProUniversalDisplayTitleResolution | null {
+export function extractTitleFromCorpusPlain(corpusPlain?: string | null): PaidProUniversalDisplayTitleResolution | null {
   const body = String(corpusPlain || "").replace(/\r\n/g, "\n").trim();
   if (body.length < 40) return null;
   const opening = body.slice(0, 2_500);

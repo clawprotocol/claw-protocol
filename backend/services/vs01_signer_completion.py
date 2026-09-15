@@ -184,7 +184,10 @@ _COMPLETION_ELIGIBLE_PARTY_ROLES = frozenset(
     {"", "signer", "owner", "party", "counterparty", "provider", "client", "service_provider"}
 )
 
-_NON_SIGNING_PARTY_ROLES = frozenset({"viewer", "reviewer", "coordinator", "fyi", "copy", "read_only", "readonly"})
+# Review-email workflow role "reviewer" is not non-signing. Named legal parties
+# stamped reviewer for Resend still sign on the review-first path. Exclude only
+# true non-signing workflow roles; honor explicit requires_signature=False.
+_NON_SIGNING_PARTY_ROLES = frozenset({"viewer", "coordinator", "fyi", "copy", "read_only", "readonly"})
 
 
 def _normalize_party_workflow_role(role: str) -> str:

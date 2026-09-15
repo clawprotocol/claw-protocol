@@ -16,11 +16,42 @@ import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
 import { PAID_PRO_RECOVERY_MIN_DISPLAY_LEN } from "./paidProPostCheckoutRenderGate";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
+import {
+  partyReceiveAllocationsFromIntake,
+  preservePartyEconomicRelationshipsInPaymentSection,
+} from "./paidProPartyEconomicRelationships";
 
 function oxfordPartyList(parties: readonly string[]): string {
   if (parties.length <= 1) return parties[0] ?? "";
   if (parties.length === 2) return `${parties[0]} and ${parties[1]}`;
   return `${parties.slice(0, -1).join(", ")}, and ${parties[parties.length - 1]}`;
+}
+
+function roleForParty(
+  party: string,
+  labeled: readonly LabeledPartyBlock[],
+  draft?: ParsedDraftShape | null,
+): string {
+  const block = labeled.find(
+    (row) => row.legalEntity === party || party.includes(row.legalEntity) || row.legalEntity.includes(party),
+  );
+  const fromLabeled = (block?.roleLabel || "").trim();
+  if (fromLabeled) return fromLabeled;
+  const fromDraft = (draft?.parties || []).find((row) => (row?.name || "").trim() === party);
+  return String(fromDraft?.role || "").trim();
+}
+
+function oxfordPartyListWithRoles(
+  parties: readonly string[],
+  labeled: readonly LabeledPartyBlock[],
+  draft?: ParsedDraftShape | null,
+): string {
+  return oxfordPartyList(
+    parties.map((party) => {
+      const role = roleForParty(party, labeled, draft);
+      return role ? `${party} ("${role}")` : party;
+    }),
+  );
 }
 
 function buildNoticeStanzas(
@@ -98,8 +129,11 @@ export function buildNPartyPaidProServerCorpus(args: {
   const purpose =
     (args.draft?.purpose || "").trim() ||
     "professional services, implementation support, and related deliverables described in the intake.";
+  const intakeAllocations = partyReceiveAllocationsFromIntake(intake);
   const payment =
-    (args.draft?.payment_terms || "").trim() ||
+    (intakeAllocations.length
+      ? intakeAllocations.map((row) => row.sentence).join(" ")
+      : (args.draft?.payment_terms || "").trim()) ||
     "Fees and milestone payments as stated in the intake and any written order forms the Parties execute.";
   const term = (args.draft?.duration || "").trim() || "twelve (12) months";
   const law =
@@ -109,7 +143,7 @@ export function buildNPartyPaidProServerCorpus(args: {
   const blocks = [
     title.toUpperCase(),
     "",
-    `This ${title} (this "Agreement") is entered into by and among ${oxfordPartyList(parties)} (each a "Party" and collectively the "Parties").`,
+    `This ${title} (this "Agreement") is entered into by and among ${oxfordPartyListWithRoles(parties, labeled, args.draft)} (each a "Party" and collectively the "Parties").`,
     "",
     "1. SERVICES AND SCOPE",
     `Each Party may provide ${purpose}`,
@@ -181,5 +215,5 @@ export function buildNPartyPaidProServerCorpus(args: {
     body = expandOperativeCorpusWithUniqueSupplements(body, minLen);
   }
 
-  return body.trim();
+  return preservePartyEconomicRelationshipsInPaymentSection(body.trim(), intake);
 }

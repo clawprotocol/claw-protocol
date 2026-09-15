@@ -49,7 +49,10 @@ import {
   resetPremiumRecipientHandoffDedupForTests,
   writePremiumRecipientHandoffFromAuthorityParties,
 } from "./premiumPartyNamesHandoff";
-import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSeed";
+import {
+  partiesForServerPersistFromSeed,
+  runPaidProSignerMetadataAuthoritySeed,
+} from "./paidProSignerMetadataSeed";
 import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
@@ -77,6 +80,7 @@ import {
   TEST487_PARTY_EMAILS,
   TEST487_PRODUCTION_INTAKE,
   TEST487_SIGNER_NAMES,
+  TEST487_SIGNER_TITLES,
   buildTest487AcceptedCorpus,
   buildTest487OperativeNoticeCorpus,
   test487DraftWithFourParsedParties,
@@ -621,5 +625,80 @@ describe("TEST487 — production validation (fresh four-party scenario)", () => 
     expect(partiesFromUi).toHaveLength(4);
     expect(partiesFromUi[2]?.partyLegalName).toContain("Coastal Meridian");
     expect(partiesFromUi[3]?.partyLegalName).toContain("Vanguard Regulatory");
+  });
+
+  it("keeps TEST487 signer name, title, email, and legal-party association from intake", () => {
+    const extracted = extractCanonicalIntakeSignerMetadata(TEST487_PRODUCTION_INTAKE);
+    expect(extracted).toHaveLength(4);
+    for (let i = 0; i < 4; i += 1) {
+      expect(extracted[i]!.legalEntity).toContain(TEST487_FOUR_PARTY[i]!.legalEntity.split(" ")[0]!);
+      expect(extracted[i]!.signerName).toBe(TEST487_SIGNER_NAMES[i]);
+      expect(extracted[i]!.signerTitle).toBe(TEST487_SIGNER_TITLES[i]);
+      expect(extracted[i]!.signerEmail).toBe(TEST487_PARTY_EMAILS[i]);
+    }
+  });
+
+  it("writes TEST487 intake emails onto parse parties that omitted them", () => {
+    const draft = {
+      title: "Precision Medicine Data Platform Agreement",
+      parties: TEST487_FOUR_PARTY.map((party) => ({
+        name: party.legalEntity,
+        role: party.role,
+        email: null,
+      })),
+    };
+    const seed = runPaidProSignerMetadataAuthoritySeed({
+      stage: "commit_parsed_draft_review",
+      legalEntities: TEST487_FOUR_PARTY_LEGAL_ENTITIES,
+      intakeText: TEST487_PRODUCTION_INTAKE,
+      draft: draft as Parameters<typeof runPaidProSignerMetadataAuthoritySeed>[0]["draft"],
+      uiSignerNames: ["", "", "", ""],
+      uiSignerTitles: ["", "", "", ""],
+      authoritativePartyCount: 4,
+    });
+    expect(seed.names).toEqual(TEST487_SIGNER_NAMES);
+    expect(seed.emails).toEqual(TEST487_PARTY_EMAILS);
+    expect(seed.draftChanged).toBe(true);
+    for (let i = 0; i < 4; i += 1) {
+      expect(seed.draft?.parties?.[i]?.email).toBe(TEST487_PARTY_EMAILS[i]);
+      expect((seed.draft?.parties?.[i] as { signerName?: string } | undefined)?.signerName).toBe(
+        TEST487_SIGNER_NAMES[i],
+      );
+    }
+    const persistParties = partiesForServerPersistFromSeed(draft.parties as { name: string; role: string }[], seed);
+    expect(persistParties.map((party) => party.email)).toEqual(TEST487_PARTY_EMAILS);
+    expect(persistParties.map((party) => party.signerName)).toEqual(TEST487_SIGNER_NAMES);
+  });
+
+  it("blocks send when signer names are genuinely missing and accepts a one-time supply", () => {
+    const missing = resolvePaidProSignerDetailsGate({
+      partyCount: 4,
+      intakeText: "Draft a four-party services agreement among four unnamed companies.",
+      draftPartyNames: ["Alpha LLC", "Beta Inc.", "Gamma LLC", "Delta Ltd."],
+      partySignerNames: ["", "", "", ""],
+      recipient1Name: "Alpha LLC",
+      recipient2Name: "Beta Inc.",
+      extraPartyLegalNames: ["Gamma LLC", "Delta Ltd."],
+      recipient1Email: "a@example.com",
+      recipient2Email: "b@example.com",
+      extraPartyReviewEmails: ["c@example.com", "d@example.com"],
+    });
+    expect(missing.complete).toBe(false);
+    expect(missing.blockers.some((row) => row.field === "signer_name")).toBe(true);
+
+    const supplied = resolvePaidProSignerDetailsGate({
+      partyCount: 4,
+      intakeText: "Draft a four-party services agreement among four unnamed companies.",
+      draftPartyNames: ["Alpha LLC", "Beta Inc.", "Gamma LLC", "Delta Ltd."],
+      partySignerNames: ["Pat One", "Pat Two", "Pat Three", "Pat Four"],
+      recipient1Name: "Alpha LLC",
+      recipient2Name: "Beta Inc.",
+      extraPartyLegalNames: ["Gamma LLC", "Delta Ltd."],
+      recipient1Email: "a@example.com",
+      recipient2Email: "b@example.com",
+      extraPartyReviewEmails: ["c@example.com", "d@example.com"],
+    });
+    expect(supplied.complete).toBe(true);
+    expect(supplied.blockers.some((row) => row.field === "signer_name")).toBe(false);
   });
 });

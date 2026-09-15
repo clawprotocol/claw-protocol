@@ -96,10 +96,16 @@ export function assertGuidedProVs01BridgeCorpusReady(
   if (corpusText.length < GUIDED_PRO_VS01_BRIDGE_MIN_CORPUS_LEN) {
     return { ok: false, reason: "corpus_too_short", diagnostics };
   }
-  if (source !== "finalized_signer_applied_guided_corpus") {
+  if (
+    source !== "finalized_signer_applied_guided_corpus" &&
+    source !== "finalized_signing_corpus" &&
+    source !== "accepted_review"
+  ) {
     return { ok: false, reason: "corpus_source_not_finalized_signer_applied", diagnostics };
   }
-  if (!/\b(?:By|Signature)\s*:\s*_{2,}/im.test(corpusText)) {
+  // Blank `By: ____` or named `By: Elena Vasquez` both count — review-first N-party
+  // paper fills the execution line from intake-supplied signer names.
+  if (!/\b(?:By|Signature)\s*:\s*(?:_{2,}|\S+)/im.test(corpusText)) {
     return { ok: false, reason: "missing_by_or_signature_lines", diagnostics };
   }
   if (!corpusHasVisibleSignatureExecutionLines(corpusText)) {

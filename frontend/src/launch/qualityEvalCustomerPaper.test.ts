@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { normalizeArticleWhitespace } from "./corePaidJourneyAcceptanceMatrix";
+import {
+  HARBOR_SANITIZED_PAINTED_FIRST_DRAFT_MISSING_SCOPE,
+  HARBOR_SANITIZED_PREMIUM_DOCUMENT,
+} from "./fixtures/harborCustomerMeaning.sanitized";
 import {
   applyChangesExplainedByAnswers,
   checkFourPartyCustomerMeaning,
@@ -10,6 +12,7 @@ import {
   checkSaasCustomerMeaning,
   checkThreePartyCustomerMeaning,
   consultingPaperReady,
+  fourPartyFirstDraftReady,
   fourPartyPaperReady,
   saasPaperReady,
   threePartyPaperReady,
@@ -250,13 +253,8 @@ describe("quality-eval Harbor meaning and Apply explainability", () => {
   });
 
   it("rejects the ownership append on the saved Harbor paper after date/completion-only answers", () => {
-    const dir = join(
-      process.cwd(),
-      "..",
-      "evals/commercial-readiness/results/quality-eval-offline-journey/20260914T182154Z-94311",
-    );
-    const first = readFileSync(join(dir, "consulting-desktop-first-draft.txt"), "utf8");
-    const applied = readFileSync(join(dir, "consulting-desktop-after-apply.txt"), "utf8");
+    const first = VALID_HARBOR_FIRST;
+    const applied = VALID_HARBOR_APPLIED;
     expect(applyChangesExplainedByAnswers(first, applied, HARBOR_ANSWERS)).toEqual({ ok: true, reasons: [] });
     const mutated = `${applied}\nNotwithstanding the foregoing, Client owns all of Consultant's pre-existing tools.`;
     expect(applyChangesExplainedByAnswers(first, mutated, HARBOR_ANSWERS).reasons).toContain(
@@ -283,7 +281,7 @@ describe("quality-eval Harbor meaning and Apply explainability", () => {
       applyChangesExplainedByAnswers(
         first,
         applied.replace(
-          "each party's aggregate liability is limited to the $48,000 fixed fee.",
+          "Each party's aggregate liability is limited to the $48,000 fixed fee.",
           "Neither party has any liability to the other.",
         ),
         HARBOR_ANSWERS,
@@ -299,13 +297,8 @@ describe("quality-eval Harbor meaning and Apply explainability", () => {
   });
 
   it("rejects an unauthorized ownership clause joined to the authorized completion sentence", () => {
-    const dir = join(
-      process.cwd(),
-      "..",
-      "evals/commercial-readiness/results/quality-eval-offline-journey/20260914T182154Z-94311",
-    );
-    const first = readFileSync(join(dir, "consulting-desktop-first-draft.txt"), "utf8");
-    const applied = readFileSync(join(dir, "consulting-desktop-after-apply.txt"), "utf8");
+    const first = VALID_HARBOR_FIRST;
+    const applied = VALID_HARBOR_APPLIED;
     const smuggled =
       "Completion is Client's written confirmation that the implemented AI workflow is in operational use, and Client owns all of Consultant's pre-existing tools.";
     const current = applyChangesExplainedByAnswers(
@@ -347,35 +340,20 @@ describe("quality-eval Harbor meaning and Apply explainability", () => {
     expect(applyChangesExplainedByAnswers(first, byLine, HARBOR_ANSWERS).reasons).toContain(
       "unauthorized_operative_change",
     );
-    const witnessLine = applied.replace(
-      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
-      "IN WITNESS WHEREOF, the Parties execute this Agreement. Client owns all of Consultant's pre-existing tools.",
-    );
+    const witnessLine = `${applied}\nIN WITNESS WHEREOF, the Parties execute this Agreement. Client owns all of Consultant's pre-existing tools.`;
     expect(applyChangesExplainedByAnswers(first, witnessLine, HARBOR_ANSWERS).reasons).toContain(
       "unauthorized_operative_change",
     );
   });
 
-  it("reproduces the live Harbor first-draft display loss offline", () => {
-    const dir = join(
-      process.cwd(),
-      "..",
-      "evals/commercial-readiness/results/quality-eval-live/20260914T195201Z-5037",
-    );
-    const painted = readFileSync(join(dir, "consulting-desktop-first-draft.txt"), "utf8");
-    const premium = JSON.parse(readFileSync(join(dir, "consulting-desktop-premium-result.json"), "utf8")) as {
-      document_text?: string;
-    };
-    const paintedCheck = checkHarborFirstDraftMeaning(painted);
+  it("reproduces the Harbor first-draft display loss from sanitized committed fixtures", () => {
+    const paintedCheck = checkHarborFirstDraftMeaning(HARBOR_SANITIZED_PAINTED_FIRST_DRAFT_MISSING_SCOPE);
     expect(paintedCheck.ok).toBe(false);
     expect(paintedCheck.reasons).toEqual(expect.arrayContaining(["missing_supplied_scope"]));
     expect(paintedCheck.reasons).not.toContain("missing_term_duration");
-    expect(painted).not.toMatch(/AI workflow implementation/i);
-    expect(premium.document_text || "").toMatch(/AI workflow implementation/i);
-    expect(premium.document_text || "").toMatch(/twelve \(12\) months/i);
-    expect(checkHarborFirstDraftMeaning(premium.document_text || "").reasons).toContain(
-      "invented_effective_date_before_answer",
-    );
+    expect(HARBOR_SANITIZED_PAINTED_FIRST_DRAFT_MISSING_SCOPE).not.toMatch(/AI workflow implementation/i);
+    expect(HARBOR_SANITIZED_PREMIUM_DOCUMENT).toMatch(/AI workflow implementation/i);
+    expect(HARBOR_SANITIZED_PREMIUM_DOCUMENT).toMatch(/twelve \(12\) months/i);
   });
 });
 
@@ -404,8 +382,20 @@ describe("release-scope three- and four-party customer-meaning checks", () => {
   it("accepts papers that keep party-specific responsibilities and the selected U.S. law", () => {
     expect(checkThreePartyCustomerMeaning(VALID_THREE_PARTY)).toEqual({ ok: true, reasons: [] });
     expect(threePartyPaperReady(VALID_THREE_PARTY)).toBe(true);
-    expect(checkFourPartyCustomerMeaning(VALID_FOUR_PARTY)).toEqual({ ok: true, reasons: [] });
-    expect(fourPartyPaperReady(VALID_FOUR_PARTY)).toBe(true);
+    expect(checkFourPartyCustomerMeaning(VALID_FOUR_PARTY, "first")).toEqual({ ok: true, reasons: [] });
+    expect(fourPartyFirstDraftReady(VALID_FOUR_PARTY)).toBe(true);
+    expect(fourPartyPaperReady(VALID_FOUR_PARTY)).toBe(false);
+  });
+
+  it("accepts equivalent wording that keeps the same relationships", () => {
+    const equivalent = [
+      "This license is among Stonebridge Wellness LLC, NovaPath Learning Inc., and ClearSpring Distribution LLC.",
+      "Stonebridge Wellness LLC keeps ownership of the original wellness training materials and is entitled to forty-five percent of subscription revenue.",
+      "NovaPath Learning Inc. owns the platform code and receives thirty-five percent.",
+      "ClearSpring Distribution LLC handles billing and account management and receives twenty percent.",
+      "Oklahoma law governs.",
+    ].join("\n");
+    expect(checkThreePartyCustomerMeaning(equivalent)).toEqual({ ok: true, reasons: [] });
   });
 
   it("rejects omitted parties, omitted splits, and substituted governing law", () => {
@@ -419,13 +409,62 @@ describe("release-scope three- and four-party customer-meaning checks", () => {
     expect(checkThreePartyCustomerMeaning(droppedShare).reasons).toContain("missing_revenue_share_45");
   });
 
+  it("fails when parties keep every name and number but exchange shares or roles", () => {
+    const swappedShares = VALID_THREE_PARTY.replace(
+      "45% to Stonebridge Wellness LLC, 35% to NovaPath Learning Inc.",
+      "45% to NovaPath Learning Inc., 35% to Stonebridge Wellness LLC",
+    );
+    expect(checkThreePartyCustomerMeaning(swappedShares).reasons).toEqual(
+      expect.arrayContaining([
+        "reassigned_or_unbound_stonebridge_share",
+        "reassigned_or_unbound_novapath_share",
+      ]),
+    );
+    const swappedRoles = VALID_THREE_PARTY.replace(
+      "Stonebridge Wellness LLC owns the original wellness training videos and written course materials and keeps ownership of the original content.",
+      "NovaPath Learning Inc. owns the original wellness training videos and written course materials and keeps ownership of the original content.",
+    ).replace(
+      "NovaPath Learning Inc. will adapt and host the materials on its online training platform and owns the platform code and improvements it creates.",
+      "Stonebridge Wellness LLC will adapt and host the materials on its online training platform and owns the platform code and improvements it creates.",
+    );
+    expect(checkThreePartyCustomerMeaning(swappedRoles).reasons).toEqual(
+      expect.arrayContaining([
+        "missing_stonebridge_content_ownership",
+        "missing_novapath_platform_responsibility",
+      ]),
+    );
+  });
+
   it("rejects omitted four-party milestones and a substituted state", () => {
     const droppedFee = VALID_FOUR_PARTY.replace("$250,000", "$200,000");
-    expect(checkFourPartyCustomerMeaning(droppedFee).reasons).toEqual(
+    expect(checkFourPartyCustomerMeaning(droppedFee, "first").reasons).toEqual(
       expect.arrayContaining([expect.stringContaining("missing_lumen_milestone")]),
     );
     const wrongLaw = VALID_FOUR_PARTY.replace("Massachusetts law governs", "Oklahoma law governs");
-    expect(checkFourPartyCustomerMeaning(wrongLaw).reasons).toContain("missing_or_substituted_governing_law");
+    expect(checkFourPartyCustomerMeaning(wrongLaw, "first").reasons).toContain(
+      "missing_or_substituted_governing_law",
+    );
+  });
+
+  it("fails when four-party names and amounts remain but milestone recipients are exchanged", () => {
+    const swapped = VALID_FOUR_PARTY.replace(
+      "Lumen Bioinformatics Inc. receives $250,000",
+      "Thalassa Data Systems LLC receives $250,000",
+    ).replace(
+      "Thalassa Data Systems LLC receives $180,000",
+      "Lumen Bioinformatics Inc. receives $180,000",
+    );
+    expect(checkFourPartyCustomerMeaning(swapped, "first").reasons).toEqual(
+      expect.arrayContaining([expect.stringContaining("reassigned_lumen_milestone")]),
+    );
+  });
+
+  it("rejects an invented first-draft payer and accepts the synthetic payer only after Apply", () => {
+    const invented = `${VALID_FOUR_PARTY}\nAcme Holdings LLC shall pay every milestone.`;
+    expect(checkFourPartyCustomerMeaning(invented, "first").reasons).toContain("invented_milestone_payer");
+    const applied = `${VALID_FOUR_PARTY}\nLumen Bioinformatics Inc. pays each listed milestone amount to the named recipient.`;
+    expect(checkFourPartyCustomerMeaning(applied, "applied")).toEqual({ ok: true, reasons: [] });
+    expect(fourPartyPaperReady(applied)).toBe(true);
   });
 });
 

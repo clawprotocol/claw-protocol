@@ -492,6 +492,7 @@ export function establishPaidProSourceOfTruth(args: {
     generationOutcome: args.generationOutcome,
     reviewSessionId,
     surface: "establish_paid_pro_source_of_truth",
+    preserveApprovedRevision: Boolean(args.allowShorterOverwrite),
   });
   logProCorpusSourceMap({
     stage: "server_full_draft_received",

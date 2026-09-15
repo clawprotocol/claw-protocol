@@ -17,16 +17,32 @@ HARBOR = "Harbor Peak Analytics LLC"
 IRONVALE = "Ironvale Manufacturing Inc."
 ORION = "Orion Harbor LLC"
 NORTHWIND = "Northwind Retail Inc."
+LUMEN = "Lumen Bioinformatics Inc."
+THALASSA = "Thalassa Data Systems LLC"
+COASTAL = "Coastal Meridian Analytics LLC"
+VANGUARD = "Vanguard Regulatory Sciences Ltd."
+STONEBRIDGE = "Stonebridge Wellness LLC"
+NOVAPATH = "NovaPath Learning Inc."
+CLEARSPRING = "ClearSpring Distribution LLC"
 CONSULTANT_SIGNER = "Maya Chen"
 CLIENT_SIGNER = "Jordan Hale"
 PROVIDER_SIGNER = "Avery Cole"
 CUSTOMER_SIGNER = "Casey Reed"
+LUMEN_SIGNER = "Dr. Elena Vasquez"
+THALASSA_SIGNER = "Marcus Webb"
+COASTAL_SIGNER = "Priya Nair"
+VANGUARD_SIGNER = "James O'Sullivan"
+STONEBRIDGE_SIGNER = "Sandra Wells"
+NOVAPATH_SIGNER = "Caleb Price"
+CLEARSPRING_SIGNER = "Maya Coleman"
 FEE = "$48,000"
 SCOPE = "AI workflow implementation"
 TERM = "twelve months"
 START = "October 1, 2026"
 LAW = "Delaware"
 SAAS_LAW = "New York"
+FOUR_PARTY_LAW = "Massachusetts"
+THREE_PARTY_LAW = "Oklahoma"
 
 
 def acceptance_stub_enabled() -> bool:
@@ -74,6 +90,14 @@ def _has_named_parties(text: str) -> bool:
 
 def _is_hosted_saas(text: str) -> bool:
     return ORION in text and NORTHWIND in text
+
+
+def _is_four_party_precision(text: str) -> bool:
+    return LUMEN in text and THALASSA in text and COASTAL in text and VANGUARD in text
+
+
+def _is_three_party_ip_license(text: str) -> bool:
+    return STONEBRIDGE in text and NOVAPATH in text and CLEARSPRING in text
 
 
 def _sparse_response() -> str:
@@ -227,6 +251,248 @@ def _saas_draft_response() -> str:
     )
 
 
+def _retain_current_if_parties(current: str, names: tuple[str, ...], family: str) -> Optional[str]:
+    if current and all(name in current for name in names):
+        return json.dumps(
+            {
+                "updated_document_text": current,
+                "document_text": current,
+                "summary_changes": [f"Retained the owner-approved {family} paper."],
+                "missing_material_info": [],
+            }
+        )
+    return None
+
+
+def _unique_operative_expansion(parties: List[str], start_section: int, min_chars: int) -> str:
+    """Distinct operative paragraphs so the complex-intake 10k floor is met without filler spam."""
+    duties = [
+        "keep a written record of its assigned deliverables and notify the other parties of material delays",
+        "use commercially reasonable care with shared data and return or destroy copies on written request after the term",
+        "nominate one operational contact and keep that contact current during the initial term",
+        "cooperate on audit-readiness materials that relate only to its own assigned work",
+        "maintain insurance appropriate to its role and furnish certificates on reasonable request",
+        "treat non-public information as confidential for five years using at least reasonable care",
+        "not assign this Agreement without prior written consent except to a surviving affiliate",
+        "perform only the work assigned to it in this Agreement and not invent extra counterparties",
+    ]
+    blocks: List[str] = []
+    n = 0
+    while len("\n\n".join(blocks)) < min_chars:
+        party = parties[n % len(parties)]
+        duty = duties[n % len(duties)]
+        blocks.append(
+            f"{start_section + n}. {party} shall {duty}. This operational paragraph {n + 1} "
+            f"is specific to that party's role and does not reassign another party's milestones, "
+            f"revenue share, or governing law."
+        )
+        n += 1
+    return "\n\n".join(blocks)
+
+
+def _four_party_parse_response() -> str:
+    return json.dumps(
+        {
+            "title": "Precision Medicine Data Platform Agreement",
+            "jurisdiction": FOUR_PARTY_LAW,
+            "parties": [
+                {"name": LUMEN, "role": "Platform Developer"},
+                {"name": THALASSA, "role": "Data Infrastructure Provider"},
+                {"name": COASTAL, "role": "Analytics Integrator"},
+                {"name": VANGUARD, "role": "Regulatory Compliance Advisor"},
+            ],
+            "purpose": "regulated precision medicine analytics platform",
+            "payment_terms": "party-specific milestones",
+            "duration": "24 months",
+            "due_date": None,
+            "effective_date": None,
+        }
+    )
+
+
+def _three_party_parse_response() -> str:
+    return json.dumps(
+        {
+            "title": "Intellectual Property License and Royalty Agreement",
+            "jurisdiction": THREE_PARTY_LAW,
+            "parties": [
+                {"name": STONEBRIDGE, "role": "Content owner / licensor"},
+                {"name": NOVAPATH, "role": "Platform adapter / host"},
+                {"name": CLEARSPRING, "role": "Distributor"},
+            ],
+            "purpose": "adapt, host, and distribute wellness training materials",
+            "payment_terms": "45% / 35% / 20% subscription revenue split",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        }
+    )
+
+
+def _four_party_corpus(*, expand: bool = True) -> str:
+    parties = [LUMEN, THALASSA, COASTAL, VANGUARD]
+    sections = [
+        "PRECISION MEDICINE DATA PLATFORM AGREEMENT",
+        f"The parties are {LUMEN} (Platform Developer), {THALASSA} (Data Infrastructure Provider), "
+        f"{COASTAL} (Analytics Integrator), and {VANGUARD} (Regulatory Compliance Advisor).",
+        "1. PARTIES AND ROLES. Each company is an independent contractor. "
+        f"{LUMEN}'s authorized signer is {LUMEN_SIGNER}, Chief Science Officer. "
+        f"{THALASSA}'s authorized signer is {THALASSA_SIGNER}, President. "
+        f"{COASTAL}'s authorized signer is {COASTAL_SIGNER}, Vice President of Operations. "
+        f"{VANGUARD}'s authorized signer is {VANGUARD_SIGNER}, Managing Director. "
+        "Nothing in this Agreement creates a partnership, joint venture, or employment relationship.",
+        f"2. SCOPE OF SERVICES. The parties will jointly develop, validate, and operate a regulated "
+        f"precision medicine analytics platform. {LUMEN} is the Platform Developer. {THALASSA} provides "
+        f"data infrastructure, including data pipeline readiness and production cutover. {COASTAL} delivers "
+        f"analytics modules and completes user acceptance testing. {VANGUARD} performs regulatory gap "
+        f"assessment and audit readiness certification.",
+        "3. FEES AND PAYMENT. "
+        f"{LUMEN} receives $250,000 upon execution, $400,000 upon platform alpha delivery, and "
+        f"$350,000 upon validation report acceptance. {THALASSA} receives $180,000 upon data pipeline "
+        f"readiness and $220,000 upon production cutover. {COASTAL} receives $150,000 upon analytics "
+        f"module delivery and $175,000 upon user acceptance testing completion. {VANGUARD} receives "
+        f"$95,000 upon regulatory gap assessment and $105,000 upon audit readiness certification. "
+        "The initial term is 24 months with two optional 12-month renewals. "
+        "This first draft does not name a milestone payer.",
+        "4. INTELLECTUAL PROPERTY. Foreground IP developed solely by a party remains that party's "
+        "property. Jointly developed foreground IP is owned equally unless otherwise agreed in writing.",
+        "5. CONFIDENTIALITY. Each party will protect the other parties' confidential information for "
+        "five years using at least reasonable care.",
+        "6. LIMITATION OF LIABILITY. Except for confidentiality breaches, indemnification obligations, "
+        "or willful misconduct, no party's aggregate liability exceeds fees paid in the twelve months "
+        "preceding the claim. Each party will maintain commercial general liability insurance of at "
+        "least $2,000,000 per occurrence and professional liability coverage appropriate to its role.",
+        "7. INDEMNIFICATION. Each party shall indemnify the others against third-party claims arising "
+        "from its breach or willful misconduct.",
+        f"8. GOVERNING LAW. This Agreement is governed by the laws of the State of {FOUR_PARTY_LAW}, "
+        "without regard to conflict-of-law rules.",
+        "9. NOTICES. Formal notices must be delivered to each party's distinct notice address. "
+        f"{LUMEN} notice address is 402 Kendall Square, Suite 500, Cambridge, MA 02142. "
+        f"{THALASSA} notice address is 8801 Research Drive, Attn Legal Dept, Charlotte, NC 28262. "
+        f"{COASTAL} notice address is PO Box 4410, San Diego, CA 92121-4410. "
+        f"{VANGUARD} notice address is 225 Market Street, 12th Floor, Harrisburg, PA 17101.",
+        "10. TERMINATION. A party may terminate for material breach after written notice and a "
+        "fifteen-business-day opportunity to cure.",
+        "11. DISPUTE RESOLUTION. The parties shall first attempt good-faith negotiation in the "
+        f"selected {FOUR_PARTY_LAW} forum before seeking court relief.",
+        "12. ENTIRE AGREEMENT. This Agreement is the entire agreement. Electronic signatures and "
+        "counterparts are valid.",
+        "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+        f"{LUMEN}   By: {LUMEN_SIGNER}   Title: Chief Science Officer   Date: ________",
+        f"{THALASSA}   By: {THALASSA_SIGNER}   Title: President   Date: ________",
+        f"{COASTAL}   By: {COASTAL_SIGNER}   Title: Vice President of Operations   Date: ________",
+        f"{VANGUARD}   By: {VANGUARD_SIGNER}   Title: Managing Director   Date: ________",
+    ]
+    if expand:
+        sections.append(_unique_operative_expansion(parties, start_section=13, min_chars=7200))
+    return "\n\n".join(sections)
+
+
+def _three_party_corpus(*, expand: bool = True) -> str:
+    parties = [STONEBRIDGE, NOVAPATH, CLEARSPRING]
+    sections = [
+        "INTELLECTUAL PROPERTY LICENSE AND ROYALTY AGREEMENT",
+        f'This Agreement is entered into by and among {STONEBRIDGE} ("Licensor"), '
+        f'{NOVAPATH} ("Platform Provider"), and {CLEARSPRING} ("Distributor").',
+        "1. PARTIES AND ROLES. The coordinator is not a party, signer, notice recipient, or beneficiary. "
+        f"{STONEBRIDGE}'s authorized signer is {STONEBRIDGE_SIGNER}, Managing Member. "
+        f"{NOVAPATH}'s authorized signer is {NOVAPATH_SIGNER}, Chief Product Officer. "
+        f"{CLEARSPRING}'s authorized signer is {CLEARSPRING_SIGNER}, President.",
+        f"2. SCOPE OF SERVICES. {STONEBRIDGE} owns the original wellness training videos and written "
+        f"course materials and keeps ownership of the original content. {NOVAPATH} will adapt and host "
+        f"the materials on its online training platform and owns the platform code and improvements it "
+        f"creates. {CLEARSPRING} will market and sell subscriptions and handle customer contracts, "
+        f"billing, and account management.",
+        f"3. FEES AND PAYMENT. Subscription revenue is split 45% to {STONEBRIDGE}, 35% to {NOVAPATH}, "
+        f"and 20% to {CLEARSPRING}.",
+        "4. INTELLECTUAL PROPERTY. Stonebridge keeps original-content ownership. NovaPath owns platform "
+        "code and its improvements. This Agreement does not transfer coordinator rights.",
+        "5. CONFIDENTIALITY. Each party will protect the other parties' non-public information and use "
+        "it only to perform this Agreement.",
+        "6. LIMITATION OF LIABILITY AND INDEMNIFICATION. Except for confidentiality breaches or willful "
+        "misconduct, each party's aggregate liability is limited to royalties received in the twelve "
+        "months preceding the claim. Each party shall indemnify the others against third-party claims "
+        "arising from its breach.",
+        f"7. GOVERNING LAW. This Agreement is governed by the laws of the State of {THREE_PARTY_LAW}, "
+        "without regard to conflict-of-law rules.",
+        "8. NOTICES. Notices shall be sent to each party's designated address. Electronic signatures "
+        "and counterparts are valid.",
+        "9. TERMINATION. A party may terminate for material breach after written notice and a ten-day "
+        "opportunity to cure.",
+        "10. DISPUTE RESOLUTION. The parties shall first attempt good-faith negotiation before seeking "
+        f"court relief in {THREE_PARTY_LAW}.",
+        "11. ENTIRE AGREEMENT. This Agreement is the entire agreement.",
+        "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+        f"{STONEBRIDGE}   By: {STONEBRIDGE_SIGNER}   Title: Managing Member   Date: ________",
+        f"{NOVAPATH}   By: {NOVAPATH_SIGNER}   Title: Chief Product Officer   Date: ________",
+        f"{CLEARSPRING}   By: {CLEARSPRING_SIGNER}   Title: President   Date: ________",
+    ]
+    if expand:
+        sections.append(_unique_operative_expansion(parties, start_section=12, min_chars=7200))
+    return "\n\n".join(sections)
+
+
+def _four_party_draft_response() -> str:
+    doc = _four_party_corpus()
+    return json.dumps(
+        {
+            "title": "Precision Medicine Data Platform Agreement",
+            "agreement_family": "services_agreement",
+            "document_text": doc,
+            "key_terms_found": [
+                LUMEN,
+                THALASSA,
+                COASTAL,
+                VANGUARD,
+                FOUR_PARTY_LAW,
+                "$250,000",
+                "24 months",
+            ],
+            "missing_material_info": [],
+            "parties": [
+                {"name": LUMEN, "role": "Platform Developer"},
+                {"name": THALASSA, "role": "Data Infrastructure Provider"},
+                {"name": COASTAL, "role": "Analytics Integrator"},
+                {"name": VANGUARD, "role": "Regulatory Compliance Advisor"},
+            ],
+            "purpose": "regulated precision medicine analytics platform",
+            "payment_terms": "party-specific milestones",
+            "jurisdiction": FOUR_PARTY_LAW,
+            "updated_document_text": doc,
+        }
+    )
+
+
+def _three_party_draft_response() -> str:
+    doc = _three_party_corpus()
+    return json.dumps(
+        {
+            "title": "Intellectual Property License and Royalty Agreement",
+            "agreement_family": "ip_license_royalty",
+            "document_text": doc,
+            "key_terms_found": [
+                STONEBRIDGE,
+                NOVAPATH,
+                CLEARSPRING,
+                "45%",
+                "35%",
+                "20%",
+                THREE_PARTY_LAW,
+            ],
+            "missing_material_info": [],
+            "parties": [
+                {"name": STONEBRIDGE, "role": "Content owner / licensor"},
+                {"name": NOVAPATH, "role": "Platform adapter / host"},
+                {"name": CLEARSPRING, "role": "Distributor"},
+            ],
+            "purpose": "adapt, host, and distribute wellness training materials",
+            "payment_terms": "45% / 35% / 20% subscription revenue split",
+            "jurisdiction": THREE_PARTY_LAW,
+            "updated_document_text": doc,
+        }
+    )
+
+
 def _full_draft_response() -> str:
     return json.dumps(
         {
@@ -265,6 +531,28 @@ def stub_legal_llm_completion(
     payload = _user_payload(messages)
     text = _intake_text(messages, payload)
     purpose = (call_purpose or "").strip().lower()
+    if _is_four_party_precision(text):
+        if purpose in {"explicit_revision", "conditional_repair"}:
+            current = str(payload.get("current_document_text") or payload.get("document_text") or "")
+            retained = _retain_current_if_parties(current, (LUMEN, THALASSA, COASTAL, VANGUARD), "four-party")
+            if retained:
+                return retained
+        if purpose in {"structured_extraction", "missing_facts"}:
+            return _four_party_parse_response()
+        if purpose == "free_one_pager":
+            return _four_party_corpus(expand=False)
+        return _four_party_draft_response()
+    if _is_three_party_ip_license(text):
+        if purpose in {"explicit_revision", "conditional_repair"}:
+            current = str(payload.get("current_document_text") or payload.get("document_text") or "")
+            retained = _retain_current_if_parties(current, (STONEBRIDGE, NOVAPATH, CLEARSPRING), "three-party")
+            if retained:
+                return retained
+        if purpose in {"structured_extraction", "missing_facts"}:
+            return _three_party_parse_response()
+        if purpose == "free_one_pager":
+            return _three_party_corpus(expand=False)
+        return _three_party_draft_response()
     if _is_hosted_saas(text):
         if purpose in {"explicit_revision", "conditional_repair"}:
             current = str(payload.get("current_document_text") or payload.get("document_text") or "")

@@ -97,6 +97,16 @@ const PHASE2_JOURNEY_ONLY = [
   "src/components/agreements/paidProUniversalGtmPartyAuthorityRegression.test.ts",
   "src/components/agreements/thinTwoPartyStatedScopeAsk.test.ts",
   "src/components/agreements/guidedDealCompletion/servicesMigrationGuidedCompletion.test.ts",
+  "src/launch/releaseScopeQualificationCampaign.test.ts",
+  "src/launch/releaseScopeQualificationJourney.test.ts",
+  "src/launch/qualityEvalCustomerPaper.test.ts",
+  "src/launch/ownerSignedAgreementPresentation.test.ts",
+  "src/agreement/nPartySigning.test.ts",
+  "src/launch/customerMeaningProductionPath.test.ts",
+  "src/components/agreements/paidProPartyEconomicRelationships.test.ts",
+  "src/components/agreements/paidProMilestonePayer.test.ts",
+  "src/components/agreements/paymentClarificationApplyRecovery.test.ts",
+  "src/vs01/paidProTest465RecipientIsolation.test.ts",
 ] as const;
 
 export const PHASE2_PAID_JOURNEY_INCLUDE = [

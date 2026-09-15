@@ -484,6 +484,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
     };
   }
   const ownerPartyId = lockedInvite.ownerPartyId;
+  const mintAllRequiredSignTokens = lockedInvite.mintAllRequiredSignTokens;
   const professional = await resolvePremiumSenderFirstSigningPath({
     agreementId: id,
     ownerPartyId,
@@ -492,7 +493,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
     (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env
       ?.VITE_RECIPIENT_LINK_MINT_KEY || "";
   for (const participantId of lockedInvite.requiredParticipantIds) {
-    if (participantId === ownerPartyId) continue;
+    if (!mintAllRequiredSignTokens && participantId === ownerPartyId) continue;
     const minted = await mintRecipientAccessTokenResult(
       id,
       { mode: "sign", role: "signer", recipient_party_id: participantId },
@@ -511,7 +512,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
       };
     }
   }
-  if (professional?.path) {
+  if (!mintAllRequiredSignTokens && professional?.path) {
     markSimpleFlowSent(id);
     emitActionCompleted("send", { agreementId: id });
     void options.navigate(professional.path);
@@ -528,25 +529,20 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
 
   if (options.premiumSendIntent === "signature" && handoff && !options.relaxPaidSessionCorpusAssert) {
     const corpusAssert = assertGuidedProVs01BridgeCorpusReady(handoff);
-    if (!corpusAssert.ok) {
+    if (corpusAssert.ok) {
+      writeGuidedVs01SigningHandoffSession(handoff);
+    } else {
+      // Invitations are already minted. Do not report "Links were not created" or
+      // "not ready for signing" after a server-confirmed lock — that split the
+      // owner surface from the recorded sign tokens.
       logGuidedProVs01BridgeCorpusBlocked({
         agreementId: id,
         source: options.logSource,
         reason: corpusAssert.reason,
+        mintedInvitesPreserved: true,
         ...corpusAssert.diagnostics,
       });
-      return {
-        ok: false,
-        failure: {
-          agreementId: id,
-          reason: "vs01_seed",
-          userMessage:
-            "The finalized agreement is not ready for signing yet. Return to final review and try again.",
-          premiumSendIntent: options.premiumSendIntent,
-        },
-      };
     }
-    writeGuidedVs01SigningHandoffSession(handoff);
   }
 
   // eslint-disable-next-line no-console

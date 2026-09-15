@@ -20,6 +20,18 @@ function ownerSigningPartyId(draft: AgreementDraft | null | undefined): string |
   return id || null;
 }
 
+export function namedLegalSigningPartyCount(draft: AgreementDraft | null | undefined): number {
+  const parties = Array.isArray(draft?.parties) ? draft.parties : [];
+  return parties.filter((party) => String(party.name || "").trim().length >= 2).length;
+}
+
+/** Three- and four-party deals have no workspace-owner legal-party role; every named party signs. */
+export function shouldMintSignTokenForEveryRequiredParticipant(
+  draft: AgreementDraft | null | undefined,
+): boolean {
+  return namedLegalSigningPartyCount(draft) >= 3;
+}
+
 const SYNTHETIC_PARTY_ID = /^party_\d+$/i;
 
 export function isDurableSigningParticipantId(id: string | null | undefined): id is string {
@@ -77,6 +89,7 @@ export type DirectSigningLockAndInviteResult =
       ownerPartyId: string;
       lockedVersionId: string;
       requiredParticipantIds: string[];
+      mintAllRequiredSignTokens: boolean;
       draft: AgreementDraft;
     }
   | { ok: false; reason: string };
@@ -97,16 +110,22 @@ export async function lockAuthoritativeVersionAndMintSigningInvites(options: {
 
   const server = await fetchAgreementDraftWithSigningLock(id);
   const authoritative = server.ok && server.draft ? server.draft : workingDraft;
+  const namedLegal = namedLegalSigningPartyCount(authoritative);
+  const mintAllRequiredSignTokens = namedLegal >= 3;
   const ownerPartyId = ownerSigningPartyId(authoritative);
-  if (!isDurableSigningParticipantId(ownerPartyId)) {
+  if (!mintAllRequiredSignTokens && !isDurableSigningParticipantId(ownerPartyId)) {
     return { ok: false, reason: "missing_owner_participant" };
   }
 
   const participantIds = requiredDirectSigningParticipantIds(authoritative);
-  if (!participantIds.includes(ownerPartyId)) {
-    return { ok: false, reason: "owner_not_in_required_signers" };
-  }
-  if (participantIds.length < 2) {
+  if (!mintAllRequiredSignTokens) {
+    if (!ownerPartyId || !participantIds.includes(ownerPartyId)) {
+      return { ok: false, reason: "owner_not_in_required_signers" };
+    }
+    if (participantIds.length < 2) {
+      return { ok: false, reason: "missing_counterparty_participant" };
+    }
+  } else if (participantIds.length < 3) {
     return { ok: false, reason: "missing_counterparty_participant" };
   }
 
@@ -122,11 +141,17 @@ export async function lockAuthoritativeVersionAndMintSigningInvites(options: {
   }
 
   const refreshed = await fetchAgreementDraft(id);
+  const lockActorId =
+    ownerPartyId && isDurableSigningParticipantId(ownerPartyId) ? ownerPartyId : participantIds[0] || "";
+  if (!isDurableSigningParticipantId(lockActorId)) {
+    return { ok: false, reason: mintAllRequiredSignTokens ? "missing_counterparty_participant" : "missing_owner_participant" };
+  }
   return {
     ok: true,
-    ownerPartyId,
+    ownerPartyId: lockActorId,
     lockedVersionId,
     requiredParticipantIds: participantIds,
+    mintAllRequiredSignTokens,
     draft: refreshed.ok && refreshed.draft ? refreshed.draft : authoritative,
   };
 }

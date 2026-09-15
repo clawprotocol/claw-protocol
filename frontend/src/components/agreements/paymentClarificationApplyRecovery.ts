@@ -9,6 +9,8 @@
 import { extractDateMeanings } from "./paidProDateMeaning";
 import { hasCompletionMeaning } from "./paidProCompletionCriteria";
 import { extractPaymentFacts, paymentSectionText } from "./proAgreementCompleteness/revisionQuestionEngine";
+import { applySuppliedMilestonePayerToAuthorizedPaper } from "./paidProMilestonePayer";
+import { preservePartyEconomicRelationshipsInPaymentSection } from "./paidProPartyEconomicRelationships";
 
 export type PaymentApplyStructuredDraft = {
   title?: string | null;
@@ -232,5 +234,6 @@ export function applySuppliedContentFactsToAuthorizedPaper(
     const completion = completionSentenceFromAnswers(userGapAnswers);
     if (completion) doc = appendScopeSentence(doc, completion);
   }
-  return doc;
+  doc = preservePartyEconomicRelationshipsInPaymentSection(doc, intakeText);
+  return applySuppliedMilestonePayerToAuthorizedPaper(doc, intakeText, userGapAnswers);
 }

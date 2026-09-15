@@ -89,6 +89,34 @@ export function auditHasRecipientApprovalForParticipant(
   return false;
 }
 
+export function auditHasRecipientApprovalForRevision(
+  audit: AgreementDraft["audit_log"] | undefined,
+  args: {
+    participantId: string;
+    snapshotId: string;
+    digest: string;
+  },
+): boolean {
+  const want = String(args.participantId || "").trim();
+  const snap = String(args.snapshotId || "").trim();
+  const digest = String(args.digest || "").trim().toLowerCase();
+  if (!want || !snap || !digest) return false;
+  return (audit || []).some((event) => {
+    const t = String(event?.event_type || "").trim();
+    if (t !== "recipient_approved" && t !== "participant_approved") return false;
+    const value = (event?.value || {}) as {
+      participant_id?: string;
+      snapshot_id?: string;
+      corpus_sha256?: string;
+    };
+    return (
+      String(value.participant_id || "").trim() === want &&
+      String(value.snapshot_id || "").trim() === snap &&
+      String(value.corpus_sha256 || "").trim().toLowerCase() === digest
+    );
+  });
+}
+
 /** Signers (excluding implicit owner) who must approve before server signing lock when party ids exist. */
 export function missingSignerApprovals(draft: AgreementDraft | null): string[] {
   if (!draft?.parties?.length) return [];

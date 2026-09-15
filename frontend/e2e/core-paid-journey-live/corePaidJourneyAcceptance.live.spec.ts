@@ -28,6 +28,7 @@ import {
   readOptionalAlertFromCount,
   snapshotFieldsFromObservedPayload,
 } from "../../src/launch/corePaidJourneySnapshotObserve";
+import { extractTitleFromCorpusPlain } from "../../src/components/agreements/paidProUniversalDisplayTitle";
 import {
   persistCorePaidJourneyArticle,
   persistCorePaidJourneyArticleCompare,
@@ -1519,6 +1520,13 @@ test.describe("Core paid journey acceptance", () => {
     const completedAid = (await completedView.getAttribute("data-agreement-id").catch(() => "")) || "";
     const completedSurface = (await completedView.getAttribute("data-completed-document-view").catch(() => "")) || "";
     const completedDoc = (await completedDocNode.innerText().catch(() => "")) || "";
+    const expectedFinalTitle = (extractTitleFromCorpusPlain(completedDoc)?.title || "").trim();
+    expect(expectedFinalTitle, "Harbor final chrome title").toBeTruthy();
+    expect(expectedFinalTitle.toLowerCase(), "Harbor final chrome title").not.toBe("untitled agreement");
+    await expect(page.getByTestId("owner-signed-agreement-chrome-title")).toHaveText(expectedFinalTitle);
+    await expect(page.getByTestId("owner-signed-agreement-signatures")).toContainText(
+      `Fully signed (${FACTS.signers.length} of ${FACTS.signers.length})`,
+    );
     persistCorePaidJourneyArticle({
       ...ctx(),
       agreementId: `${drafted.agreementId}-final`,

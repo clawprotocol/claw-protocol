@@ -180,7 +180,7 @@ export function test487Draft(): ParsedDraftShape {
     ],
     purpose: "Regulated precision medicine analytics platform.",
     payment_terms:
-      "Total project value $1,925,000. Milestone payments include $250,000 upon execution, $400,000 upon alpha delivery, $350,000 upon validation report, $180,000 upon pipeline readiness, $220,000 upon production cutover, $150,000 upon analytics delivery, $175,000 upon UAT completion, $95,000 upon regulatory assessment, and $105,000 upon audit readiness.",
+      `${TEST487_LUMEN} receives $250,000 upon execution, $400,000 upon platform alpha delivery, and $350,000 upon validation report acceptance. ${TEST487_THALASSA} receives $180,000 upon data pipeline readiness and $220,000 upon production cutover. ${TEST487_COASTAL} receives $150,000 upon analytics module delivery and $175,000 upon user acceptance testing completion. ${TEST487_VANGUARD} receives $95,000 upon regulatory gap assessment and $105,000 upon audit readiness certification.`,
     duration: "24 months",
     due_date: null,
     effective_date: null,

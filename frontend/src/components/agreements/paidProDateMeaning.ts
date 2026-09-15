@@ -190,11 +190,11 @@ export function dateMeaningMaterialItem(args: {
 } | null {
   const meanings = extractDateMeanings(args.intakeRaw || "", args.userGapAnswers || "", args.body || "");
   if (!meanings.needsQuestion) return null;
-  if (!meanings.serviceStart && !DATE_RE.test(args.intakeRaw || "") && !/(?:effective date|term|start)/i.test(args.intakeRaw || "")) {
+  if (!meanings.serviceStart && !DATE_RE.test(args.intakeRaw || "") && !/(?:effective date)/i.test(args.intakeRaw || "")) {
     return null;
   }
   if (!meanings.serviceStart && !meanings.needsQuestion) return null;
-  if (!meanings.serviceStart && !/(?:starting|beginning|effective date|term)/i.test(args.intakeRaw || "")) {
+  if (!meanings.serviceStart && !/(?:starting|beginning|effective date)/i.test(args.intakeRaw || "")) {
     return null;
   }
   return {

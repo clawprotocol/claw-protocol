@@ -6,6 +6,14 @@ import { mergePaidProRecipientSetupEmailsIntoDraft } from "./agreementToVs01Sign
 
 const SIMPLE_SEND_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+function humanSignerNameOrEmpty(signerName: string | undefined, entityName: string): string {
+  const sn = String(signerName || "").trim();
+  const entity = String(entityName || "").trim();
+  if (!sn) return "";
+  if (entity && sn.toLowerCase() === entity.toLowerCase()) return "";
+  return sn;
+}
+
 function normalizeRole(role: string | undefined): string {
   return String(role ?? "").trim().toLowerCase();
 }
@@ -131,8 +139,17 @@ export function mergeReviewLinkRecipientEmailsOntoHydratedDraft(
     const prim = primedList[i];
     let email = plausibleSlotEmail(fp.email);
     if (!email && prim) email = plausibleSlotEmail(prim.email);
-    if (email) return { ...fp, email };
-    return { ...fp };
+    const entityName = String(fp.name || prim?.name || "").trim();
+    const signerName =
+      humanSignerNameOrEmpty(fp.signerName, entityName) ||
+      humanSignerNameOrEmpty(prim?.signerName, entityName);
+    const signerTitle = String(fp.signerTitle || "").trim() || String(prim?.signerTitle || "").trim();
+    return {
+      ...fp,
+      ...(email ? { email } : {}),
+      ...(signerName ? { signerName } : {}),
+      ...(signerTitle ? { signerTitle } : {}),
+    };
   });
 
   const handoff = readPremiumRecipientHandoff();

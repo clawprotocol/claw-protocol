@@ -20,7 +20,12 @@ import {
   unconfirmedCompletionCriteriaQuestion,
   unconfirmedEffectiveDateQuestion,
 } from "../../src/components/agreements/proAgreementCompleteness";
-import { loadCorePaidJourneyRuntime, seedCorePaidJourneyOwner } from "./corePaidJourneyLiveAuth";
+import {
+  captureRecipientMints,
+  loadCorePaidJourneyRuntime,
+  seedCorePaidJourneyOwner,
+  type RecipientTokenEvent,
+} from "./corePaidJourneyLiveAuth";
 import {
   applyChangesExplainedByAnswers,
   assertCheck,
@@ -30,12 +35,16 @@ import {
   checkSaasCustomerMeaning,
   checkThreePartyCustomerMeaning,
   consultingPaperReady as consultingPaperReadyCheck,
+  fourPartyFirstDraftReady as fourPartyFirstDraftReadyCheck,
   fourPartyPaperReady as fourPartyPaperReadyCheck,
   saasPaperReady as saasPaperReadyCheck,
   threePartyPaperReady as threePartyPaperReadyCheck,
 } from "../../src/launch/qualityEvalCustomerPaper";
+import { UNCONFIRMED_MILESTONE_PAYER_QUESTION } from "../../src/components/agreements/paidProMilestonePayer";
+import { extractTitleFromCorpusPlain } from "../../src/components/agreements/paidProUniversalDisplayTitle";
 import {
   RELEASE_SCOPE_FOUR_PARTY_FILLED_INTAKE,
+  RELEASE_SCOPE_FOUR_PARTY_PAYER_ANSWER_TEST_DATA,
   RELEASE_SCOPE_SAAS_FILLED_INTAKE,
   RELEASE_SCOPE_SAAS_SPARSE_INTAKE,
   RELEASE_SCOPE_THREE_PARTY_FILLED_INTAKE,
@@ -477,11 +486,15 @@ export function fourPartyPaperReady(article: string): boolean {
   return fourPartyPaperReadyCheck(article);
 }
 
-export function paperReadyForCase(id: QualityEvalCaseId): (article: string) => boolean {
+export function fourPartyFirstDraftReady(article: string): boolean {
+  return fourPartyFirstDraftReadyCheck(article);
+}
+
+export function paperReadyForCase(id: QualityEvalCaseId, stage: "first" | "applied" = "applied"): (article: string) => boolean {
   if (id === "consulting") return consultingPaperReady;
   if (id === "saas") return saasPaperReady;
   if (id === "three_party") return threePartyPaperReady;
-  return fourPartyPaperReady;
+  return stage === "first" ? fourPartyFirstDraftReady : fourPartyPaperReady;
 }
 
 export function assertHarborCustomerMeaning(article: string): void {
@@ -500,8 +513,8 @@ export function assertThreePartyCustomerMeaning(article: string): void {
   assertCheck(checkThreePartyCustomerMeaning(article), "three_party_customer_meaning");
 }
 
-export function assertFourPartyCustomerMeaning(article: string): void {
-  assertCheck(checkFourPartyCustomerMeaning(article), "four_party_customer_meaning");
+export function assertFourPartyCustomerMeaning(article: string, stage: "first" | "applied" = "first"): void {
+  assertCheck(checkFourPartyCustomerMeaning(article, stage), "four_party_customer_meaning");
 }
 
 export function assertReleaseScopePaper(id: QualityEvalCaseId, article: string, stage: "first" | "applied"): void {
@@ -518,7 +531,7 @@ export function assertReleaseScopePaper(id: QualityEvalCaseId, article: string, 
     assertThreePartyCustomerMeaning(article);
     return;
   }
-  assertFourPartyCustomerMeaning(article);
+  assertCheck(checkFourPartyCustomerMeaning(article, stage === "applied" ? "applied" : "first"), "four_party_customer_meaning");
 }
 
 export function assertApplyExplainedByAnswers(before: string, after: string, answers: string): void {
@@ -611,6 +624,45 @@ export async function applyHarborContentAnswers(
   return observeSnapshotCreateResponse(snapshotRes, agreementId, "content_apply_snapshot_create", startedAt);
 }
 
+export async function applyFourPartyPayerAnswer(
+  page: Page,
+  agreementId: string,
+): Promise<{ snapshotId: string; digest: string; corpus: string; length: number; agreementId: string }> {
+  const panel = page.getByTestId("paid-draft-content-clarification-panel");
+  await expect(panel, "milestone payer question must be visible after the four-party draft").toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(panel.getByTestId("milestone-payer-clarification-question")).toContainText(
+    UNCONFIRMED_MILESTONE_PAYER_QUESTION,
+  );
+  await expect(panel).toContainText(/Optional — you can review or sign without answering/i);
+  await page.getByTestId("paid-draft-content-clarification-answer").fill(RELEASE_SCOPE_FOUR_PARTY_PAYER_ANSWER_TEST_DATA);
+  const startedAt = Date.now();
+  const snapshotPostDone = page.waitForResponse(
+    (res) =>
+      isCanonicalSnapshotCreatePost({
+        url: res.url(),
+        method: res.request().method(),
+        agreementId,
+      }),
+    { timeout: 90_000 },
+  );
+  await page.getByTestId("paid-draft-content-clarification-apply").click();
+  const applyAlert = page.getByTestId("paid-draft-content-clarification-panel").locator("[role='alert']");
+  const snapshotOrError = await Promise.race([
+    snapshotPostDone.then((res) => ({ kind: "snapshot" as const, res })),
+    applyAlert
+      .waitFor({ state: "visible", timeout: 15_000 })
+      .then(async () => ({ kind: "error" as const, message: (await applyAlert.innerText()).trim() }))
+      .catch(() => ({ kind: "none" as const })),
+  ]);
+  if (snapshotOrError.kind === "error" && snapshotOrError.message) {
+    throw new Error(`payer_apply_failed ${snapshotOrError.message}`);
+  }
+  const snapshotRes = snapshotOrError.kind === "snapshot" ? snapshotOrError.res : await snapshotPostDone;
+  return observeSnapshotCreateResponse(snapshotRes, agreementId, "payer_apply_snapshot_create", startedAt);
+}
+
 export async function waitForCapturedSnapshotCreate(
   posts: Response[],
   agreementId: string,
@@ -663,6 +715,7 @@ export async function assertFreshEditableReopen(
   await seedCorePaidJourneyOwner(freshPage);
   await installQualityEvalPageGuards(freshPage);
   await freshPage.goto(`/app/create?agreementId=${agreementId}`, { waitUntil: "domcontentloaded" });
+  await waitForOwnerWorkspaceReady(freshPage, agreementId);
   const leaked = await readCreateSessionState(freshPage);
   expect(leaked.payment, "fresh context must not inherit payment sessionStorage").toBeNull();
   expect(leaked.premium, "fresh context must not inherit premium completion snapshot").toBeNull();
@@ -681,6 +734,7 @@ export async function assertFreshEditableReopen(
   await expect(freshPage).toHaveURL(new RegExp(`/app/create\\?agreementId=${agreementId}`));
   await expect(freshPage.getByTestId("date-meaning-clarification-question")).toHaveCount(0);
   await expect(freshPage.getByTestId("completion-criteria-clarification-question")).toHaveCount(0);
+  await expect(freshPage.getByTestId("milestone-payer-clarification-question")).toHaveCount(0);
   const freshGet = await fetchOwnerCanonicalSnapshot(freshPage, agreementId);
   expect(freshGet.snapshotId).toBe(expected.snapshotId);
   expect(freshGet.digest).toBe(expected.digest);
@@ -689,4 +743,557 @@ export async function assertFreshEditableReopen(
   expect(mintedNew, "opening the saved agreement must not mint a replacement").toEqual([]);
   await freshContext.close();
   return { article, reopenId };
+}
+
+function mintPartyId(event: RecipientTokenEvent | undefined): string {
+  const req = event?.request && typeof event.request === "object" ? event.request : {};
+  const body = event?.body && typeof event.body === "object" ? event.body : {};
+  return String(
+    (body as { recipient_party_id?: unknown }).recipient_party_id ||
+      (req as { recipient_party_id?: unknown }).recipient_party_id ||
+      "",
+  ).trim();
+}
+
+function mintedTokenForParticipant(
+  events: RecipientTokenEvent[],
+  mode: "review" | "sign",
+  participantId: string,
+): RecipientTokenEvent | undefined {
+  const pid = participantId.trim();
+  if (!pid) return undefined;
+  return [...events].reverse().find((row) => {
+    const body = row.body && typeof row.body === "object" ? row.body : {};
+    const req = row.request || {};
+    return (
+      row.ok &&
+      String((body as { mode?: string }).mode || req.mode || "") === mode &&
+      String((body as { token?: string }).token || "").length > 12 &&
+      mintPartyId(row) === pid
+    );
+  });
+}
+
+type OwnerPartyRow = {
+  id?: string;
+  name?: string;
+  email?: string;
+  role?: string;
+  signer_name?: string;
+  signerName?: string;
+};
+
+type OwnerAuditEvent = {
+  event_type?: string;
+  value?: { participant_id?: string; snapshot_id?: string; corpus_sha256?: string };
+};
+
+type OwnerDraftAuthority = {
+  parties: OwnerPartyRow[];
+  audit: OwnerAuditEvent[];
+};
+
+type RecipientApprovePostEvent = {
+  status: number;
+  path: string;
+  ok: boolean;
+  code?: string;
+  participantId?: string;
+  snapshotId?: string;
+  digest?: string;
+};
+
+async function fetchOwnerDraftAuthority(page: Page, agreementId: string): Promise<OwnerDraftAuthority> {
+  const api = configuredLiveApiBase();
+  const runtime = loadCorePaidJourneyRuntime();
+  const res = await page.request.get(`${api}/api/agreements/${encodeURIComponent(agreementId)}`, {
+    headers: {
+      Authorization: `Bearer ${runtime.access_token}`,
+      "X-Claw-Org-Id": runtime.org_id,
+    },
+  });
+  expect(res.ok(), `owner GET failed ${res.status()}`).toBeTruthy();
+  const body = (await res.json()) as {
+    draft?: { parties?: OwnerPartyRow[]; audit_log?: OwnerAuditEvent[] };
+  };
+  return {
+    parties: Array.isArray(body.draft?.parties) ? body.draft.parties : [],
+    audit: Array.isArray(body.draft?.audit_log) ? body.draft.audit_log : [],
+  };
+}
+
+async function fetchOwnerParties(page: Page, agreementId: string): Promise<OwnerPartyRow[]> {
+  return (await fetchOwnerDraftAuthority(page, agreementId)).parties;
+}
+
+function partySignerName(row: OwnerPartyRow | undefined): string {
+  return String(row?.signerName || row?.signer_name || "").trim();
+}
+
+function approvalOnIntendedRevision(
+  audit: OwnerAuditEvent[],
+  participantId: string,
+  snapshotId: string,
+  digest: string,
+): boolean {
+  const want = participantId.trim();
+  const snap = snapshotId.trim();
+  const dig = digest.trim().toLowerCase();
+  return audit.some((event) => {
+    const t = String(event.event_type || "").trim();
+    if (t !== "participant_approved" && t !== "recipient_approved") return false;
+    const value = event.value || {};
+    return (
+      String(value.participant_id || "").trim() === want &&
+      String(value.snapshot_id || "").trim() === snap &&
+      String(value.corpus_sha256 || "").trim().toLowerCase() === dig
+    );
+  });
+}
+
+function signatureCompletedForParticipant(audit: OwnerAuditEvent[], participantId: string): boolean {
+  const want = participantId.trim();
+  return audit.some((event) => {
+    if (String(event.event_type || "").trim() !== "signature_completed") return false;
+    return String(event.value?.participant_id || "").trim() === want;
+  });
+}
+
+function captureRecipientApprovePosts(page: Page): RecipientApprovePostEvent[] {
+  const events: RecipientApprovePostEvent[] = [];
+  page.on("response", (response) => {
+    const request = response.request();
+    if (request.method() !== "POST") return;
+    let path = "";
+    try {
+      path = new URL(response.url()).pathname;
+    } catch {
+      return;
+    }
+    if (!path.endsWith("/recipient-approve")) return;
+    const posted = (request.postDataJSON() || {}) as {
+      participant_id?: string;
+      snapshot_id?: string;
+      expected_digest?: string;
+    };
+    void response
+      .json()
+      .then((body) => {
+        const detail = body && typeof body === "object" ? (body as { detail?: unknown }).detail : undefined;
+        const code =
+          typeof detail === "string"
+            ? detail
+            : detail && typeof detail === "object"
+              ? String((detail as { code?: string }).code || "")
+              : "";
+        events.push({
+          status: response.status(),
+          path,
+          ok: response.ok(),
+          code: code || undefined,
+          participantId: String(posted.participant_id || ""),
+          snapshotId: String(posted.snapshot_id || ""),
+          digest: String(posted.expected_digest || ""),
+        });
+      })
+      .catch(() => {
+        events.push({
+          status: response.status(),
+          path,
+          ok: response.ok(),
+          participantId: String(posted.participant_id || ""),
+          snapshotId: String(posted.snapshot_id || ""),
+          digest: String(posted.expected_digest || ""),
+        });
+      });
+  });
+  return events;
+}
+
+async function waitForOwnerWorkspaceReady(page: Page, agreementId: string): Promise<void> {
+  const settling = page.getByTestId("create-auth-workspace-settling");
+  try {
+    await expect(settling).toHaveCount(0, { timeout: 60_000 });
+  } catch {
+    const copy = await page.locator("body").innerText().catch(() => "");
+    throw new Error(
+      `owner_workspace_restore_failed agreementId=${agreementId} still showing create-auth-workspace-settling: ${copy.slice(0, 400)}`,
+    );
+  }
+}
+
+async function recipientPaperText(page: Page, partyCue: string): Promise<string> {
+  const shell = page.getByTestId("recipient-document-shell");
+  await expect(shell).toBeVisible({ timeout: 45_000 });
+  await expect(shell).toContainText(partyCue, { timeout: 30_000 });
+  return shell.innerText();
+}
+
+function acceptNativeDialogs(page: Page): void {
+  page.on("dialog", (dialog) => {
+    void dialog.accept();
+  });
+}
+
+function ownerOrigin(page: Page): string {
+  try {
+    return new URL(page.url()).origin;
+  } catch {
+    return "";
+  }
+}
+
+async function assertSignerFormHoldsIntakeOrFillOnlyOmitted(
+  page: Page,
+  signers: readonly { legalEntity: string; signerName: string; signerEmail?: string }[],
+): Promise<void> {
+  const sendReady = page.getByTestId("simple-pro-send-for-review").or(page.getByTestId("simple-pro-send-for-signature"));
+  if (await sendReady.first().isVisible({ timeout: 4_000 }).catch(() => false)) return;
+  const openSetup = page.getByRole("button", { name: /Complete signer details|Finalize signer details/i }).first();
+  if (await openSetup.isVisible().catch(() => false)) await openSetup.click();
+  let filledOmitted = false;
+  for (const [idx, signer] of signers.entries()) {
+    const nameField = idx === 0 ? "r1-name" : idx === 1 ? "r2-name" : `party-${idx}-legal-name`;
+    const signerField = idx === 0 ? "r1-signer-name" : idx === 1 ? "r2-signer-name" : `party-${idx}-signer-name`;
+    const emailField = idx === 0 ? "r1-email" : idx === 1 ? "r2-email" : idx === 2 ? "r3-email" : "r4-email";
+    const nameInput = page.locator(`[data-claw-recipient-field="${nameField}"]`).first();
+    const signerInput = page.locator(`[data-claw-recipient-field="${signerField}"]`).first();
+    const emailInput = page.locator(`[data-claw-recipient-field="${emailField}"]`).first();
+    if (await nameInput.isVisible({ timeout: 1_500 }).catch(() => false)) {
+      const value = (await nameInput.inputValue()).trim();
+      if (!value && signer.legalEntity) {
+        throw new Error(`intake_legal_entity_lost ${signer.legalEntity}`);
+      }
+    }
+    if (await signerInput.isVisible({ timeout: 1_500 }).catch(() => false)) {
+      const value = (await signerInput.inputValue()).trim();
+      if (!value && signer.signerName) {
+        throw new Error(`intake_signer_name_lost ${signer.legalEntity} expected=${signer.signerName}`);
+      }
+      if (!value && !signer.signerName) {
+        await signerInput.fill(`Omitted Signer ${idx + 1}`);
+        filledOmitted = true;
+      }
+    }
+    if (await emailInput.isVisible({ timeout: 1_500 }).catch(() => false)) {
+      const value = (await emailInput.inputValue()).trim();
+      if (!value && signer.signerEmail) {
+        throw new Error(`intake_signer_email_lost ${signer.legalEntity} expected=${signer.signerEmail}`);
+      }
+      if (!value && !signer.signerEmail) {
+        await emailInput.fill(`omitted.signer.${idx + 1}@example.com`);
+        filledOmitted = true;
+      }
+    }
+  }
+  const advance = page
+    .getByRole("button", {
+      name: /Finalize signer details and continue to review decision|Complete signer details|Save signer details|Continue to review/i,
+    })
+    .first();
+  if (await advance.isVisible().catch(() => false) && !(await advance.isDisabled().catch(() => true))) {
+    await advance.click();
+  }
+  if (filledOmitted) {
+    // Genuinely omitted fields were entered on the form; persist is asserted by the later owner GET.
+  }
+}
+
+async function clickOwnerSend(
+  page: Page,
+  testId: "simple-pro-send-for-review" | "simple-pro-send-for-signature",
+): Promise<boolean> {
+  const button = page.getByTestId(testId);
+  if (!(await button.isVisible({ timeout: 12_000 }).catch(() => false))) {
+    const openSetup = page.getByRole("button", { name: /Complete signer details|Finalize signer details/i }).first();
+    if (await openSetup.isVisible().catch(() => false)) await openSetup.click();
+  }
+  if (!(await button.isVisible({ timeout: 12_000 }).catch(() => false))) return false;
+  if (await button.isDisabled().catch(() => false)) return false;
+  await button.click();
+  if (testId === "simple-pro-send-for-signature") {
+    const finalize = page
+      .locator("button:visible")
+      .filter({ hasText: /Finalize signer details and continue to signing|Create signing links/i })
+      .first();
+    await expect(finalize, "signing confirmation must mount after Send for signature").toBeVisible({
+      timeout: 20_000,
+    });
+    await finalize.scrollIntoViewIfNeeded();
+    await expect(finalize).toBeEnabled({ timeout: 20_000 });
+    await finalize.click();
+    const linksFailed = page.getByText(/Links were not created/i);
+    if (await linksFailed.isVisible({ timeout: 20_000 }).catch(() => false)) {
+      const copy = await page.locator("body").innerText().catch(() => "");
+      throw new Error(`signing_links_not_created ${copy.slice(0, 600)}`);
+    }
+  }
+  return true;
+}
+
+export async function completeLocalReviewSignAndFinal(args: {
+  page: Page;
+  browser: Browser;
+  agreementId: string;
+  snapshotId: string;
+  digest: string;
+  partyCue: string;
+  paperReady: (article: string) => boolean;
+  signers: readonly { legalEntity: string; signerName: string; signerEmail?: string }[];
+}): Promise<{ receiptId: string; signedCount: number }> {
+  acceptNativeDialogs(args.page);
+  const minted = captureRecipientMints(args.page);
+  await waitForOwnerWorkspaceReady(args.page, args.agreementId);
+  await expect
+    .poll(async () => {
+      const text = await articleText(args.page, args.partyCue);
+      return args.paperReady(text) ? text.length : 0;
+    }, { timeout: 90_000 })
+    .toBeGreaterThan(400);
+  for (const signer of args.signers) {
+    await expect(args.page.locator("body")).toContainText(signer.signerName);
+  }
+  const parsedParties = await fetchOwnerParties(args.page, args.agreementId);
+  for (const signer of args.signers) {
+    const row = parsedParties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
+    expect(row, `saved party missing for ${signer.legalEntity}`).toBeTruthy();
+    if (signer.signerEmail) {
+      expect(String(row?.email || "").toLowerCase(), `intake_signer_email_lost ${signer.legalEntity}`).toBe(
+        signer.signerEmail.toLowerCase(),
+      );
+    }
+  }
+  await assertSignerFormHoldsIntakeOrFillOnlyOmitted(args.page, args.signers);
+  expect(await clickOwnerSend(args.page, "simple-pro-send-for-review"), "send-for-review must mount").toBeTruthy();
+  await expect.poll(async () => (await fetchOwnerParties(args.page, args.agreementId)).length, { timeout: 30_000 }).toBe(
+    args.signers.length,
+  );
+  const parties = await fetchOwnerParties(args.page, args.agreementId);
+  for (const signer of args.signers) {
+    const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
+    expect(row?.id, `participant id missing for ${signer.legalEntity}`).toBeTruthy();
+    if (signer.signerEmail) {
+      expect(String(row?.email || "").toLowerCase(), `intake_signer_email_lost_after_send ${signer.legalEntity}`).toBe(
+        signer.signerEmail.toLowerCase(),
+      );
+    }
+    if (signer.signerName) {
+      expect(partySignerName(row), `intake_signer_name_lost_after_send ${signer.legalEntity}`).toMatch(
+        new RegExp(signer.signerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+      );
+    }
+  }
+  await expect
+    .poll(() => {
+      return args.signers.every((signer) => {
+        const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
+        return Boolean(row?.id && mintedTokenForParticipant(minted, "review", String(row.id)));
+      })
+        ? 1
+        : 0;
+    }, { timeout: 45_000 })
+    .toBe(1);
+  for (const signer of args.signers) {
+    const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity))!;
+    const token = String(
+      (mintedTokenForParticipant(minted, "review", String(row.id))?.body as { token?: string } | undefined)?.token || "",
+    );
+    const context = await args.browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const recipient = await context.newPage();
+    acceptNativeDialogs(recipient);
+    const approvePosts = captureRecipientApprovePosts(recipient);
+    const reviewOrigin = ownerOrigin(args.page);
+    await recipient.goto(
+      `${reviewOrigin}/agreements/${args.agreementId}/review?t=${encodeURIComponent(token)}`,
+      { waitUntil: "domcontentloaded" },
+    );
+    const paper = await recipientPaperText(recipient, args.partyCue);
+    expect(args.paperReady(paper), `${signer.legalEntity} review paper`).toBeTruthy();
+    const authority = recipient.getByTestId("recipient-review-authority-meta");
+    await expect(authority).toBeVisible({ timeout: 20_000 });
+    expect(await authority.getAttribute("data-snapshot-id")).toBe(args.snapshotId);
+    expect((await authority.getAttribute("data-corpus-sha256") || "").toLowerCase()).toBe(args.digest);
+    const approve = recipient.getByRole("button", { name: /^Approve draft$/i });
+    const fallback = recipient.getByTestId("recipient-review-approve-draft");
+    if (await approve.isVisible().catch(() => false)) await approve.click();
+    else await fallback.click();
+    await expect
+      .poll(() => approvePosts.filter((event) => event.participantId === String(row.id)).length, { timeout: 20_000 })
+      .toBeGreaterThan(0);
+    const posted = [...approvePosts].reverse().find((event) => event.participantId === String(row.id));
+    expect(posted, `${signer.legalEntity} approve POST missing`).toBeTruthy();
+    const ownerAfterPost = await fetchOwnerDraftAuthority(args.page, args.agreementId);
+    const recordedAfterPost = approvalOnIntendedRevision(
+      ownerAfterPost.audit,
+      String(row.id),
+      args.snapshotId,
+      args.digest,
+    );
+    if (!posted?.ok) {
+      const ambiguous = (posted?.status ?? 0) >= 500 || (posted?.status ?? 0) === 0;
+      expect(
+        ambiguous && recordedAfterPost,
+        `${signer.legalEntity} recipient-approve rejected method=POST path=${posted?.path} status=${posted?.status} code=${posted?.code || ""} participant=${row.id} agreement=${args.agreementId} snapshot=${args.snapshotId} digest=${args.digest}`,
+      ).toBeTruthy();
+    }
+    expect(
+      recordedAfterPost,
+      `${signer.legalEntity} approval missing on intended revision after POST status=${posted?.status}`,
+    ).toBeTruthy();
+    await recipient.reload({ waitUntil: "domcontentloaded" });
+    const ownerAfterReload = await fetchOwnerDraftAuthority(args.page, args.agreementId);
+    expect(
+      approvalOnIntendedRevision(ownerAfterReload.audit, String(row.id), args.snapshotId, args.digest),
+      `${signer.legalEntity} approval did not persist after recipient reload`,
+    ).toBeTruthy();
+    const persistedApproved = recipient
+      .getByTestId("recipient-accepted-awaiting-lock-root")
+      .or(recipient.getByTestId("recipient-approved-waiting-header"))
+      .or(recipient.getByTestId("recipient-approved-draft-collapsed"))
+      .or(recipient.getByTestId("recipient-review-approved-status"))
+      .or(recipient.getByText(/Review submitted|Your review has been recorded/i));
+    await expect(persistedApproved.first()).toBeVisible({ timeout: 20_000 });
+    const expandApproved = recipient.getByText(/tap to expand|Approved draft/i).first();
+    if (await expandApproved.isVisible().catch(() => false)) {
+      await expandApproved.click();
+    }
+    if (await recipient.getByTestId("recipient-document-shell").isVisible({ timeout: 3_000 }).catch(() => false)) {
+      expect(args.paperReady(await recipientPaperText(recipient, args.partyCue)), `${signer.legalEntity} reloaded paper`).toBeTruthy();
+    }
+    await context.close();
+  }
+
+  await expect
+    .poll(async () => {
+      const authority = await fetchOwnerDraftAuthority(args.page, args.agreementId);
+      const approved = args.signers.filter((signer) => {
+        const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
+        return row?.id && approvalOnIntendedRevision(authority.audit, String(row.id), args.snapshotId, args.digest);
+      });
+      return approved.length;
+    }, { timeout: 30_000 })
+    .toBe(args.signers.length);
+
+  await seedCorePaidJourneyOwner(args.page);
+  await args.page.goto(`/app/create?agreementId=${args.agreementId}`, { waitUntil: "domcontentloaded" });
+  await waitForOwnerWorkspaceReady(args.page, args.agreementId);
+  await expect
+    .poll(async () => {
+      const text = await articleText(args.page, args.partyCue);
+      return args.paperReady(text) ? text.length : 0;
+    }, { timeout: 90_000 })
+    .toBeGreaterThan(400);
+  const restoredParties = await fetchOwnerParties(args.page, args.agreementId);
+  for (const signer of args.signers) {
+    const row = restoredParties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
+    expect(row, `restored party missing for ${signer.legalEntity}`).toBeTruthy();
+    if (signer.signerName) {
+      expect(partySignerName(row), `intake_signer_name_lost_after_restore ${signer.legalEntity}`).toMatch(
+        new RegExp(signer.signerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+      );
+    }
+    if (signer.signerEmail) {
+      expect(String(row?.email || "").toLowerCase(), `intake_signer_email_lost_after_restore ${signer.legalEntity}`).toBe(
+        signer.signerEmail.toLowerCase(),
+      );
+    }
+  }
+  await assertSignerFormHoldsIntakeOrFillOnlyOmitted(args.page, args.signers);
+  expect(await clickOwnerSend(args.page, "simple-pro-send-for-signature"), "send-for-signature must mount").toBeTruthy();
+  await expect
+    .poll(() => {
+      return args.signers.every((signer) => {
+        const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
+        return Boolean(row?.id && mintedTokenForParticipant(minted, "sign", String(row.id)));
+      })
+        ? 1
+        : 0;
+    }, { timeout: 45_000 })
+    .toBe(1);
+  for (const signer of args.signers) {
+    const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity))!;
+    const token = String(
+      (mintedTokenForParticipant(minted, "sign", String(row.id))?.body as { token?: string } | undefined)?.token || "",
+    );
+    const viewport = args.page.viewportSize() ?? { width: 1280, height: 800 };
+    const context = await args.browser.newContext({ viewport });
+    const recipient = await context.newPage();
+    acceptNativeDialogs(recipient);
+    const signOrigin = ownerOrigin(args.page);
+    await recipient.goto(
+      `${signOrigin}/agreements/${args.agreementId}/sign?t=${encodeURIComponent(token)}`,
+      { waitUntil: "domcontentloaded" },
+    );
+    await expect(
+      recipient.getByTestId("recipient-public-sign-route"),
+      `${signer.legalEntity} sign route`,
+    ).toBeVisible({ timeout: 30_000 });
+    const paper = await recipientPaperText(recipient, args.partyCue);
+    expect(args.paperReady(paper), `${signer.legalEntity} sign paper`).toBeTruthy();
+    await recipient.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => undefined);
+    const typed = recipient.getByTestId("recipient-sign-typed-name");
+    await typed.scrollIntoViewIfNeeded().catch(() => undefined);
+    if (await typed.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await typed.fill(signer.signerName);
+    }
+    const consent = recipient.getByTestId("recipient-sign-consent");
+    await consent.scrollIntoViewIfNeeded().catch(() => undefined);
+    await expect(consent, `${signer.legalEntity} sign consent`).toBeVisible({ timeout: 15_000 });
+    await consent.check();
+    await expect(consent).toBeChecked();
+    const action = recipient.locator('[data-testid="recipient-sign-action"]:visible');
+    await action.scrollIntoViewIfNeeded().catch(() => undefined);
+    await expect(action, `${signer.legalEntity} sign action must enable`).toBeEnabled({ timeout: 20_000 });
+    await action.click();
+    await expect(
+      recipient
+        .getByTestId("recipient-sign-complete-status")
+        .or(recipient.getByText(/Signed\. Confirmation saved\.|Your signature has been recorded\./i))
+        .first(),
+    ).toBeVisible({ timeout: 30_000 });
+    const afterSign = await fetchOwnerDraftAuthority(args.page, args.agreementId);
+    expect(
+      signatureCompletedForParticipant(afterSign.audit, String(row.id)),
+      `${signer.legalEntity} signature_completed missing for participant ${row.id}`,
+    ).toBeTruthy();
+    await context.close();
+  }
+
+  await seedCorePaidJourneyOwner(args.page);
+  await args.page.goto(`/app/agreements/${args.agreementId}/view-signed`, {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000,
+  });
+  await expect(args.page.getByTestId("owner-signed-agreement-page")).toBeVisible({ timeout: 30_000 });
+  const finalDoc = args.page.getByTestId("owner-signed-agreement-document");
+  await expect(finalDoc).toContainText(args.partyCue, { timeout: 30_000 });
+  const finalText = await finalDoc.innerText();
+  expect(args.paperReady(finalText), "owner final record").toBeTruthy();
+  for (const signer of args.signers) expect(finalText).toContain(signer.signerName);
+  const expectedTitle = (extractTitleFromCorpusPlain(finalText)?.title || "").trim();
+  expect(expectedTitle, "corpus heading for chrome title").toBeTruthy();
+  expect(expectedTitle.toLowerCase(), "corpus heading for chrome title").not.toBe("untitled agreement");
+  await expect(args.page.getByTestId("owner-signed-agreement-chrome-title")).toHaveText(expectedTitle);
+  const requiredSigners = args.signers.length;
+  expect(requiredSigners, "journey required signers").toBeGreaterThanOrEqual(2);
+  await expect(args.page.getByTestId("owner-signed-agreement-signatures")).toContainText(
+    `Fully signed (${requiredSigners} of ${requiredSigners})`,
+  );
+  const api = configuredLiveApiBase();
+  const runtime = loadCorePaidJourneyRuntime();
+  const receiptRes = await args.page.request.get(
+    `${api}/api/agreements/${encodeURIComponent(args.agreementId)}/proof-status`,
+    {
+      headers: {
+        Authorization: `Bearer ${runtime.access_token}`,
+        "X-Claw-Org-Id": runtime.org_id,
+      },
+    },
+  );
+  expect(receiptRes.ok(), `proof-status failed ${receiptRes.status()}`).toBeTruthy();
+  const receipt = ((await receiptRes.json()) as { finalized_receipt?: { receipt_id?: string; bound?: boolean; accepted_snapshot_id?: string; accepted_snapshot_digest?: string } }).finalized_receipt || {};
+  expect(receipt.bound).toBe(true);
+  expect(String(receipt.accepted_snapshot_id || "")).toBe(args.snapshotId);
+  expect(String(receipt.accepted_snapshot_digest || "").toLowerCase()).toBe(args.digest);
+  return { receiptId: String(receipt.receipt_id || ""), signedCount: args.signers.length };
 }

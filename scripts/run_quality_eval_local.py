@@ -54,8 +54,8 @@ def main() -> int:
         raise RuntimeError('routing_audit_is_no_spend_only')
     if args.offline_journey and (args.live or args.audit_paid_entry):
         raise RuntimeError('offline_journey_is_no_spend_only')
-    if args.offline_journey and args.case in {'three_party', 'four_party', 'release_scope'}:
-        raise RuntimeError('offline_journey_is_harbor_saas_only')
+    # Three-/four-party offline now uses the local acceptance stub (not live replay).
+    # --case all remains the Harbor + SaaS rematch pair.
     if args.replay_live_evidence and args.live:
         raise RuntimeError('live_replay_is_no_spend_only')
     from backend.quality_eval_live_prepare import (
@@ -133,13 +133,15 @@ def main() -> int:
     replay_dir = None
     if args.offline_journey:
         env['QUALITY_EVAL_OFFLINE_JOURNEY'] = '1'
+        # Harbor replay is Harbor-only. Three-/four-party offline uses the stub.
+        attach_harbor_replay = args.case in {'all', 'consulting', 'release_scope'}
         default_replay = ROOT / 'evals/commercial-readiness/results/quality-eval-live/20260914T195201Z-5037'
-        replay_dir = args.replay_live_evidence or (default_replay if default_replay.is_dir() else None)
+        replay_dir = args.replay_live_evidence or (default_replay if attach_harbor_replay and default_replay.is_dir() else None)
         if replay_dir:
             if not (replay_dir / 'consulting-desktop-model-endpoints.json').is_file():
                 raise RuntimeError('replay_live_evidence_missing_harbor_endpoints')
             env['QUALITY_EVAL_REPLAY_LIVE_DIR'] = str(replay_dir.resolve())
-    if args.filled_only or args.live:
+    if args.filled_only or args.live or args.case in {'three_party', 'four_party', 'release_scope'}:
         env['QUALITY_EVAL_FILLED_ONLY'] = '1'
     env['CLAW_QUALITY_EVAL_INCREMENT_PATH'] = increment_selection['path']
     budget = None
@@ -179,8 +181,20 @@ def main() -> int:
                 'viewports': ['desktop', 'mobile'],
                 'retries': 0,
                 'model': 'gpt-5.4' if args.live else 'acceptance-stub',
-                'harbor_evidence': 'live-replay' if replay_dir else ('live-model' if args.live else 'acceptance-stub'),
-                'saas_evidence': 'acceptance-stub' if args.offline_journey else ('live-model' if args.live else 'acceptance-stub'),
+                'harbor_evidence': (
+                    'not_exercised' if args.case in {'saas', 'three_party', 'four_party'} else
+                    'live-replay' if replay_dir else ('live-model' if args.live else 'acceptance-stub')
+                ),
+                'saas_evidence': (
+                    'not_exercised' if args.case in {'consulting', 'three_party', 'four_party'} else
+                    'acceptance-stub' if args.offline_journey else ('live-model' if args.live else 'acceptance-stub')
+                ),
+                'three_party_evidence': (
+                    'acceptance-stub' if args.case in {'three_party', 'release_scope'} else 'not_exercised'
+                ),
+                'four_party_evidence': (
+                    'acceptance-stub' if args.case in {'four_party', 'release_scope'} else 'not_exercised'
+                ),
                 'replay_boundary': (
                     'captured Harbor parse + premium-full-draft bodies; frontend transforms, date/payment guards, display, Apply, GET, and reopen are current product code'
                     if replay_dir else None
@@ -273,12 +287,27 @@ def main() -> int:
                 'live_quality':'not_claimed',
                 'sample_limitation': identity['sample_limitation']})+'\n')
         elif args.offline_journey:
-            case_filter = [] if args.case == 'all' else ['--grep', f'real drafting: {args.case}$']
+            case_filter = [] if args.case in {'all', 'release_scope'} else ['--grep', f'real drafting: {args.case}$']
+            browser_timeout = 2400 if args.case in {'four_party', 'three_party', 'release_scope'} else 1500
             run('browser', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',
                 'qualityEvalDrafts.live.spec.ts','--workers=1','--retries=0','--max-failures=1','--reporter=line', *case_filter],
-                ROOT/'frontend', timeout=1500)
+                ROOT/'frontend', timeout=browser_timeout)
+            recipient_paths = []
+            for name in sorted(p.name for p in out.glob('*-continuation.json')):
+                row = json.loads((out / name).read_text())
+                recipient_paths.append({
+                    'file': name,
+                    'case_id': row.get('case_id'),
+                    'viewport': row.get('viewport'),
+                    'recipient_path': row.get('recipient_path'),
+                    'stage': row.get('stage'),
+                    'receipt_id': row.get('receipt_id'),
+                })
+            exercised = [row['recipient_path'] for row in recipient_paths if row.get('recipient_path') and row['recipient_path'] != 'not_yet_exercised']
             print(
-                'offline_journey=PASS; Harbor live-replay + SaaS stub; not fresh-model evidence; live quality not claimed',
+                'offline_journey=PASS; selected_cases='
+                + ','.join(identity['selected_cases'])
+                + '; not fresh-model evidence; live quality not claimed',
                 flush=True,
             )
             (out/'status.json').write_text(json.dumps({
@@ -288,11 +317,14 @@ def main() -> int:
                 'model_calls': 0,
                 'harbor_evidence': identity.get('harbor_evidence'),
                 'saas_evidence': identity.get('saas_evidence'),
+                'three_party_evidence': identity.get('three_party_evidence'),
+                'four_party_evidence': identity.get('four_party_evidence'),
                 'replay_boundary': identity.get('replay_boundary'),
                 'live_quality': 'not_claimed',
                 'fresh_model_quality': 'unverified',
                 'manual_edit_recovery': 'unverified',
-                'recipient_paths': 'not_yet_exercised',
+                'recipient_paths': exercised or 'not_yet_exercised',
+                'recipient_path_records': recipient_paths,
             })+'\n')
         elif args.audit_paid_entry:
             run('browser', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',

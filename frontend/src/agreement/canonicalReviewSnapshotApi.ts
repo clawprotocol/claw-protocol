@@ -26,6 +26,7 @@ export type CanonicalReviewSnapshot = {
   accepted_at?: string | null;
   schema_version?: string | null;
   status: string;
+  customer_confirmed_answers?: string | null;
 };
 
 export type PersistCanonicalReviewSnapshotResult =
@@ -102,6 +103,7 @@ export function coerceCanonicalReviewSnapshot(payload: unknown): CanonicalReview
   if (!src) return null;
   const snapshot_id = String(src.snapshot_id || "").trim();
   if (!snapshot_id) return null;
+  const confirmed = String(src.customer_confirmed_answers ?? "").trim();
   return {
     snapshot_id,
     agreement_id: String(src.agreement_id || "").trim(),
@@ -113,6 +115,7 @@ export function coerceCanonicalReviewSnapshot(payload: unknown): CanonicalReview
     accepted_at: (src.accepted_at as string | null | undefined) ?? null,
     schema_version: (src.schema_version as string | null | undefined) ?? null,
     status: String(src.status || root.status || "pending"),
+    customer_confirmed_answers: confirmed || null,
   };
 }
 
@@ -333,6 +336,7 @@ export async function persistCanonicalReviewSnapshot(args: {
   generationSessionId?: string | null;
   createdBySession?: string | null;
   expectedRegistryVersion?: number | null;
+  customerConfirmedAnswers?: string | null;
 }): Promise<PersistCanonicalReviewSnapshotResult> {
   const id = args.agreementId.trim();
   const corpus = (args.corpusPlain || "").trim();
@@ -351,6 +355,7 @@ export async function persistCanonicalReviewSnapshot(args: {
           args.expectedRegistryVersion === undefined || args.expectedRegistryVersion === null
             ? null
             : args.expectedRegistryVersion,
+        customer_confirmed_answers: (args.customerConfirmedAnswers || "").trim() || null,
       }),
     });
     if (!res.ok) {
@@ -498,6 +503,7 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
   userId?: string | null;
   organizationId?: string | null;
   revisionId?: string | null;
+  customerConfirmedAnswers?: string | null;
 }): Promise<
   | {
       ok: true;
@@ -537,6 +543,7 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
     corpusPlain: corpus,
     generationSessionId: args.generationSessionId,
     createdBySession: args.generationSessionId,
+    customerConfirmedAnswers: args.customerConfirmedAnswers,
   });
   if (!persisted.ok) return { ok: false, code: persisted.code };
 
@@ -660,6 +667,21 @@ export async function hydrateCommercialReviewFromServerSnapshot(args: {
     ...display,
     corpusPlain: getCorpus,
   });
+  if ((snap.customer_confirmed_answers || "").trim()) {
+    const { restoreConfirmedContentAnswersFromVerifiedSnapshot } = await import(
+      "../components/agreements/paidProConfirmedContentAnswers"
+    );
+    const { resolveCurrentUser } = await import("../account/currentUser");
+    restoreConfirmedContentAnswersFromVerifiedSnapshot({
+      userId: resolveCurrentUser().id,
+      organizationId: getOrgId(),
+      agreementId: id,
+      revisionId: snap.corpus_sha256,
+      answers: snap.customer_confirmed_answers,
+      snapshotId: snap.snapshot_id,
+      digest: snap.corpus_sha256,
+    });
+  }
   const accepted = display.status === "accepted";
   if (accepted) {
     storeAcceptedReviewSnapshotRef({

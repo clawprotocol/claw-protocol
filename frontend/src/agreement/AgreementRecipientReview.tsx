@@ -73,6 +73,7 @@ import {
 } from "../vs01/negotiationTimeline";
 import { detectChangedSnapshotFields } from "./negotiationMemory";
 import {
+  fetchRecipientAgreementDraft,
   finalizeRecipientProposalApi,
   postSigningCeremonyComplete,
   postSigningCeremonyStart,
@@ -88,6 +89,10 @@ import {
 } from "./pendingSignatureDerive";
 import { normalizeAgreementDraftFromApi } from "./agreementDraftNormalize";
 import { auditHasRecipientApprovalForParticipant } from "./participantModel";
+import {
+  recipientApprovalPostIsAmbiguous,
+  recipientApprovalRecordedOnIntendedRevision,
+} from "./recipientApprovalReconcile";
 import { recipientLinkTokenFingerprint } from "./recipientLinkTokenFingerprint";
 import { logReviewStateSource } from "../components/agreements/reviewFlowDebugLog";
 import {
@@ -332,6 +337,7 @@ import {
   writeReviewFirstSubmitInflightProposalId,
 } from "./reviewerTokenPersistence";
 import {
+  clearReviewerApprovalLocalState,
   logReviewerApprovalLocalStateApplied,
   logReviewerApprovalSubmitFailed,
   logReviewerApprovalSubmitStart,
@@ -3810,18 +3816,6 @@ export function AgreementRecipientReview({
     setJourneyActionFeedback(
       resolveUserActionFeedback({ actor: "recipient", action: "approve_review", outcome: "working" }),
     );
-    const localRecord = writeReviewerApprovalLocalState({
-      agreementId,
-      participantPartyId: pidForApprove,
-      recipientAccessToken,
-    });
-    setApprovedAck(true);
-    setLocalApprovalAt(localRecord.approvedAt);
-    logReviewerApprovalLocalStateApplied({
-      agreementIdShort,
-      participantPartyId: pidForApprove || null,
-      approvedAt: localRecord.approvedAt,
-    });
     try {
       const r = await recipientApproveCurrentApi(agreementId, {
         participant_id: partiesHaveIds ? pidForApprove : undefined,
@@ -3830,19 +3824,49 @@ export function AgreementRecipientReview({
         expected_digest: reviewAuthorityMeta?.corpusSha256 || "",
         recipientAccessToken,
       });
+      let authoritativeDraft = r.ok && r.draft
+        ? normalizeAgreementDraftFromApi(r.draft, { fallbackAgreementId: agreementId })
+        : null;
       if (!r.ok) {
-        logReviewerApprovalSubmitFailed({
-          agreementIdShort,
-          participantPartyId: pidForApprove || null,
-          error: r.error ?? "unknown",
-        });
-        throw new Error(
-          humanizeRecipientActionError(r.error, "Couldn't record approval. Please try again."),
-        );
+        if (recipientApprovalPostIsAmbiguous(r)) {
+          const reconciled = await fetchRecipientAgreementDraft(agreementId, recipientAccessToken);
+          if (
+            reconciled.ok &&
+            reconciled.draft &&
+            recipientApprovalRecordedOnIntendedRevision(reconciled.draft.audit_log, {
+              participantId: pidForApprove,
+              snapshotId: reviewAuthorityMeta?.snapshotId || "",
+              digest: reviewAuthorityMeta?.corpusSha256 || "",
+            })
+          ) {
+            authoritativeDraft = reconciled.draft;
+          }
+        }
+        if (!authoritativeDraft) {
+          logReviewerApprovalSubmitFailed({
+            agreementIdShort,
+            participantPartyId: pidForApprove || null,
+            error: r.error ?? "unknown",
+          });
+          throw new Error(
+            humanizeRecipientActionError(r.error, "Couldn't record approval. Please try again."),
+          );
+        }
       }
-      if (r.draft) {
-        const merged = normalizeAgreementDraftFromApi(r.draft, { fallbackAgreementId: agreementId });
-        if (merged) setDraft(merged);
+      const localRecord = writeReviewerApprovalLocalState({
+        agreementId,
+        participantPartyId: pidForApprove,
+        recipientAccessToken,
+      });
+      setApprovedAck(true);
+      setLocalApprovalAt(localRecord.approvedAt);
+      logReviewerApprovalLocalStateApplied({
+        agreementIdShort,
+        participantPartyId: pidForApprove || null,
+        approvedAt: localRecord.approvedAt,
+      });
+      if (authoritativeDraft) {
+        setDraft(authoritativeDraft);
       }
       logReviewerApprovalSubmitSuccess({
         agreementIdShort,
@@ -3853,7 +3877,7 @@ export function AgreementRecipientReview({
           actor: "recipient",
           action: "approve_review",
           outcome: "succeeded",
-          allReviewsComplete: resolveAllReviewPartiesApproved(r.draft ? normalizeAgreementDraftFromApi(r.draft, { fallbackAgreementId: agreementId }) : draft),
+          allReviewsComplete: resolveAllReviewPartiesApproved(authoritativeDraft || draft),
         }),
       );
       if (import.meta.env.MODE !== "test") {
@@ -3880,6 +3904,13 @@ export function AgreementRecipientReview({
       }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Could not record approval.";
+      clearReviewerApprovalLocalState({
+        agreementId,
+        participantPartyId: pidForApprove,
+        recipientAccessToken,
+      });
+      setApprovedAck(false);
+      setLocalApprovalAt(null);
       setError(message);
       setJourneyActionFeedback(
         resolveUserActionFeedback({

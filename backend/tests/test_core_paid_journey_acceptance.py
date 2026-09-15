@@ -106,6 +106,73 @@ def test_premium_full_draft_returns_expected_consulting_facts(client: TestClient
     assert "[" not in doc or "insert" not in doc.lower()
 
 
+def test_premium_full_draft_returns_contract_complete_four_party_paper(client: TestClient) -> None:
+    from backend.tests.test_quality_eval_multiparty_acceptance_stub import FOUR_PARTY_INTAKE
+
+    res = client.post(
+        "/api/agreements/premium-full-draft",
+        headers=_headers(),
+        json={"intake_text": FOUR_PARTY_INTAKE, "user_gap_answers": ""},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body.get("generation_ok") is True
+    assert body.get("generation_outcome") != "degraded"
+    doc = str(body.get("document_text") or body.get("server_full_document_text") or "")
+    assert "PRECISION MEDICINE DATA PLATFORM AGREEMENT" in doc
+    assert "Lumen Bioinformatics Inc." in doc
+    assert "Vanguard Regulatory Sciences Ltd." in doc
+    assert "Dr. Elena Vasquez" in doc
+    assert "Massachusetts" in doc
+    assert "pays each listed milestone" not in doc
+    assert "Harbor Peak Analytics LLC" not in doc
+    assert "CONSULTING SERVICES AGREEMENT" not in doc
+
+
+def test_premium_full_draft_returns_contract_complete_three_party_paper(client: TestClient) -> None:
+    from backend.tests.test_quality_eval_multiparty_acceptance_stub import THREE_PARTY_INTAKE
+
+    res = client.post(
+        "/api/agreements/premium-full-draft",
+        headers=_headers(),
+        json={"intake_text": THREE_PARTY_INTAKE, "user_gap_answers": ""},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body.get("generation_ok") is True
+    assert body.get("generation_outcome") != "degraded"
+    doc = str(body.get("document_text") or body.get("server_full_document_text") or "")
+    assert "Stonebridge Wellness LLC" in doc
+    assert "NovaPath Learning Inc." in doc
+    assert "ClearSpring Distribution LLC" in doc
+    assert "Oklahoma" in doc
+    assert "45%" in doc
+    assert "35%" in doc
+    assert "20%" in doc
+    assert "Harbor Peak Analytics LLC" not in doc
+    assert "Lumen Bioinformatics Inc." not in doc
+
+
+def test_four_party_parse_returns_plain_free_document_not_json_blob(client: TestClient) -> None:
+    from backend.tests.test_quality_eval_multiparty_acceptance_stub import FOUR_PARTY_INTAKE
+
+    res = client.post(
+        "/api/agreements/parse",
+        headers=_headers(),
+        json={"intake_text": FOUR_PARTY_INTAKE, "ai_model_class": "basic"},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    draft = body.get("draft") or {}
+    names = [str((row or {}).get("name") or "") for row in (draft.get("parties") or [])]
+    assert "Lumen Bioinformatics Inc." in names
+    assert "Vanguard Regulatory Sciences Ltd." in names
+    free = str(body.get("free_document_text") or "")
+    assert free.startswith("PRECISION MEDICINE DATA PLATFORM AGREEMENT")
+    assert not free.lstrip().startswith("{")
+    assert body.get("free_document_validation") == "ok"
+
+
 def test_commercial_es256_bearer_binds_and_sees_pro(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from backend.jwt_acceptance_jwks import (
         DEFAULT_ISSUER,

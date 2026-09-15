@@ -183,3 +183,19 @@ def test_parenthesized_party_roles_require_both_intake_identities():
     assert _has_named_parties(draft, "Harbor Peak LLC and Ironvale Inc.", {})
     assert not _has_named_parties(draft, "Harbor Peak LLC and Other Entity LLC", {})
     assert not _has_named_parties(draft, "need consulting for two parties", {})
+
+
+def test_four_party_listed_recital_is_identifiable_when_intake_names_those_entities():
+    from backend.agreements.premium_agreement_validation import _has_named_parties
+    from backend.tests.test_quality_eval_multiparty_acceptance_stub import FOUR_PARTY_INTAKE
+    from backend.llm_acceptance_stub import stub_legal_llm_completion
+    import json
+
+    doc = json.loads(
+        stub_legal_llm_completion(
+            [{"role": "user", "content": FOUR_PARTY_INTAKE}],
+            call_purpose="agreement_drafting",
+        )
+    )["document_text"]
+    assert _has_named_parties(doc, FOUR_PARTY_INTAKE, {})
+    assert not _has_named_parties(doc, "Harbor Peak LLC and Ironvale Inc.", {})

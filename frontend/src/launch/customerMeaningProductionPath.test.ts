@@ -4,10 +4,13 @@
  * model. Transforms, sanitizer, date distinction, and checkers are current
  * product code. This is not fresh-model evidence.
  */
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CORE_PAID_JOURNEY_FILLED_INTAKE } from "./corePaidJourneyAcceptanceMatrix";
+import {
+  HARBOR_SANITIZED_OUTGOING_CONTEXT,
+  HARBOR_SANITIZED_PAINTED_FIRST_DRAFT_MISSING_SCOPE,
+  HARBOR_SANITIZED_PREMIUM_DOCUMENT,
+} from "./fixtures/harborCustomerMeaning.sanitized";
 import {
   applyChangesExplainedByAnswers,
   checkHarborFirstDraftMeaning,
@@ -35,12 +38,6 @@ import {
 } from "../components/agreements/premiumDraftTransform";
 import type { ParsedDraftShape } from "../components/agreements/intakeSmartDefaults";
 
-const LIVE_DIR = join(
-  process.cwd(),
-  "..",
-  "evals/commercial-readiness/results/quality-eval-live/20260914T195201Z-5037",
-);
-
 const HARBOR_INTAKE = CORE_PAID_JOURNEY_FILLED_INTAKE;
 const QUALITY_EVAL_SAAS =
   "Draft a 12-month SaaS subscription agreement between Orion Harbor LLC (Provider) and Northwind Retail Inc. (Customer). Scope: hosted platform access and standard onboarding, hosted platform only, no professional services. Fee $48,000 annually, net 30. Governing law New York.";
@@ -49,18 +46,6 @@ const HARBOR_ANSWERS = [
   "The agreement effective date is the same as the October 1, 2026 service start.",
   "Completion is Client's written confirmation that the implemented AI workflow is in operational use.",
 ].join("\n");
-
-function liveJson<T>(name: string): T {
-  const path = join(LIVE_DIR, name);
-  if (!existsSync(path)) throw new Error(`preserved live evidence missing: ${path}`);
-  return JSON.parse(readFileSync(path, "utf8")) as T;
-}
-
-function liveText(name: string): string {
-  const path = join(LIVE_DIR, name);
-  if (!existsSync(path)) throw new Error(`preserved live evidence missing: ${path}`);
-  return readFileSync(path, "utf8");
-}
 
 function asDraft(parsed: Record<string, unknown>): ParsedDraftShape {
   return {
@@ -77,30 +62,24 @@ function asDraft(parsed: Record<string, unknown>): ParsedDraftShape {
   };
 }
 
-describe("customer-meaning production path from preserved live Harbor evidence", () => {
-  it("identifies the replay boundary on the captured endpoints", () => {
-    const endpoints = liveJson<Array<{ path: string; request?: { context?: { purpose?: string; additional_terms?: string; effective_date?: string; termination_summary?: string } } }>>(
-      "consulting-desktop-model-endpoints.json",
-    );
-    const parsePremium = endpoints.find((row) => row.path === "/api/agreements/parse" && row.request);
-    const premium = endpoints.find((row) => row.path === "/api/agreements/premium-full-draft");
-    expect(parsePremium).toBeTruthy();
-    expect(premium?.request?.context?.purpose).toMatch(/Biotech, manufacturing/i);
-    expect(premium?.request?.context?.additional_terms).toMatch(/CRM/i);
-    expect(premium?.request?.context?.effective_date).toMatch(/October 1, 2026/);
-    expect(premium?.request?.context?.termination_summary).toMatch(/for convenience/i);
+describe("customer-meaning production path from sanitized committed Harbor fixtures", () => {
+  it("records the sanitized outgoing-context defect separately from live evidence", () => {
+    expect(HARBOR_SANITIZED_OUTGOING_CONTEXT.purpose).toMatch(/Biotech, manufacturing/i);
+    expect(HARBOR_SANITIZED_OUTGOING_CONTEXT.additional_terms).toMatch(/CRM/i);
+    expect(HARBOR_SANITIZED_OUTGOING_CONTEXT.effective_date).toMatch(/October 1, 2026/);
+    expect(HARBOR_SANITIZED_OUTGOING_CONTEXT.termination_summary).toMatch(/for convenience/i);
   });
 
-  it("rebuilds a clean outgoing premium request from the captured parse", () => {
-    const endpoints = liveJson<Array<{ path: string; request?: { ai_model_class?: string }; body?: { draft?: Record<string, unknown> } }>>(
-      "consulting-desktop-model-endpoints.json",
-    );
-    const parse = endpoints.find(
-      (row) => row.path === "/api/agreements/parse" && row.request?.ai_model_class === "premium",
-    );
+  it("rebuilds a clean outgoing premium request from the Harbor intake", () => {
     const structured = parseIntakeToStructuredAgreement(HARBOR_INTAKE);
     expect(structured.scope).toMatch(/AI workflow implementation/i);
-    let draft = asDraft(parse?.body?.draft || {});
+    let draft = asDraft({
+      title: "Consulting Services Agreement",
+      jurisdiction: "Delaware",
+      purpose: "",
+      payment_terms: "$48,000",
+      additional_terms: HARBOR_SANITIZED_OUTGOING_CONTEXT.additional_terms,
+    });
     draft = {
       ...draft,
       termination_summary:
@@ -131,11 +110,10 @@ describe("customer-meaning production path from preserved live Harbor evidence",
     expect(buildPremiumFullDraftContext(draft).effective_date).toBeNull();
   });
 
-  it("paints the captured server paper without deleting supplied scope", () => {
-    const premium = liveJson<{ document_text?: string }>("consulting-desktop-premium-result.json");
-    const paintedBefore = liveText("consulting-desktop-first-draft.txt");
+  it("paints the sanitized server paper without deleting supplied scope", () => {
+    const paintedBefore = HARBOR_SANITIZED_PAINTED_FIRST_DRAFT_MISSING_SCOPE;
     expect(checkHarborFirstDraftMeaning(paintedBefore).reasons).toContain("missing_supplied_scope");
-    const guarded = sanitizePaidProDomainScopeContamination(premium.document_text || "", HARBOR_INTAKE, {
+    const guarded = sanitizePaidProDomainScopeContamination(HARBOR_SANITIZED_PREMIUM_DOCUMENT, HARBOR_INTAKE, {
       providerLabel: "Harbor Peak Analytics LLC",
       clientLabel: "Ironvale Manufacturing Inc.",
     }).text;

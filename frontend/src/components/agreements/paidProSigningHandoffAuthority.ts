@@ -8,6 +8,7 @@ import {
 } from "./authoritativeSigningSnapshot";
 import {
   type CanonicalFinalPartyManifest,
+  type CanonicalFinalPartyRole,
 } from "./guidedDealCompletion/canonicalFinalPartyManifest";
 import {
   buildGuidedSignaturePacketFromManifest,
@@ -51,36 +52,105 @@ function manifestHasPartyRows(manifest: CanonicalFinalPartyManifest | null | und
   );
 }
 
+type DraftPartyContact = {
+  name?: string;
+  role?: string;
+  email?: string;
+  signerName?: string;
+  signerTitle?: string;
+};
+
+function draftPartyRole(index: number): CanonicalFinalPartyRole {
+  if (index === 0) return "client";
+  if (index === 1) return "service_provider";
+  return `party_${index}`;
+}
+
+function matchDraftPartyByLegalName(
+  draftParties: readonly DraftPartyContact[] | undefined,
+  legalName: string,
+): DraftPartyContact | undefined {
+  const want = legalName.trim().toLowerCase();
+  if (!want) return undefined;
+  return (draftParties ?? []).find((party) => String(party.name ?? "").trim().toLowerCase() === want);
+}
+
+export function buildSigningHandoffManifestFromDraftParties(
+  draftParties?: readonly DraftPartyContact[] | null,
+): CanonicalFinalPartyManifest {
+  const parties = (draftParties ?? [])
+    .map((party, index) => {
+      const partyName = String(party.name ?? "").trim();
+      const isIndividual = partyName ? isIndividualPartyName(partyName) : false;
+      return {
+        index,
+        role: draftPartyRole(index),
+        partyName,
+        email: String(party.email ?? "").trim(),
+        signerName: String(party.signerName ?? "").trim() || null,
+        signerTitle: String(party.signerTitle ?? "").trim() || null,
+        roleLabel: String(party.role ?? "").trim(),
+        signerKind: isIndividual ? ("individual" as const) : ("entity_representative" as const),
+        isSenderSide: index === 0,
+        isIndividual,
+      };
+    })
+    .filter((party) => party.partyName.length >= 2);
+  return { parties };
+}
+
+function mergePersistedDraftContactOntoManifest(
+  manifest: CanonicalFinalPartyManifest,
+  draftParties?: readonly DraftPartyContact[] | null,
+): CanonicalFinalPartyManifest {
+  if (!draftParties?.length) return manifest;
+  return {
+    parties: manifest.parties.map((party) => {
+      const match = matchDraftPartyByLegalName(draftParties, party.partyName);
+      if (!match) return party;
+      const email = String(match.email ?? "").trim() || party.email;
+      const signerName = String(match.signerName ?? "").trim() || party.signerName;
+      const signerTitle = String(match.signerTitle ?? "").trim() || party.signerTitle;
+      return { ...party, email, signerName, signerTitle };
+    }),
+  };
+}
+
 /** Live manifest for signing handoff — snapshot and consumed authority win over React memo state. */
 export function resolvePaidProSigningHandoffPartyManifest(args?: {
   fallbackManifest?: CanonicalFinalPartyManifest | null;
   intakeText?: string | null;
   draftPartyNames?: readonly string[];
+  draftParties?: readonly DraftPartyContact[] | null;
 }): CanonicalFinalPartyManifest {
   const snap = getAuthoritativeSigningSnapshot();
   if (snap && manifestHasPartyRows(snap.partyManifest)) {
-    return snap.partyManifest;
+    return mergePersistedDraftContactOntoManifest(snap.partyManifest, args?.draftParties);
   }
 
   const authority = readConsumedPaidProSignerMetadataAuthority();
   if (authority && authority.parties.length >= 2) {
-    return buildCanonicalFinalPartyManifestFromAuthority(authority, {
-      intakeText: args?.intakeText ?? null,
-      draftPartyNames: args?.draftPartyNames,
-    });
+    return mergePersistedDraftContactOntoManifest(
+      buildCanonicalFinalPartyManifestFromAuthority(authority, {
+        intakeText: args?.intakeText ?? null,
+        draftPartyNames: args?.draftPartyNames,
+      }),
+      args?.draftParties,
+    );
   }
 
   if (manifestHasPartyRows(args?.fallbackManifest ?? null)) {
-    return args!.fallbackManifest!;
+    return mergePersistedDraftContactOntoManifest(args!.fallbackManifest!, args?.draftParties);
   }
 
-  return { parties: [] };
+  return buildSigningHandoffManifestFromDraftParties(args?.draftParties);
 }
 
 export function resolvePaidProSigningHandoffRecipients(args?: {
   manifest?: CanonicalFinalPartyManifest | null;
   intakeText?: string | null;
   draftPartyNames?: readonly string[];
+  draftParties?: readonly DraftPartyContact[] | null;
   lifecycleMode?: SigningAuthorityLifecycleMode;
   frozenSnapshot?: FrozenSigningAuthoritySnapshotV1 | null;
 }): PaidProSigningHandoffRecipient[] {
@@ -94,6 +164,7 @@ export function resolvePaidProSigningHandoffRecipients(args?: {
         fallbackManifest: args?.manifest ?? null,
         intakeText: args?.intakeText,
         draftPartyNames: args?.draftPartyNames,
+        draftParties: args?.draftParties,
       });
   const authority = readConsumedPaidProSignerMetadataAuthority();
   const authorityByIndex = new Map(
@@ -108,18 +179,21 @@ export function resolvePaidProSigningHandoffRecipients(args?: {
         ? resolveFrozenSignerForPartyIndexFromSnapshot(p.index, injectedSnapshot)
         : null;
       const auth = authorityByIndex.get(p.index);
+      const draftParty = matchDraftPartyByLegalName(args?.draftParties ?? undefined, String(p.partyName ?? ""));
       const partyLegalName = String(p.partyName ?? "").trim();
       const isIndividual =
         p.isIndividual ?? (partyLegalName ? isIndividualPartyName(partyLegalName) : false);
       return {
         partyLegalName,
         signerName: String(
-          frozenSigner?.signerName ?? p.signerName ?? auth?.signerName ?? "",
+          draftParty?.signerName ?? frozenSigner?.signerName ?? p.signerName ?? auth?.signerName ?? "",
         ).trim(),
         signerTitle: String(
-          frozenSigner?.signerTitle ?? p.signerTitle ?? auth?.signerTitle ?? "",
+          draftParty?.signerTitle ?? frozenSigner?.signerTitle ?? p.signerTitle ?? auth?.signerTitle ?? "",
         ).trim(),
-        email: String(frozenSigner?.signerEmail ?? p.email ?? auth?.signerEmail ?? "").trim(),
+        email: String(
+          draftParty?.email ?? frozenSigner?.signerEmail ?? p.email ?? auth?.signerEmail ?? "",
+        ).trim(),
         address: String(auth?.partyAddress ?? "").trim(),
         isIndividual: isIndividual ? true : false,
       };
@@ -131,6 +205,7 @@ export function resolvePaidProSigningHandoffSignerManifest(args?: {
   signFirst?: boolean;
   intakeText?: string | null;
   draftPartyNames?: readonly string[];
+  draftParties?: readonly DraftPartyContact[] | null;
 }): CanonicalSignerManifest {
   const snap = getAuthoritativeSigningSnapshot();
   if (snap?.signatureBlockModel?.entries?.length) {
@@ -140,6 +215,7 @@ export function resolvePaidProSigningHandoffSignerManifest(args?: {
     fallbackManifest: args?.manifest ?? null,
     intakeText: args?.intakeText,
     draftPartyNames: args?.draftPartyNames,
+    draftParties: args?.draftParties,
   });
   return buildGuidedSignaturePacketFromManifest(manifest, args?.signFirst ?? true);
 }
@@ -148,6 +224,7 @@ export function evaluatePaidProSigningHandoffReadiness(args?: {
   manifest?: CanonicalFinalPartyManifest | null;
   intakeText?: string | null;
   draftPartyNames?: readonly string[];
+  draftParties?: readonly DraftPartyContact[] | null;
   requiredPartyCount?: number;
 }): {
   ok: boolean;
@@ -159,11 +236,13 @@ export function evaluatePaidProSigningHandoffReadiness(args?: {
     fallbackManifest: args?.manifest ?? null,
     intakeText: args?.intakeText,
     draftPartyNames: args?.draftPartyNames,
+    draftParties: args?.draftParties,
   });
   const recipients = resolvePaidProSigningHandoffRecipients({
     manifest,
     intakeText: args?.intakeText,
     draftPartyNames: args?.draftPartyNames,
+    draftParties: args?.draftParties,
   });
   const required = Math.max(args?.requiredPartyCount ?? 2, 2);
 

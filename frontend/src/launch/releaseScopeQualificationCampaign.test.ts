@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CORE_PAID_JOURNEY_FILLED_INTAKE } from "./corePaidJourneyAcceptanceMatrix";
 import {
@@ -8,6 +10,7 @@ import { TEST477_THREE_PARTY } from "../components/agreements/paidProTest477Fixt
 import { TEST490_THREE_PARTY_REVENUE_SHARE_INTAKE } from "../components/agreements/paidProTest490Fixtures";
 import {
   RELEASE_SCOPE_FOUR_PARTY_FILLED_INTAKE,
+  RELEASE_SCOPE_FOUR_PARTY_PAYER_ANSWER_TEST_DATA,
   RELEASE_SCOPE_SAAS_FILLED_INTAKE,
   RELEASE_SCOPE_SAMPLES,
   RELEASE_SCOPE_THREE_PARTY_FILLED_INTAKE,
@@ -75,6 +78,55 @@ describe("release-scope qualification campaign facts", () => {
     expect(selectReleaseScopeCaseIds("three_party")).toEqual(["three_party"]);
     expect(selectReleaseScopeCaseIds("four_party")).toEqual(["four_party"]);
     expect(() => selectReleaseScopeCaseIds("five_party")).toThrow(/unknown_quality_eval_case/);
+  });
+
+  it("does not persist a legal-entity copy as the three-party signer name", async () => {
+    const { partiesForServerPersistFromSeed, runPaidProSignerMetadataAuthoritySeed } = await import(
+      "../components/agreements/paidProSignerMetadataSeed"
+    );
+    const draft = {
+      parties: TEST477_THREE_PARTY.map((party) => ({
+        name: party.legalEntity,
+        role: "party",
+        email: party.email,
+        signerName: party.legalEntity,
+      })),
+    };
+    const seed = runPaidProSignerMetadataAuthoritySeed({
+      stage: "post_new_draft_persist",
+      legalEntities: TEST477_THREE_PARTY.map((party) => party.legalEntity),
+      intakeText: RELEASE_SCOPE_THREE_PARTY_FILLED_INTAKE,
+      draft: draft as never,
+      uiSignerNames: ["", "", ""],
+      uiSignerTitles: ["", "", ""],
+      authoritativePartyCount: 3,
+    });
+    const persistParties = partiesForServerPersistFromSeed(draft.parties, seed);
+    expect(persistParties.map((party) => party.signerName)).toEqual(TEST477_THREE_PARTY.map((party) => party.signerName));
+  });
+
+  it("labels the four-party payer answer as synthetic test data, not original intake", () => {
+    expect(RELEASE_SCOPE_FOUR_PARTY_PAYER_ANSWER_TEST_DATA).toMatch(
+      /^TEST DATA \(synthetic customer answer; not part of the original intake\)/,
+    );
+    expect(RELEASE_SCOPE_FOUR_PARTY_FILLED_INTAKE).not.toMatch(/\b(?:pays?|shall pay|will pay|paying party)\b/i);
+    expect(RELEASE_SCOPE_FOUR_PARTY_FILLED_INTAKE).not.toContain(RELEASE_SCOPE_FOUR_PARTY_PAYER_ANSWER_TEST_DATA);
+  });
+
+  it("wires the durable local regressions into the existing phase-2 release checks", () => {
+    const config = readFileSync(join(process.cwd(), "vitest.phase2PaidJourney.runner.config.ts"), "utf8");
+    for (const path of [
+      "src/launch/releaseScopeQualificationCampaign.test.ts",
+      "src/launch/releaseScopeQualificationJourney.test.ts",
+      "src/launch/qualityEvalCustomerPaper.test.ts",
+      "src/launch/customerMeaningProductionPath.test.ts",
+      "src/components/agreements/paidProPartyEconomicRelationships.test.ts",
+      "src/components/agreements/paidProMilestonePayer.test.ts",
+      "src/components/agreements/paymentClarificationApplyRecovery.test.ts",
+      "src/vs01/paidProTest465RecipientIsolation.test.ts",
+    ]) {
+      expect(config).toContain(`"${path}"`);
+    }
   });
 
   it("does not treat U.S. states as interchangeable", () => {

@@ -265,7 +265,22 @@ export function runPaidProSignerMetadataAuthoritySeed(
   if (draft) {
     const merged = mergeSignerMetadataIntoDraftParties(draft, resolved);
     draftChanged = merged !== draft;
-    draft = merged as ParsedDraftShape;
+    const parties = [...((merged as ParsedDraftShape).parties ?? [])];
+    let emailChanged = false;
+    for (let i = 0; i < partyCount; i++) {
+      const em = (cleanedEmails[i] ?? "").trim();
+      if (!em) continue;
+      const prev = parties[i] ?? { name: canonicalLegalEntities[i] || "", role: "party" };
+      const existing = String((prev as { email?: string }).email ?? "").trim();
+      if (existing) {
+        if (!parties[i]) parties[i] = prev;
+        continue;
+      }
+      parties[i] = { ...prev, email: em };
+      emailChanged = true;
+    }
+    draft = (emailChanged ? { ...merged, parties } : merged) as ParsedDraftShape;
+    draftChanged = draftChanged || emailChanged;
   }
 
   const hasSignerSignal = bundle.parties.some(
@@ -294,6 +309,33 @@ export function runPaidProSignerMetadataAuthoritySeed(
     draft,
     draftChanged,
   };
+}
+
+/** Attach seeded intake emails and signer fields onto parties for server persist. */
+export function partiesForServerPersistFromSeed<
+  T extends { name?: string; role?: string; email?: string; signerName?: string; signerTitle?: string },
+>(
+  parties: readonly T[],
+  seed: PaidProSignerMetadataSeedResult,
+): Array<T & { email?: string; signerName?: string; signerTitle?: string }> {
+  const source = (seed.draft?.parties ?? parties) as T[];
+  return source.map((party, index) => {
+    const email = String(party.email || seed.emails[index] || "").trim();
+    const entityName = String(party.name || "").trim();
+    const rawSigner = String(party.signerName || "").trim();
+    const humanFromParty =
+      (scrubLegalEntityCopiedSignerNames([rawSigner], [entityName])[0] || "").trim();
+    const seedName = String(seed.names[index] || "").trim();
+    const signerName =
+      (isLikelyHumanSignerName(humanFromParty) ? humanFromParty : "") || seedName;
+    const signerTitle = String(party.signerTitle || seed.titles[index] || "").trim();
+    return {
+      ...party,
+      ...(email ? { email } : {}),
+      ...(signerName ? { signerName } : {}),
+      ...(signerTitle ? { signerTitle } : {}),
+    };
+  });
 }
 
 /** Read current handoff emails/addresses for non-destructive seed merge. */

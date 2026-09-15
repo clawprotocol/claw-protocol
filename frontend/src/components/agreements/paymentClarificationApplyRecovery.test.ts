@@ -1,6 +1,8 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it } from "vitest";
 import { CORE_PAID_JOURNEY_FILLED_INTAKE } from "../../launch/corePaidJourneyAcceptanceMatrix";
+import { RELEASE_SCOPE_FOUR_PARTY_PAYER_ANSWER_TEST_DATA } from "../../launch/releaseScopeQualificationCampaign";
+import { TEST487_PRODUCTION_INTAKE } from "./paidProTest487ProductionValidationFixtures";
 import {
   applySuppliedContentFactsToAuthorizedPaper,
   applySuppliedPaymentFactsToAuthorizedPaper,
@@ -208,5 +210,32 @@ describe("payment clarification apply recovery", () => {
     expect(out).toMatch(/once on October 1, 2026/i);
     expect(out).toMatch(/Payment is due net 60/i);
     expect(out).not.toMatch(/invoice the fixed fee monthly/i);
+  });
+
+  it("applies the four-party synthetic payer without changing unrelated terms", () => {
+    const first = [
+      "PRECISION MEDICINE DATA PLATFORM AGREEMENT",
+      "The parties are Lumen Bioinformatics Inc. (Platform Developer), Thalassa Data Systems LLC (Data Infrastructure Provider), Coastal Meridian Analytics LLC (Analytics Integrator), and Vanguard Regulatory Sciences Ltd. (Regulatory Compliance Advisor).",
+      "3. PAYMENT AND CONSIDERATION",
+      "Lumen Bioinformatics Inc. receives $250,000 upon execution, $400,000 upon platform alpha delivery, and $350,000 upon validation report acceptance.",
+      "Thalassa Data Systems LLC receives $180,000 upon data pipeline readiness and $220,000 upon production cutover.",
+      "Coastal Meridian Analytics LLC receives $150,000 upon analytics module delivery and $175,000 upon user acceptance testing completion.",
+      "Vanguard Regulatory Sciences Ltd. receives $95,000 upon regulatory gap assessment and $105,000 upon audit readiness certification.",
+      "4. TERM AND DURATION",
+      "The initial term is 24 months with two optional 12-month renewals.",
+      "11. GOVERNING LAW",
+      "Massachusetts law governs without regard to conflict-of-law rules.",
+    ].join("\n");
+    const out = applySuppliedContentFactsToAuthorizedPaper(
+      first,
+      TEST487_PRODUCTION_INTAKE,
+      RELEASE_SCOPE_FOUR_PARTY_PAYER_ANSWER_TEST_DATA,
+    );
+    expect(out).toMatch(/Lumen Bioinformatics Inc\. pays each listed milestone amount to the named recipient/);
+    expect(out).toMatch(/Thalassa Data Systems LLC receives \$180,000/);
+    expect(out).toMatch(/24 months/);
+    expect(out).toMatch(/Massachusetts/);
+    expect(out).not.toMatch(/Acme Holdings/);
+    expect(applySuppliedContentFactsToAuthorizedPaper(first, TEST487_PRODUCTION_INTAKE, "")).toBe(first);
   });
 });

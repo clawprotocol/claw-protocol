@@ -1,4 +1,5 @@
 import { prepareCommercialReviewSnapshotAuthority } from "../../agreement/canonicalReviewSnapshotApi";
+import { persistConfirmedContentAnswers } from "./paidProConfirmedContentAnswers";
 import { replacePaidProPipelineAcceptedCorpusAfterApprovedRevision } from "./paidProPipelineAcceptedCorpus";
 import {
   paidProRevisionOperationAllowsDisplay,
@@ -69,6 +70,7 @@ export async function commitPaidProUserApprovedRevisionCorpus(args: {
   generationSessionId?: string | null;
   draft?: ParsedDraftShape | null;
   intakeText?: string | null;
+  customerConfirmedAnswers?: string | null;
   applyDisplayMutations?: (stable: string) => void;
 }): Promise<PaidProUserApprovedRevisionCommitResult> {
   const raw = (args.text || "").trim();
@@ -86,6 +88,7 @@ export async function commitPaidProUserApprovedRevisionCorpus(args: {
     userId: args.operation.userId,
     organizationId: args.operation.organizationId,
     revisionId: args.operation.revisionId,
+    customerConfirmedAnswers: args.customerConfirmedAnswers,
   });
   if (!prepared.ok) {
     return { ok: false, corpus: "", displayed: false, code: prepared.code };
@@ -104,6 +107,17 @@ export async function commitPaidProUserApprovedRevisionCorpus(args: {
     agreementId: args.operation.agreementId,
     organizationId: args.operation.organizationId,
   });
+  if ((args.customerConfirmedAnswers || "").trim()) {
+    persistConfirmedContentAnswers({
+      userId: args.operation.userId,
+      organizationId: args.operation.organizationId,
+      agreementId: args.operation.agreementId,
+      revisionId: args.operation.revisionId,
+      answers: args.customerConfirmedAnswers || "",
+      snapshotId: prepared.snapshot.snapshot_id,
+      digest: prepared.snapshot.corpus_sha256,
+    });
+  }
   try {
     establishPaidProSourceOfTruth({
       text: stable,

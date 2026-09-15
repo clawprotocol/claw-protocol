@@ -115,7 +115,7 @@ import {
   summarizeComplexityGateIntent,
 } from "./agreementAdvancedIntentSummary";
 import { simplifyParsedDraftForInstantPath } from "./agreementComplexityGate";
-import { shouldInterceptAdvancedDocumentFamily } from "./agreementLaunchFamilies";
+import { shouldRunComplexityInterceptBeforePaidGeneration } from "./agreementLaunchFamilies";
 import {
   assessStarterComplexityGate,
   buildStarterProCheckoutPendingDraft,
@@ -555,8 +555,10 @@ import {
   readPaidProEditReturnHandoff,
 } from "../../launch/simpleProduct/paidProEditReturnHandoff";
 import {
+  liveSignerUiFieldsFromDraftParties,
   mergePaidProAuthoritativeDraftFieldsFromApi,
   retainAuthorizedApiPartiesAfterIntakeDefaults,
+  shouldKeepPersistedApiPartiesOnResume,
 } from "../../launch/simpleProduct/paidProResumeDraftMerge";
 import { mergeLiveDraftWithRecipientSetupForReviewLinks } from "../../launch/simpleProduct/reviewLinkRecipientEmailMerge";
 import {
@@ -1041,6 +1043,7 @@ import {
   type PaidProSignerMetadataField,
 } from "./paidProSignerMetadataAuthority";
 import {
+  partiesForServerPersistFromSeed,
   readHandoffContactFieldsForSeed,
   runPaidProSignerMetadataAuthoritySeed,
 } from "./paidProSignerMetadataSeed";
@@ -5958,6 +5961,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ): Promise<{ id: string; postDraft: AgreementDraft | null }> {
     const reviewFirstHandoffPersist = Boolean(options?.reviewFirstHandoffPersist);
     const merged = mergeParsedForApiPersist(parsed);
+    const persistLegalEntities = (merged.parties ?? [])
+      .map((party) => String(party.name || "").trim())
+      .filter(Boolean);
+    const persistSeed = runPaidProSignerMetadataAuthoritySeed({
+      stage: "post_new_draft_persist",
+      legalEntities: persistLegalEntities,
+      intakeText: intakeCombinedRef.current || intakeCombined,
+      draft: merged,
+      uiSignerNames: partySignerNamesRef.current,
+      uiSignerTitles: partySignerTitlesRef.current,
+      uiSignerEmails: [
+        recipient1EmailRef.current,
+        recipient2EmailRef.current,
+        ...extraPartyReviewEmailsRef.current,
+      ],
+      authoritativePartyCount: persistLegalEntities.length >= 2 ? persistLegalEntities.length : undefined,
+    });
+    const persistParties = partiesForServerPersistFromSeed(persistSeed.draft?.parties ?? merged.parties ?? [], persistSeed);
     const persistPurpose = longestPlainForAgreementPersist(merged, agreementDocumentTextRef.current).trim() || merged.purpose;
     const {
       payment: _payment,
@@ -5996,7 +6017,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const apiDraft = {
       title: rest.title,
       jurisdiction: rest.jurisdiction,
-      parties: rest.parties,
+      parties: persistParties.length ? persistParties : rest.parties,
       purpose: persistPurpose,
       payment_terms: rest.payment_terms,
       duration: rest.duration ?? null,
@@ -6402,6 +6423,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (seed.uiChanged) {
           setPartySignerNames(seed.names);
           setPartySignerTitles(seed.titles);
+        }
+        if (seed.emails.some((email) => email.trim())) {
+          if (seed.emails[0]) setRecipient1Email((prev) => (prev.trim() ? prev : seed.emails[0]!));
+          if (seed.emails[1]) setRecipient2Email((prev) => (prev.trim() ? prev : seed.emails[1]!));
+          if (seed.emails.length > 2) {
+            setExtraPartyReviewEmails((prev) => {
+              const next = prev.slice();
+              while (next.length < seed.emails.length - 2) next.push("");
+              for (let i = 2; i < seed.emails.length; i++) {
+                const em = seed.emails[i]?.trim() ?? "";
+                if (em && !(next[i - 2] ?? "").trim()) next[i - 2] = em;
+              }
+              return next;
+            });
+          }
         }
       }
     }
@@ -13423,7 +13459,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return false;
         }
       }
-      if (shouldInterceptAdvancedDocumentFamily(rawIntake, parsed.agreement_family)) {
+      if (
+        shouldRunComplexityInterceptBeforePaidGeneration({
+          skipFreeStarterCreateSubmit,
+          intakeText: rawIntake,
+          family: parsed.agreement_family,
+        })
+      ) {
         stashCreateComplexityResume({
           rawIntake,
           pending: parsed,
@@ -14657,7 +14699,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
         };
         await pushField("purpose", purposePush);
-        await pushField("parties", parsed.parties ?? []);
+        const existingLegalEntities = (parsed.parties ?? [])
+          .map((party) => String(party.name || "").trim())
+          .filter(Boolean);
+        const existingSeed = runPaidProSignerMetadataAuthoritySeed({
+          stage: "existing_draft_parties_persist",
+          legalEntities: existingLegalEntities,
+          intakeText: intakeCombinedRef.current || intakeCombined,
+          draft: parsed,
+          uiSignerNames: partySignerNamesRef.current,
+          uiSignerTitles: partySignerTitlesRef.current,
+          uiSignerEmails: [
+            recipient1EmailRef.current,
+            recipient2EmailRef.current,
+            ...extraPartyReviewEmailsRef.current,
+          ],
+          authoritativePartyCount: existingLegalEntities.length >= 2 ? existingLegalEntities.length : undefined,
+        });
+        await pushField(
+          "parties",
+          partiesForServerPersistFromSeed(existingSeed.draft?.parties ?? parsed.parties ?? [], existingSeed),
+        );
         await pushField("payment_terms", parsed.payment_terms ?? "");
         await pushField("jurisdiction", parsed.jurisdiction ?? "");
         await pushField("duration", parsed.duration ?? null);
@@ -18029,6 +18091,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       text: string,
       reason: string,
       operation?: PaymentApplyTarget,
+      customerConfirmedAnswers?: string | null,
     ): Promise<PaidProUserApprovedRevisionCommitResult> => {
       const raw = text.trim();
       if (!raw) return { ok: false, corpus: "", displayed: false, code: "empty_revision_text" };
@@ -18071,6 +18134,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           generationSessionId: getOrInitSessionAgreementGenerationId(),
           draft: draft ?? null,
           intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+          customerConfirmedAnswers: customerConfirmedAnswers,
           applyDisplayMutations: (stable) => {
             hydratedPremiumBodyRef.current = stable;
             lastPremiumWinningCorpusRef.current = stable;
@@ -18219,6 +18283,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             patched,
             "payment_clarification_answer",
             captured,
+            userGapAnswers,
           );
           const outcome = resolveOwnerApprovedRevisionCallerOutcome(committed);
           if (!outcome.applied) {
@@ -18314,6 +18379,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         body,
         "payment_clarification_answer",
         captured,
+        userGapAnswers,
       );
       const outcome = resolveOwnerApprovedRevisionCallerOutcome(committed);
       if (!outcome.applied) {
@@ -19279,14 +19345,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         next = mergePaidProAuthoritativeDraftFieldsFromApi(next, adForHydrate);
         // Signer-setup resume: keep persisted party/signer metadata authority — never re-derive
         // party names from document body sections (causes authority_party_count_mismatch).
-        if (!signerSetupResume) {
+        const apiParties = Array.isArray(adForHydrate.parties) ? adForHydrate.parties : [];
+        const keepPersistedApiParties = shouldKeepPersistedApiPartiesOnResume({
+          signerSetupResume,
+          apiParties,
+        });
+        if (!keepPersistedApiParties) {
           next = runIntakeDefaultsAndRoles(next, rawIntake, simpleProductFlow, intakePartyRoleLabels);
           next = alignParsedWithCanonicalType(next, rawIntake);
           next = normalizeParsedDraftLegalConcepts(next, rawIntake);
           next = retainAuthorizedApiPartiesAfterIntakeDefaults(next, adForHydrate);
         } else {
           // Prefer API parties as-is; only fill empty legal names from draft.party slots.
-          const apiParties = Array.isArray(adForHydrate.parties) ? adForHydrate.parties : [];
           if (apiParties.length > 0) {
             next = {
               ...next,
@@ -19369,6 +19439,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         setReviewDocRefreshTick((n) => n + 1);
         setDraft(next);
+        {
+          const persistedUi = liveSignerUiFieldsFromDraftParties(next.parties ?? []);
+          if (persistedUi.emails.some(Boolean) || persistedUi.names.some(Boolean)) {
+            if (persistedUi.legal[0]) setRecipient1Name(persistedUi.legal[0]!);
+            if (persistedUi.legal[1]) setRecipient2Name(persistedUi.legal[1]!);
+            if (persistedUi.emails[0]) setRecipient1Email(persistedUi.emails[0]!);
+            if (persistedUi.emails[1]) setRecipient2Email(persistedUi.emails[1]!);
+            if (persistedUi.legal.length > 2) setExtraPartyLegalNames(persistedUi.legal.slice(2));
+            if (persistedUi.emails.length > 2) setExtraPartyReviewEmails(persistedUi.emails.slice(2));
+            setPartySignerNames(persistedUi.names.length ? persistedUi.names : ["", ""]);
+            setPartySignerTitles(persistedUi.titles.length ? persistedUi.titles : ["", ""]);
+            setSignerSetupUiPartyCount(Math.max(next.parties?.length ?? 0, 2));
+          }
+        }
         setMissing([]);
         setFollowUpDetailTotal(0);
         setCreateUiStage(CreateUiStage.DRAFT);
@@ -19428,6 +19512,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             lastPremiumWinningCorpusRef.current = resumeCorpus;
             premiumPipelineOutputBodyRef.current = resumeCorpus;
             lastKnownGoodAuthoritativeDraftRef.current = resumeCorpus;
+            acceptedReviewCorpusRef.current = resumeCorpus;
+            finalizedSigningCorpusRef.current = resumeCorpus;
             setAgreementDocumentText(resumeCorpus);
             setPremiumPersistedFlowActive(true);
             setProFullDraftQualityRetry(false);
@@ -23303,7 +23389,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ? lastKnownGoodAuthoritativeDraftRef.current ||
           hydratedPremiumBodyRef.current ||
           agreementDocumentText
-        : displayPolishedPaidProPlain || premiumPaidReadonlyPick.plainText);
+        : premiumPaidReadonlyPick.plainText || renderedAgreementPreview || agreementDocumentText);
     const corpus =
       corpusRaw.length >= 200
         ? polishProAgreementDisplayLayer(corpusRaw, {
@@ -28302,11 +28388,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       fallbackManifest: guidedFinalPartyManifest,
       intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
+      draftParties: draft?.parties ?? [],
     });
     const signingHandoffReadiness = evaluatePaidProSigningHandoffReadiness({
       manifest: signingHandoffManifest,
       intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
+      draftParties: draft?.parties ?? [],
       requiredPartyCount: guidedPreReviewSignerSlots.requiredCount,
     });
     if (!signingHandoffReadiness.ok) {
@@ -28320,6 +28408,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       signFirst: peekPremiumSenderSignFirst() ?? true,
       intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
+      draftParties: draft?.parties ?? [],
     });
     setGuidedAuthVersionNonce((n) => n + 1);
     const recipientEmails = [
@@ -32302,6 +32391,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         fallbackManifest: guidedFinalPartyManifest,
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
         draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
+        draftParties: draft?.parties ?? [],
       });
       const handoffAssert = assertGuidedVs01SigningHandoffReady({
         manifest: signingHandoffManifest,

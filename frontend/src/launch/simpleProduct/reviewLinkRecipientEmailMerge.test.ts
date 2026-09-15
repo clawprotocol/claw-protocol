@@ -83,6 +83,25 @@ describe("mergeReviewLinkRecipientEmailsOntoHydratedDraft", () => {
     expect(out.parties[0].email).toContain("example.com");
     expect(out.parties[1].email).toContain("example.org");
   });
+
+  it("replaces a legal-entity signerName copy with the intake human signer", () => {
+    const fetched = {
+      id: "ag-3",
+      parties: [
+        { id: "p1", name: "Stonebridge Wellness LLC", role: "licensor", signerName: "Stonebridge Wellness LLC" },
+        { id: "p2", name: "NovaPath Learning Inc.", role: "reviewer", signerName: "NovaPath Learning Inc." },
+      ],
+    } as AgreementDraft;
+    const primed = {
+      id: "ag-3",
+      parties: [
+        { name: "Stonebridge Wellness LLC", role: "licensor", signerName: "Sandra Wells" },
+        { name: "NovaPath Learning Inc.", role: "reviewer", signerName: "Caleb Price" },
+      ],
+    } as AgreementDraft;
+    const out = mergeReviewLinkRecipientEmailsOntoHydratedDraft(fetched, primed);
+    expect(out.parties.map((party) => party.signerName)).toEqual(["Sandra Wells", "Caleb Price"]);
+  });
 });
 
 describe("rowReadyForReviewLinkInvite", () => {

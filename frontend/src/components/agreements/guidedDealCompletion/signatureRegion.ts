@@ -116,10 +116,12 @@ export function countSignatureBlockHeadingsInTail(text: string): number {
       .length;
   if (roleHeadings > 0) return roleHeadings;
   // Labeled N-party entity-heading mode: legal entity line is the block heading.
+  // Numbered operational paragraphs after the witness block ("13. Lumen Bioinformatics Inc.")
+  // must not count as extra signature headings — that falsely blocks signing handoff.
   return (
     (
       tail.match(
-        /^\s*[A-Z0-9][A-Z0-9 &.',\-]{1,160}\b(?:LLC|L\.L\.C\.|INC\.?|CORP\.?|LTD\.?|LP)\.?\s*:?\s*$/gm,
+        /^\s*(?!\d+\.\s)[A-Z0-9][A-Z0-9 &.',\-]{1,160}\b(?:LLC|L\.L\.C\.|INC\.?|CORP\.?|LTD\.?|LP)\.?\s*:?\s*$/gm,
       ) || []
     ).length
   );
@@ -129,7 +131,7 @@ export function countSignatureBlockHeadingsInTail(text: string): number {
 export function countSignatureExecutionLinesInTail(text: string): number {
   const start = signaturePatchStartIndex(text);
   const tail = start >= 0 ? text.slice(start) : text.slice(Math.floor(text.length * 0.72));
-  return (tail.match(/^\s*(?:By|Signature)\s*:/gim) || []).length;
+  return (tail.match(/(?:^|\s)(?:By|Signature)\s*:/gim) || []).length;
 }
 
 /** @deprecated Use {@link countSignatureExecutionLinesInTail}. */

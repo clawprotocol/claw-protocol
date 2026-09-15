@@ -10,11 +10,13 @@ import {
   getPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
 } from "./paidProSourceOfTruth";
+import { readConfirmedContentAnswers } from "./paidProConfirmedContentAnswers";
 import { selectVerifiedPaidReviewPaper } from "./paidProVerifiedReviewPaper";
 import {
   buildMaterialMissingItems,
   isCompletionCriteriaQuestion,
   isDateMeaningQuestion,
+  isMilestonePayerQuestion,
 } from "./proAgreementCompleteness";
 
 export function contentClarificationQuestions(args: {
@@ -33,7 +35,12 @@ export function contentClarificationQuestions(args: {
   });
   return items
     .map((item) => item.question)
-    .filter((question) => isDateMeaningQuestion(question) || isCompletionCriteriaQuestion(question));
+    .filter(
+      (question) =>
+        isDateMeaningQuestion(question) ||
+        isCompletionCriteriaQuestion(question) ||
+        isMilestonePayerQuestion(question),
+    );
 }
 
 export function PaidDraftContentAdvisory(args: {
@@ -63,8 +70,16 @@ export function PaidDraftContentAdvisory(args: {
   });
   const stored = readPaymentClarification(scope);
   const intake = (stored?.intake || args.intakeText || "").trim();
-  const appliedAnswers =
+  const storedApplied =
     stored?.revisionId && stored.revisionId === revisionId ? (stored.appliedAnswers || "").trim() : "";
+  const appliedAnswers =
+    storedApplied ||
+    readConfirmedContentAnswers({
+      userId: scope?.userId,
+      organizationId: scope?.organizationId,
+      agreementId: args.agreementId,
+      revisionId,
+    });
   const pendingAnswer = (stored?.pendingAnswer || "").trim();
   const applyStatus = stored?.applyStatus || "idle";
   const questions = useMemo(
@@ -88,18 +103,19 @@ export function PaidDraftContentAdvisory(args: {
 
   const dateQuestions = questions.filter((question) => isDateMeaningQuestion(question));
   const completionQuestions = questions.filter((question) => isCompletionCriteriaQuestion(question));
+  const payerQuestions = questions.filter((question) => isMilestonePayerQuestion(question));
 
   return (
     <section
       className="mb-4 rounded-xl border border-amber-300/80 bg-amber-50/90 px-4 py-3 text-stone-900 shadow-sm"
       data-testid="paid-draft-content-clarification-panel"
       data-apply-status={applyStatus}
-      aria-label="Date and completion clarification"
+      aria-label="Date, completion, and missing-fact clarification"
     >
-      <p className="text-sm font-semibold tracking-tight">Recommended date and completion details</p>
+      <p className="text-sm font-semibold tracking-tight">Recommended missing-fact details</p>
       <p className="mt-1 text-xs leading-relaxed text-stone-700">
         Optional — you can review or sign without answering. Confirmed facts update the opening, term,
-        and scope wording without inventing extra obligations.
+        payment relationships, and scope wording without inventing extra obligations or parties.
       </p>
       <p className="sr-only" data-testid="paid-draft-content-clarification-status">
         {applyStatus}
@@ -112,6 +128,11 @@ export function PaidDraftContentAdvisory(args: {
         ))}
         {completionQuestions.map((question) => (
           <li key={question} data-testid="completion-criteria-clarification-question">
+            {question}
+          </li>
+        ))}
+        {payerQuestions.map((question) => (
+          <li key={question} data-testid="milestone-payer-clarification-question">
             {question}
           </li>
         ))}

@@ -113,11 +113,20 @@ describe("TEST465 — four-party recipient isolation and ordered dashboard progr
       expect(boot.identity.lockedSignerRoleId).toBe(selfRole.roleId);
     }
 
-    vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockResolvedValue({
-      ok: true,
-      fully_executed: false,
-      completion_emails_sent: false,
-    });
+    vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockImplementation(
+      async (agreementId, body) => ({
+        ok: true,
+        fully_executed: false,
+        completion_emails_sent: false,
+        completion: {
+          status: "completed",
+          agreement_id: agreementId,
+          document_id: body.document_id || TEST463_DOC,
+          signer_role_id: body.signer_role_id,
+          participant_id: body.participant_id,
+        },
+      }),
+    );
 
     const completionOrder = [
       test463RoleByEntity(TEST440_HORIZON, roles),

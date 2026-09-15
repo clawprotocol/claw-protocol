@@ -679,7 +679,14 @@ export function selectAuthoritativeTwoPartySlots(names: readonly string[]): stri
   return collapsed.slice(0, 2);
 }
 
-export type DraftPartyRowLike = { name: string; role?: string; email?: string; id?: string };
+export type DraftPartyRowLike = {
+  name: string;
+  role?: string;
+  email?: string;
+  id?: string;
+  signerName?: string;
+  signerTitle?: string;
+};
 
 export function partySlotListHasDriftFragments(
   names: readonly string[],
@@ -723,16 +730,16 @@ export function collapseDraftPartyRows(
     quoted.length >= labeled.length ? quoted : labeled.length >= 3 ? labeled : quoted.length >= 3 ? quoted : labeled;
   if (authoritativeIntake.length >= 3 && parties.length !== authoritativeIntake.length) {
     return authoritativeIntake.map((name, index) => {
-      const prev =
-        parties.find((p) => partyLegalNamesMatch(p.name, name)) ??
-        parties[index] ??
-        parties[parties.length - 1];
+      const matched = parties.find((p) => partyLegalNamesMatch(p.name, name));
+      const prev = matched ?? parties[index];
       const role = isInternalPartyAliasRole(prev?.role) ? undefined : prev?.role;
       return {
         name,
         role: role || (index === 0 ? "Client" : index === 1 ? "Service Provider" : "party"),
-        email: prev?.email,
-        id: prev?.id,
+        email: matched?.email,
+        id: matched?.id ?? prev?.id,
+        signerName: matched?.signerName,
+        signerTitle: matched?.signerTitle,
       };
     });
   }
@@ -764,16 +771,16 @@ export function collapseDraftPartyRows(
 
   if (collapsedNames.length >= 2 && parties.length > collapsedNames.length) {
     return collapsedNames.map((name, index) => {
-      const prev =
-        parties.find((p) => partyLegalNamesMatch(p.name, name)) ??
-        parties[index] ??
-        parties[parties.length - 1];
+      const matched = parties.find((p) => partyLegalNamesMatch(p.name, name));
+      const prev = matched ?? parties[index];
       const role = isInternalPartyAliasRole(prev?.role) ? undefined : prev?.role;
       return {
         name,
         role: role || (index === 0 ? "Client" : index === 1 ? "Service Provider" : "party"),
-        email: prev?.email,
-        id: prev?.id,
+        email: matched?.email,
+        id: matched?.id ?? prev?.id,
+        signerName: matched?.signerName,
+        signerTitle: matched?.signerTitle,
       };
     });
   }

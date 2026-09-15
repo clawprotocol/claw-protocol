@@ -99,6 +99,7 @@ describe("paidProDirectSigningLockAndInvite", () => {
     expect(result.ownerPartyId).toBe("harbor-uuid");
     expect(result.lockedVersionId).toBe("v1");
     expect(result.requiredParticipantIds).toEqual(["harbor-uuid", "ironvale-uuid"]);
+    expect(result.mintAllRequiredSignTokens).toBe(false);
     expect(lockSpy).toHaveBeenCalledWith(
       "ag-direct",
       expect.objectContaining({ locked_version_id: "v1", locked_by: "owner" }),
@@ -127,5 +128,47 @@ describe("paidProDirectSigningLockAndInvite", () => {
       draft: noOwner,
     });
     expect(result).toEqual({ ok: false, reason: "missing_owner_participant" });
+  });
+
+  it("locks a four-party draft without rewriting a commercial role to owner and mints every party", async () => {
+    const fourParty = draft({
+      parties: [
+        { id: "lumen-uuid", name: "Lumen Bioinformatics Inc.", role: "Platform Developer" },
+        { id: "thalassa-uuid", name: "Thalassa Data Systems LLC", role: "Data Infrastructure Provider" },
+        { id: "coastal-uuid", name: "Coastal Meridian Analytics LLC", role: "Analytics Integrator" },
+        { id: "vanguard-uuid", name: "Vanguard Regulatory Sciences Ltd.", role: "Regulatory Compliance Advisor" },
+      ],
+    });
+    vi.spyOn(ownerDeliveryTrack, "persistOwnerDeliveryTrack").mockResolvedValue(true);
+    vi.spyOn(reviewEmailPartyRoles, "persistReviewEmailPartyRolesOnServer").mockResolvedValue({
+      ok: true,
+      draft: fourParty,
+      rolesPersisted: false,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: fourParty,
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: fourParty,
+    });
+    vi.spyOn(recipientAccessApi, "putSigningLock").mockResolvedValue({ ok: true });
+
+    const result = await lockAuthoritativeVersionAndMintSigningInvites({
+      agreementId: "ag-direct",
+      draft: fourParty,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mintAllRequiredSignTokens).toBe(true);
+    expect(result.requiredParticipantIds).toEqual([
+      "lumen-uuid",
+      "thalassa-uuid",
+      "coastal-uuid",
+      "vanguard-uuid",
+    ]);
+    expect(fourParty.parties.some((party) => party.role === "owner")).toBe(false);
   });
 });

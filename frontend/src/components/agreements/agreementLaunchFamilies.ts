@@ -158,8 +158,29 @@ export function matchesAdvancedCommercialStructureSignals(intakeText: string): b
   return false;
 }
 
+/**
+ * Independent-contractor / relationship disclaimers often list "partnership, joint
+ * venture, or employment" as things the deal is *not*. Those must not trip the
+ * advanced-instrument gate or entitled four-party Create never reaches generation.
+ */
+export function stripRelationshipDisclaimerPhrases(intakeText: string): string {
+  return (intakeText || "")
+    .replace(
+      /\b(?:nothing(?:\s+in\s+this\s+agreement)?|this\s+agreement)\s+(?:creates?|create|constitutes?|establishes?)\s+(?:a\s+)?(?:partnership|joint\s+venture|employment(?:\s+relationship)?|agency)(?:\s*,\s*(?:a\s+)?(?:partnership|joint\s+venture|employment(?:\s+relationship)?|agency))*(?:\s*,?\s*or\s+(?:a\s+)?(?:partnership|joint\s+venture|employment(?:\s+relationship)?|agency))*/gi,
+      " ",
+    )
+    .replace(
+      /\b(?:does|do|shall|will)\s+not\s+(?:create|constitute|establish)\s+(?:a\s+)?(?:partnership|joint\s+venture|employment(?:\s+relationship)?|agency)(?:\s*,\s*(?:a\s+)?(?:partnership|joint\s+venture|employment(?:\s+relationship)?|agency))*(?:\s*,?\s*or\s+(?:a\s+)?(?:partnership|joint\s+venture|employment(?:\s+relationship)?|agency))*/gi,
+      " ",
+    )
+    .replace(
+      /\bno\s+(?:partnership|joint\s+venture|employment(?:\s+relationship)?|agency)(?:\s*,\s*(?:partnership|joint\s+venture|employment(?:\s+relationship)?|agency))*(?:\s*,?\s*or\s+(?:partnership|joint\s+venture|employment(?:\s+relationship)?|agency))*/gi,
+      " ",
+    );
+}
+
 export function matchesAdvancedInstrumentPhrases(intakeText: string): boolean {
-  const t = (intakeText || "").replace(/\s+/g, " ").trim();
+  const t = stripRelationshipDisclaimerPhrases(intakeText).replace(/\s+/g, " ").trim();
   const low = t.toLowerCase();
   if (!t) return false;
   if (/\bsafe\b/i.test(low)) return true;
@@ -172,6 +193,16 @@ export function matchesAdvancedInstrumentPhrases(intakeText: string): boolean {
   if (/\bstock\s+purchase\b/i.test(low)) return true;
   if (/\bgovernance\b/i.test(low) && /\b(?:agreement|document|plan|llc|corp)\b/i.test(low)) return true;
   return false;
+}
+
+/** Entitled paid Create already owns the full-draft path — do not stop on the complexity gate. */
+export function shouldRunComplexityInterceptBeforePaidGeneration(args: {
+  skipFreeStarterCreateSubmit: boolean;
+  intakeText: string;
+  family?: AgreementFamily;
+}): boolean {
+  if (args.skipFreeStarterCreateSubmit) return false;
+  return shouldInterceptAdvancedDocumentFamily(args.intakeText, args.family);
 }
 
 /**

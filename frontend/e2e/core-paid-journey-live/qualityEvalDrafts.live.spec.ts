@@ -1,11 +1,14 @@
 import { expect, test } from "@playwright/test";
 import { authorizedPaidProRevisionId } from "../../src/components/agreements/paidProSourceOfTruthState";
+import { releaseScopeSample } from "../../src/launch/releaseScopeQualificationCampaign";
 import { describeOperativeArticleCompare, normalizeArticleWhitespace } from "../../src/launch/corePaidJourneyAcceptanceMatrix";
 import {
   HARBOR_CONTENT_ANSWERS,
   QUALITY_EVAL_ALL_CASES,
+  applyFourPartyPayerAnswer,
   applyHarborContentAnswers,
   articleText,
+  completeLocalReviewSignAndFinal,
   assertApplyExplainedByAnswers,
   assertFreshEditableReopen,
   assertHarborCustomerMeaning,
@@ -38,9 +41,12 @@ const selected = selectQualityEvalCases(process.env.QUALITY_EVAL_CASE);
 for (const scenario of selected) {
   test(`real drafting: ${scenario.id}`, async ({ page, browser }) => {
     test.skip(reopenOnly, "Reopen-only mode does not regenerate samples");
-    test.setTimeout(300_000);
+    test.setTimeout(scenario.id === "three_party" || scenario.id === "four_party" ? 480_000 : 300_000);
     const modelResponses: object[] = [];
     const pending: Promise<void>[] = [];
+    page.on("pageerror", (err) => {
+      throw new Error(`create_render_exception ${err.message}`);
+    });
     const capturedIds = captureServerAgreementIds(page);
     const snapshotPosts = captureCanonicalSnapshotCreates(page);
     page.on("response", (response) => {
@@ -154,6 +160,12 @@ for (const scenario of selected) {
         noteClarificationEvent(await panel.innerText());
         scriptedActions.push("apply_date_completion");
         posted = await applyHarborContentAnswers(page, agreementId);
+      } else if (scenario.id === "four_party") {
+        const panel = page.getByTestId("paid-draft-content-clarification-panel");
+        await expect(panel).toBeVisible({ timeout: 20_000 });
+        noteClarificationEvent(await panel.innerText());
+        scriptedActions.push("apply_milestone_payer_test_data");
+        posted = await applyFourPartyPayerAnswer(page, agreementId);
       } else {
         if (scenario.id === "saas") {
           await expect(page.getByTestId("paid-draft-content-clarification-panel")).toHaveCount(0);
@@ -178,6 +190,9 @@ for (const scenario of selected) {
         });
         assertHarborCustomerMeaning(afterApply);
         assertApplyExplainedByAnswers(firstPaper, afterApply, HARBOR_CONTENT_ANSWERS);
+      } else if (scenario.id === "four_party") {
+        await expect(page.getByTestId("milestone-payer-clarification-question")).toHaveCount(0, { timeout: 20_000 });
+        assertReleaseScopePaper(scenario.id, afterApply, "applied");
       } else {
         assertReleaseScopePaper(scenario.id, afterApply, "applied");
         const applyVsFirst = describeOperativeArticleCompare("first_draft", firstPaper, "after_apply", afterApply);
@@ -194,7 +209,11 @@ for (const scenario of selected) {
         posted.length || persisted.corpus.length,
       );
       expect(paperReady(persisted.corpus)).toBeTruthy();
-      assertReleaseScopePaper(scenario.id, persisted.corpus, scenario.id === "consulting" ? "applied" : "first");
+      assertReleaseScopePaper(
+        scenario.id,
+        persisted.corpus,
+        scenario.id === "consulting" || scenario.id === "four_party" ? "applied" : "first",
+      );
       const getVsPost = describeOperativeArticleCompare(
         "canonical_get",
         persisted.corpus,
@@ -211,14 +230,15 @@ for (const scenario of selected) {
       expect(visibleVsGet.sameOperative, visibleVsGet.diff).toBe(true);
 
       await page.reload({ waitUntil: "domcontentloaded" });
-      const article = page
-        .locator(
-          '[data-testid="simple-pro-final-review-document"]:visible, [data-testid="paid-pro-visible-document-shell"]:visible',
-        )
-        .first();
-      await expect(article).toBeVisible({ timeout: 20_000 });
-      for (const party of scenario.parties) await expect(article).toContainText(party);
-      writeQualityEvalArtifact("after-refresh.txt", await article.innerText(), scenario.id);
+      let afterRefresh = "";
+      await expect
+        .poll(async () => {
+          afterRefresh = await articleText(page, scenario.partyCue);
+          return paperReady(afterRefresh) ? afterRefresh.length : 0;
+        }, { timeout: 90_000 })
+        .toBeGreaterThan(400);
+      for (const party of scenario.parties) expect(afterRefresh).toContain(party);
+      writeQualityEvalArtifact("after-refresh.txt", afterRefresh, scenario.id);
 
       const reopened = await assertFreshEditableReopen(
         browser,
@@ -231,7 +251,11 @@ for (const scenario of selected) {
       if (scenario.id === "consulting") {
         await expect(page.getByTestId("date-meaning-clarification-question")).toHaveCount(0);
       }
-      assertReleaseScopePaper(scenario.id, reopened.article, scenario.id === "consulting" ? "applied" : "first");
+      assertReleaseScopePaper(
+        scenario.id,
+        reopened.article,
+        scenario.id === "consulting" || scenario.id === "four_party" ? "applied" : "first",
+      );
       writeQualityEvalArtifact("fresh-reopen.txt", reopened.article, scenario.id);
       writeQualityEvalSample({
         caseId: scenario.id,
@@ -241,13 +265,44 @@ for (const scenario of selected) {
         length: persisted.length,
       });
 
+      let recipientPath = "not_yet_exercised";
+      let receiptId = "";
+      if (scenario.id === "three_party" || scenario.id === "four_party") {
+        const sample = releaseScopeSample(scenario.id);
+        const signers = sample.parties.map((party) => ({
+          legalEntity: party.legalEntity,
+          signerName: party.signerName || "",
+          signerEmail: party.email || "",
+        }));
+        expect(signers.every((row) => row.signerName), "intake-supplied signer names must remain associated").toBeTruthy();
+        for (const signer of signers) {
+          await expect(page.locator("body")).toContainText(signer.signerName);
+        }
+        scriptedActions.push("local_review_sign_final");
+        const finished = await completeLocalReviewSignAndFinal({
+          page,
+          browser,
+          agreementId,
+          snapshotId: persisted.snapshotId,
+          digest: persisted.digest,
+          partyCue: scenario.partyCue,
+          paperReady,
+          signers,
+        });
+        expect(finished.signedCount).toBe(signers.length);
+        expect(finished.receiptId.length).toBeGreaterThan(8);
+        recipientPath = "local_review_sign_final";
+        receiptId = finished.receiptId;
+      }
+
       writeQualityEvalArtifact(
         "continuation.json",
         JSON.stringify(
           {
             case_id: scenario.id,
             viewport: qualityEvalViewportName(),
-            stage: "draft_apply_get_reopen",
+            stage: recipientPath === "not_yet_exercised" ? "draft_apply_get_reopen" : "draft_apply_get_reopen_review_sign_final",
+            receipt_id: receiptId || undefined,
             url: page.url(),
             intended_track: scenario.track,
             agreement_id: agreementId,
@@ -288,7 +343,7 @@ for (const scenario of selected) {
                 ? "four filled release-scope cases; not arbitrary-input proof"
                 : "two filled cases only; not arbitrary-input proof",
             complete_paper_review: "required_for_live_quality",
-            recipient_path: "not_yet_exercised",
+            recipient_path: recipientPath,
             manual_edit_recovery: "unverified",
           },
           null,
@@ -327,7 +382,11 @@ test("reopen saved samples without regeneration", async ({ page, browser }) => {
       scenario.partyCue,
       paperReady,
     );
-    assertReleaseScopePaper(scenario.id, reopened.article, scenario.id === "consulting" ? "applied" : "first");
+    assertReleaseScopePaper(
+      scenario.id,
+      reopened.article,
+      scenario.id === "consulting" || scenario.id === "four_party" ? "applied" : "first",
+    );
     writeQualityEvalArtifact("reopen-only.txt", reopened.article, scenario.id);
   }
 });

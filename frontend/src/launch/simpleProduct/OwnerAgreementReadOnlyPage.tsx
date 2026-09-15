@@ -3,7 +3,7 @@ import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { RecipientControlCenter } from "../../agreement/RecipientControlCenter";
 import { PremiumAgreementReadonlyView } from "../../components/agreements/PremiumAgreementReadonlyView";
 import { computeReviewApprovalStatus } from "../../components/agreements/draftRecipientReviewSignals";
-import { displayCreatorAgreementTitle } from "../creatorDashboardPresentation";
+import { resolveSignedRecordDisplayTitle } from "../ownerSignedAgreementPresentation";
 import { CREATOR_MANAGE_RECIPIENTS_LABEL } from "../creatorDashboardCopy";
 import { useLaunchNav } from "../LaunchNavContext";
 import {
@@ -61,7 +61,12 @@ export function OwnerAgreementReadOnlyPage(props: Props) {
       return;
     }
     setDraft(loaded.draft);
-    setTitle(displayCreatorAgreementTitle(loaded.draft.title ?? ""));
+    setTitle(
+      resolveSignedRecordDisplayTitle({
+        draftTitle: loaded.draft.title,
+        corpusText: loaded.corpusText,
+      }).title,
+    );
     const agg = computeReviewApprovalStatus(loaded.draft);
     if (agg.requiredReviewerCount > 0) {
       setProgressLine(`${agg.approvedReviewerCount} of ${agg.requiredReviewerCount} approved`);

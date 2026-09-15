@@ -136,8 +136,12 @@ export function normalizeAgreementDraftFromApi(
       let role = coerceStr(pr.role) || "party";
       if (isPlaceholderPartyRole(role)) role = fallbackRoleForPartyIndex(parties.length);
       const pid = coerceStr(pr.id as string);
+      const signerName = coerceStr(pr.signerName) || coerceStr(pr.signer_name);
+      const signerTitle = coerceStr(pr.signerTitle) || coerceStr(pr.signer_title);
       const row: AgreementParty = { name, role, email: pr.email == null ? undefined : String(pr.email) };
       if (pid) row.id = pid;
+      if (signerName) row.signerName = signerName;
+      if (signerTitle) row.signerTitle = signerTitle;
       parties.push(row);
     }
   }
@@ -168,6 +172,8 @@ export function normalizeAgreementDraftFromApi(
       role: row.role || "party",
       email: row.email,
       ...(row.id ? { id: row.id } : {}),
+      ...(row.signerName ? { signerName: row.signerName } : {}),
+      ...(row.signerTitle ? { signerTitle: row.signerTitle } : {}),
     });
   }
 

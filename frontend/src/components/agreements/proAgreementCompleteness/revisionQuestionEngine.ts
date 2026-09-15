@@ -1,3 +1,4 @@
+import { stripRelationshipDisclaimerPhrases } from "../agreementLaunchFamilies";
 import { shouldSuppressPartyLegalNamesGuidedQuestion } from "../canonicalPartyIdentityResolver";
 import { detectAgreementFamily, type AgreementFamily } from "../agreementFamilyRouter";
 import { scanBodyMaterialPlaceholders } from "../guidedDealCompletion/bodyMaterialPlaceholderScanner";
@@ -9,6 +10,11 @@ import { isConsultingDevIntake } from "../guidedDealCompletion/consultingGuidedI
 import { isServicesMigrationIntake } from "../guidedDealCompletion/servicesMigrationGuidedIntake";
 import { dateMeaningMaterialItem, isDateMeaningQuestion } from "../paidProDateMeaning";
 import { completionCriteriaMaterialItem, isCompletionCriteriaQuestion } from "../paidProCompletionCriteria";
+import {
+  intakeHasNamedMilestoneRecipients,
+  isMilestonePayerQuestion,
+  milestonePayerMaterialItem,
+} from "../paidProMilestonePayer";
 import type { CommercialFamilyHint, MaterialMissingItem } from "./types";
 
 const VAGUE_COMMERCIAL_RE =
@@ -170,6 +176,12 @@ function paymentQuestionsForMaterials(intake: string, userGapAnswers = ""): Arra
   label: string;
 }> {
   if (!FEE_AMOUNT_RE.test(`${intake}\n${userGapAnswers}`)) return [];
+  if (
+    intakeHasNamedMilestoneRecipients(`${intake}\n${userGapAnswers}`) &&
+    /\bupon\s+\w/i.test(`${intake}\n${userGapAnswers}`)
+  ) {
+    return [];
+  }
   const facts = extractPaymentFacts(intake, userGapAnswers);
   const cadence = Boolean(facts.cadence) && !facts.cadenceConflict;
   const deadline = facts.deadlineDays != null;
@@ -193,7 +205,7 @@ function paymentQuestionsForMaterials(intake: string, userGapAnswers = ""): Arra
 }
 
 function detectCommercialFamilyHint(intake: string, body: string): CommercialFamilyHint {
-  const low = `${intake}\n${body}`.toLowerCase();
+  const low = stripRelationshipDisclaimerPhrases(`${intake}\n${body}`).toLowerCase();
   if (/\b(?:saas|software as a service|msa|master\s+services)\b/.test(low)) return "saas_msa";
   if (/\b(?:referral|commission|channel\s+partner)\b/.test(low)) return "referral";
   if (/\b(?:license|licen[cs]ing|sublicen)\b/.test(low)) return "licensing";
@@ -776,6 +788,14 @@ export function buildMaterialMissingItems(args: {
   if (completionItem) {
     pushItem(items, seen, completionItem, family);
   }
+  const payerItem = milestonePayerMaterialItem({
+    intakeRaw: args.intakeRaw,
+    userGapAnswers: args.userGapAnswers,
+    body,
+  });
+  if (payerItem) {
+    pushItem(items, seen, payerItem, family);
+  }
 
   for (const bodyItem of scanBodyMaterialPlaceholders(body, family)) {
     pushItem(items, seen, bodyItem, family);
@@ -823,7 +843,8 @@ export function buildMaterialMissingItems(args: {
       t === UNCONFIRMED_INVOICE_CADENCE_QUESTION ||
       t === UNCONFIRMED_PAYMENT_DUE_QUESTION ||
       isDateMeaningQuestion(t) ||
-      isCompletionCriteriaQuestion(t)
+      isCompletionCriteriaQuestion(t) ||
+      isMilestonePayerQuestion(t)
     ) {
       continue;
     }

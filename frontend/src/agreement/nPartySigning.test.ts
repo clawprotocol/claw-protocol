@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   countRequiredSignersFromHandoff,
+  countRequiredSignersFromParties,
   countRequiredSignersFromPortableRoles,
   resolveRequiredSignerCount,
 } from "./resolveRequiredSignerCount";
+import { partyRequiresSignature } from "./partyRequiresSignature";
 import type { PaidProVs01PostSignHandoffV1 } from "../vs01/vs01PaidProPostSignHandoff";
 import {
   buildVs01PrepareSigningRoles,
@@ -90,6 +92,33 @@ describe("buildVs01PrepareSigningRolesFromLegalParties", () => {
     expect(roles).toHaveLength(2);
     expect(roles[0]?.kind).toBe("owner");
     expect(roles[1]?.kind).toBe("counterparty");
+  });
+});
+
+describe("countRequiredSignersFromParties", () => {
+  it("counts reviewer-stamped named legal parties as required signers", () => {
+    expect(
+      countRequiredSignersFromParties([
+        { id: "p1", name: "Lumen Bioinformatics Inc.", role: "owner" },
+        { id: "p2", name: "Thalassa Data Systems LLC", role: "reviewer" },
+        { id: "p3", name: "Coastal Meridian Analytics LLC", role: "reviewer" },
+        { id: "p4", name: "Vanguard Regulatory Sciences Ltd.", role: "reviewer" },
+      ]),
+    ).toBe(4);
+    expect(partyRequiresSignature({ id: "p2", name: "Thalassa Data Systems LLC", role: "reviewer" })).toBe(
+      true,
+    );
+  });
+
+  it("still excludes coordinators and explicit notice-only extras", () => {
+    expect(
+      countRequiredSignersFromParties([
+        { id: "p1", name: "Alpha LLC", role: "party" },
+        { id: "p2", name: "Beta Inc", role: "party" },
+        { id: "coord", name: "Coordinator", role: "coordinator" },
+        { id: "notice", name: "Notice Desk LLC", role: "reviewer", requiresSignature: false },
+      ]),
+    ).toBe(2);
   });
 });
 

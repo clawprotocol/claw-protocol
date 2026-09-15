@@ -336,6 +336,44 @@ export async function fetchAgreementDraft(
   }
 }
 
+/** Token-authorized GET of the same agreement the recipient just tried to approve. */
+export async function fetchRecipientAgreementDraft(
+  agreementId: string,
+  recipientAccessToken?: string | null,
+): Promise<FetchAgreementDraftResult> {
+  const id = String(agreementId || "").trim();
+  if (!id) return { ok: false, draft: null, error: classifyFetchAgreementDraftFailure({ missingId: true }) };
+  try {
+    const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(id)}`, {
+      headers: {
+        ...clawAgreementHeaders(),
+        ...recipientAgreementReadHeaders(id, recipientAccessToken),
+      },
+    });
+    if (!res.ok) {
+      return {
+        ok: false,
+        draft: null,
+        status: res.status,
+        error: classifyFetchAgreementDraftFailure({ status: res.status }),
+      };
+    }
+    const j = (await res.json()) as { draft?: unknown };
+    const draft = normalizeAgreementDraftFromApi(j?.draft ?? null, { fallbackAgreementId: id });
+    if (!draft) {
+      return {
+        ok: false,
+        draft: null,
+        status: res.status,
+        error: classifyFetchAgreementDraftFailure({ normalizeFailed: true, status: res.status }),
+      };
+    }
+    return { ok: true, draft, status: res.status };
+  } catch {
+    return { ok: false, draft: null, error: classifyFetchAgreementDraftFailure({ network: true }) };
+  }
+}
+
 /** Same GET as {@link fetchAgreementDraft} but also returns server `signing_lock` (owner resume / finalize UX). */
 export async function fetchAgreementDraftWithSigningLock(
   agreementId: string,
@@ -613,7 +651,7 @@ export async function recipientApproveCurrentApi(
     expected_digest?: string;
     recipientAccessToken?: string | null;
   }
-): Promise<{ ok: boolean; error?: string; draft?: unknown }> {
+): Promise<{ ok: boolean; error?: string; draft?: unknown; status?: number; idempotent?: boolean }> {
   try {
     const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(agreementId)}/recipient-approve`, {
       method: "POST",
@@ -631,14 +669,14 @@ export async function recipientApproveCurrentApi(
     });
     if (res.ok) {
       try {
-        const j = (await res.json()) as { draft?: unknown };
-        return { ok: true, draft: j?.draft };
+        const j = (await res.json()) as { draft?: unknown; idempotent?: boolean };
+        return { ok: true, draft: j?.draft, status: res.status, idempotent: j?.idempotent === true };
       } catch {
-        return { ok: true };
+        return { ok: true, status: res.status };
       }
     }
     const parsed = parseRecipientProposalApiError(res.status, await res.json().catch(() => ({})));
-    return { ok: false, error: parsed.error };
+    return { ok: false, error: parsed.error, status: res.status };
   } catch {
     return { ok: false, error: "network" };
   }

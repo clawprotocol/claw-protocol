@@ -21,6 +21,10 @@ export function isOwnerNormalizedWorkflowRole(role: string | undefined | null): 
  * Ensure persisted draft parties carry explicit owner/reviewer roles for live Resend review invites.
  * Paid Pro drafts often use ``client`` / ``service_provider`` — not owner-normalized — until this runs.
  */
+function namedLegalPartyCount(parties: readonly AgreementParty[]): number {
+  return parties.filter((p) => String(p.name || "").trim().length >= 2).length;
+}
+
 export function ensureExplicitReviewEmailPartyRoles(
   parties: readonly AgreementParty[],
 ): AgreementParty[] {
@@ -29,7 +33,10 @@ export function ensureExplicitReviewEmailPartyRoles(
 
   const ownerIdx = resolveReviewLinkAssumedOwnerPartyIndex(list);
 
-  if (!isOwnerNormalizedWorkflowRole(list[ownerIdx]?.role)) {
+  // Three- and four-party deals: every named legal party reviews. Do not rewrite a
+  // commercial role (Platform Developer, etc.) into workspace-owner. Two-party
+  // Harbor-style drafts still stamp index 0 as owner for Resend exclusion.
+  if (namedLegalPartyCount(list) < 3 && !isOwnerNormalizedWorkflowRole(list[ownerIdx]?.role)) {
     const prev = list[ownerIdx];
     if (prev) list[ownerIdx] = { ...prev, role: "owner" };
   }
@@ -63,7 +70,11 @@ export function reviewEmailPartyContactNeedPersist(
     const roleChanged = String(prev?.role ?? "") !== String(p.role ?? "");
     const emailChanged =
       String(prev?.email ?? "").trim().toLowerCase() !== String(p.email ?? "").trim().toLowerCase();
-    return roleChanged || emailChanged;
+    const signerNameChanged =
+      String(prev?.signerName ?? "").trim() !== String(p.signerName ?? "").trim();
+    const signerTitleChanged =
+      String(prev?.signerTitle ?? "").trim() !== String(p.signerTitle ?? "").trim();
+    return roleChanged || emailChanged || signerNameChanged || signerTitleChanged;
   });
 }
 
@@ -83,7 +94,20 @@ export function prepareReviewEmailPartyRowsForServer(
 ): AgreementParty[] {
   const localWithContact = mergeLocalRecipientContactOntoDraft(localDraft, recipientSetup);
   const merged = mergeReviewLinkRecipientEmailsOntoHydratedDraft(serverDraft, localWithContact);
-  return ensureExplicitReviewEmailPartyRoles(merged.parties ?? []);
+  return rejectCrossPartyEmailReuse(ensureExplicitReviewEmailPartyRoles(merged.parties ?? []));
+}
+
+/** A persisted email belongs to one legal party. Never copy a sibling's address onto another row. */
+export function rejectCrossPartyEmailReuse(parties: readonly AgreementParty[]): AgreementParty[] {
+  const claimed = new Set<string>();
+  return parties.map((party) => {
+    const email = String(party.email || "").trim();
+    const key = email.toLowerCase();
+    if (!key) return { ...party };
+    if (claimed.has(key)) return { ...party, email: undefined };
+    claimed.add(key);
+    return { ...party, email };
+  });
 }
 
 /** PATCH ``parties`` on the server draft when review-email roles or emails are missing. */

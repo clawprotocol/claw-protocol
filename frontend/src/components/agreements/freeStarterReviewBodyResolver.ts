@@ -71,6 +71,21 @@ export function shouldRedirectFreeToProForValidation(validation: string | null |
   return true;
 }
 
+export function unwrapFreeDocumentText(raw: string | null | undefined): string {
+  const text = String(raw ?? "").trim();
+  if (!text.startsWith("{")) return text;
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    for (const key of ["document_text", "updated_document_text", "free_document_text"]) {
+      const value = parsed[key];
+      if (typeof value === "string" && value.trim().length >= 40) return value.trim();
+    }
+  } catch {
+    /* raw JSON without a document field is not paint-ready paper */
+  }
+  return "";
+}
+
 /**
  * Role-only placeholder names that are NOT real legal parties.
  * These should never appear as the actual party name in a painted free page.
@@ -315,7 +330,7 @@ export function evaluateSimpleHollowBodyGate(
     jurisdiction?: string | null;
   },
 ): { isHollow: boolean; reason: string | null } {
-  const text = (body ?? "").trim();
+  const text = unwrapFreeDocumentText(body);
   if (!text || text.length < 200) {
     return { isHollow: true, reason: "body_too_short" };
   }
@@ -1223,7 +1238,7 @@ export function resolveFreeStarterReviewBody(
   const repairedPaymentTerms = extractFreeStarterPaymentTermsLine(repairedPreview);
 
   // Check for direct OpenAI one-pager (highest priority when validation is "ok")
-  const freeDocText = String(args.freeDocumentText ?? draft?.free_document_text ?? "").trim();
+  const freeDocText = unwrapFreeDocumentText(args.freeDocumentText ?? draft?.free_document_text);
   const freeDocValidation = String(args.freeDocumentValidation ?? draft?.free_document_validation ?? "").trim();
   
   // If we have a valid free document from OpenAI, use it directly

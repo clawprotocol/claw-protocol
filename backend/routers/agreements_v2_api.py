@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple, cast
 from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from backend.config.anchor_network_config import (
     ALLOWED_AGREEMENT_ANCHOR_NETWORKS,
@@ -658,6 +658,16 @@ def _fallback_role_for_party_index(idx: int) -> str:
     return "party"
 
 
+def _party_signer_kwargs(party: Any) -> Dict[str, Optional[str]]:
+    if isinstance(party, dict):
+        signer_name = str(party.get("signer_name") or party.get("signerName") or "").strip() or None
+        signer_title = str(party.get("signer_title") or party.get("signerTitle") or "").strip() or None
+    else:
+        signer_name = str(getattr(party, "signer_name", None) or getattr(party, "signerName", None) or "").strip() or None
+        signer_title = str(getattr(party, "signer_title", None) or getattr(party, "signerTitle", None) or "").strip() or None
+    return {"signer_name": signer_name, "signer_title": signer_title}
+
+
 def _sanitize_agreement_parties_in_order(parties: List[AgreementParty]) -> List[AgreementParty]:
     """Drop empty names after cleanup; remap internal placeholder roles to party_a / party_b by final order."""
     out: List[AgreementParty] = []
@@ -670,7 +680,19 @@ def _sanitize_agreement_parties_in_order(parties: List[AgreementParty]) -> List[
         pid = (p.id or "").strip() or None
         email = str(getattr(p, "email", None) or "").strip() or None
         phone = str(getattr(p, "phone", None) or "").strip() or None
-        out.append(AgreementParty(name=name, role=role_out, id=pid, email=email, phone=phone))
+        signer_name = str(getattr(p, "signer_name", None) or "").strip() or None
+        signer_title = str(getattr(p, "signer_title", None) or "").strip() or None
+        out.append(
+            AgreementParty(
+                name=name,
+                role=role_out,
+                id=pid,
+                email=email,
+                phone=phone,
+                signer_name=signer_name,
+                signer_title=signer_title,
+            )
+        )
     return out
 
 
@@ -716,11 +738,15 @@ def _party_display_names_role(
 
 
 class AgreementParty(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str
     role: str
     id: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    signer_name: Optional[str] = Field(default=None, alias="signerName")
+    signer_title: Optional[str] = Field(default=None, alias="signerTitle")
 
 
 class VersionSnapshot(BaseModel):
@@ -3216,6 +3242,8 @@ class CanonicalReviewSnapshotCreateBody(BaseModel):
     created_by_session: Optional[str] = None
     """Optimistic concurrency: must match current registryVersion when provided."""
     expected_registry_version: Optional[int] = None
+    """Confirmed customer answers only — never inferred from generated paper."""
+    customer_confirmed_answers: Optional[str] = None
 
 
 class CanonicalReviewSnapshotAcceptBody(BaseModel):
@@ -3587,6 +3615,22 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
     return parsed
 
 
+def _unwrap_llm_document_text(raw: str) -> str:
+    """Use document_text when a model/stub returns JSON instead of plain paper."""
+    text = (raw or "").strip()
+    if not text.startswith("{"):
+        return text
+    try:
+        parsed = _extract_json_object(text)
+    except Exception:
+        return text
+    for key in ("document_text", "updated_document_text", "free_document_text"):
+        value = parsed.get(key)
+        if isinstance(value, str) and len(value.strip()) >= 40:
+            return value.strip()
+    return text
+
+
 def _normalize_parsed_draft(raw: Dict[str, Any]) -> AgreementDraftCreate:
     parties_in = raw.get("parties") if isinstance(raw.get("parties"), list) else []
     tmp: List[AgreementParty] = []
@@ -3598,7 +3642,16 @@ def _normalize_parsed_draft(raw: Dict[str, Any]) -> AgreementDraftCreate:
         pid = str(p.get("id") or "").strip()
         email = str(p.get("email") or "").strip() or None
         phone = str(p.get("phone") or "").strip() or None
-        tmp.append(AgreementParty(name=name, role=role, id=pid or None, email=email, phone=phone))
+        tmp.append(
+            AgreementParty(
+                name=name,
+                role=role,
+                id=pid or None,
+                email=email,
+                phone=phone,
+                **_party_signer_kwargs(p),
+            )
+        )
     parties = _ensure_agreement_parties_have_ids(tmp)
     due_date = str(raw.get("due_date") or "").strip() or None
     duration = str(raw.get("duration") or "").strip() or None
@@ -4911,6 +4964,7 @@ def _generate_free_one_pager(intake_text: str, llm_model: str, max_retries: int 
                 lines = document.split('\n')
                 lines = [l for l in lines if not l.strip().startswith("```")]
                 document = '\n'.join(lines).strip()
+            document = _unwrap_llm_document_text(document)
             
             # Validate the document
             validation = _validate_free_one_pager(document, intake_text)
@@ -6369,7 +6423,16 @@ def _ensure_agreement_parties_have_ids(parties: List[AgreementParty]) -> List[Ag
         pid = (p.id or "").strip() or str(uuid.uuid4())
         email = str(getattr(p, "email", None) or "").strip() or None
         phone = str(getattr(p, "phone", None) or "").strip() or None
-        out.append(AgreementParty(name=p.name, role=p.role, id=pid, email=email, phone=phone))
+        out.append(
+            AgreementParty(
+                name=p.name,
+                role=p.role,
+                id=pid,
+                email=email,
+                phone=phone,
+                **_party_signer_kwargs(p),
+            )
+        )
     return out
 
 
@@ -7867,6 +7930,7 @@ def post_canonical_review_snapshot(
         registry=get_registry(draft),
         expected_registry_version=body.expected_registry_version,
         draft_for_immutability=draft,
+        customer_confirmed_answers=body.customer_confirmed_answers,
     )
     if not ok or not isinstance(snap, dict) or not isinstance(reg, dict):
         status = 409 if err in {"registry_version_conflict", "accepted_snapshot_mutation_rejected"} else 400
@@ -7908,6 +7972,7 @@ def post_canonical_review_snapshot(
             "created_at": snap.get("createdAt"),
             "schema_version": snap.get("schemaVersion"),
             "status": snap.get("status"),
+            "customer_confirmed_answers": snap.get("customerConfirmedAnswers"),
         },
         "registry_version": reg.get("registryVersion"),
         "accepted": public_accepted_snapshot_fragment(accepted),
@@ -8129,6 +8194,7 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
                 "accepted_at": accepted.get("acceptedAt"),
                 "schema_version": accepted.get("schemaVersion"),
                 "status": accepted.get("status"),
+                "customer_confirmed_answers": accepted.get("customerConfirmedAnswers"),
             },
             "registry_version": reg.get("registryVersion"),
             "public": public_accepted_snapshot_fragment(accepted),
@@ -8162,6 +8228,7 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
             "created_at": latest.get("createdAt"),
             "schema_version": latest.get("schemaVersion"),
             "status": latest.get("status"),
+            "customer_confirmed_answers": latest.get("customerConfirmedAnswers"),
         },
         "registry_version": reg.get("registryVersion"),
         "public": None,
@@ -9753,6 +9820,12 @@ def patch_agreement_workspace_tags(
     return {"ok": True, "draft": next_draft.model_dump()}
 
 
+def _public_verify_display_title(draft: AgreementDraft) -> str:
+    from backend.services.signed_record_display import resolve_signed_record_display_title
+
+    return resolve_signed_record_display_title(draft) or (draft.title or "")
+
+
 def _public_agreement_verify_payload(aid: str, draft: AgreementDraft) -> Dict[str, Any]:
     """Full public verify JSON; callers wrap in try/except for graceful degradation."""
     overview_hash = _public_agreement_overview_hash(aid, draft)
@@ -9855,7 +9928,7 @@ def _public_agreement_verify_payload(aid: str, draft: AgreementDraft) -> Dict[st
     return {
         "agreement_id": aid,
         "summary": {
-            "title": draft.title,
+            "title": _public_verify_display_title(draft),
             "jurisdiction": draft.jurisdiction,
             "created_at": draft.created_at,
             "updated_at": draft.updated_at,
@@ -9903,7 +9976,7 @@ def _public_agreement_verify_pending_payload(aid: str, draft: AgreementDraft) ->
         "record_status": "pending",
         "record_status_reason": "verification_bundle_incomplete",
         "summary": {
-            "title": draft.title,
+            "title": _public_verify_display_title(draft),
             "jurisdiction": draft.jurisdiction,
             "created_at": draft.created_at,
             "updated_at": draft.updated_at,
@@ -10253,8 +10326,18 @@ def update_agreement_field(
                 email = email_raw or (str(prior.email or "").strip() if prior else "") or None
                 phone_raw = str(p.get("phone") or "").strip()
                 phone = phone_raw or (str(prior.phone or "").strip() if prior else "") or None
+                incoming_signer = _party_signer_kwargs(p)
+                prior_signer = _party_signer_kwargs(prior) if prior else {}
                 parties_raw.append(
-                    AgreementParty(name=name, role=role, id=pid, email=email, phone=phone)
+                    AgreementParty(
+                        name=name,
+                        role=role,
+                        id=pid,
+                        email=email,
+                        phone=phone,
+                        signer_name=incoming_signer.get("signer_name") or prior_signer.get("signer_name"),
+                        signer_title=incoming_signer.get("signer_title") or prior_signer.get("signer_title"),
+                    )
                 )
         parties = _ensure_agreement_parties_have_ids(parties_raw)
         next_data["parties"] = [p.model_dump() for p in parties]
@@ -12138,6 +12221,36 @@ def _normalize_workflow_role(role: str) -> str:
     return r or "party"
 
 
+def _existing_participant_revision_approval(
+    audit: Any,
+    participant_id: Optional[str],
+    snapshot_id: Optional[str],
+    digest: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    pid = str(participant_id or "").strip()
+    snap = str(snapshot_id or "").strip()
+    dig = str(digest or "").strip().lower()
+    if not pid:
+        return None
+    for event in audit or []:
+        d = _audit_event_dict(event)
+        if str(d.get("event_type") or "") not in ("participant_approved", "recipient_approved"):
+            continue
+        val = d.get("value") or {}
+        if not isinstance(val, dict):
+            continue
+        if str(val.get("participant_id") or "").strip() != pid:
+            continue
+        prior_snap = str(val.get("snapshot_id") or "").strip()
+        prior_dig = str(val.get("corpus_sha256") or "").strip().lower()
+        if snap and prior_snap and prior_snap != snap:
+            continue
+        if dig and prior_dig and prior_dig != dig:
+            continue
+        return val
+    return None
+
+
 def _approved_participant_ids(audit: Any) -> set:
     out: set = set()
     for e in audit or []:
@@ -13361,6 +13474,7 @@ def recipient_approve_agreement(
     msg = (body.message or "").strip()
     part_id = (body.participant_id or "").strip()
     part_name = (body.participant_display_name or "").strip()
+    named_legal_count = sum(1 for p in (draft.parties or []) if str(p.name or "").strip())
     if part_id:
         found = False
         for p in draft.parties or []:
@@ -13369,7 +13483,7 @@ def recipient_approve_agreement(
                 if not part_name:
                     part_name = p.name
                 wr = _normalize_workflow_role(p.role)
-                if wr == "owner":
+                if wr == "owner" and named_legal_count < 3:
                     raise HTTPException(status_code=403, detail="owner_uses_workspace_not_recipient_approve")
                 if wr == "viewer":
                     raise HTTPException(status_code=403, detail="viewer_cannot_approve")
@@ -13378,6 +13492,14 @@ def recipient_approve_agreement(
             raise HTTPException(status_code=400, detail="participant_not_found")
     elif any((p.id or "").strip() for p in (draft.parties or [])):
         raise HTTPException(status_code=400, detail="participant_id_required")
+    existing_approval = _existing_participant_revision_approval(
+        draft.audit_log,
+        part_id,
+        bound.get("snapshot_id") if bound else None,
+        bound.get("corpus_sha256") if bound else None,
+    )
+    if existing_approval:
+        return {"ok": True, "draft": draft.model_dump(), "idempotent": True}
     audit = [*(draft.audit_log or [])]
     approve_val: Dict[str, Any] = {"message": msg or "approved_current_draft"}
     if bound:
