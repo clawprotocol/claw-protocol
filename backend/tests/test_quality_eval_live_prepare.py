@@ -17,6 +17,7 @@ from backend.quality_eval_live_prepare import (
     DEFAULT_INACTIVE_POLICY,
     LivePrepareBlocked,
     assert_live_provider_may_be_contacted,
+    authorized_additional_reserved_usd,
     prepare_authorized_live_boundary,
     product_source_hashes,
     resolve_increment_selection,
@@ -35,6 +36,60 @@ def _authorized_copy(tmp_path: Path) -> Path:
     dest = tmp_path / "quality-eval-increment-authorized-copy.json"
     dest.write_text(json.dumps(src, indent=2) + "\n")
     return dest
+
+
+def test_authorized_additional_reserved_usd_accepts_only_approved_grants():
+    assert authorized_additional_reserved_usd(1.0) == 1.0
+    assert authorized_additional_reserved_usd(2.5) == 2.5
+    assert authorized_additional_reserved_usd(3.0) is None
+    assert authorized_additional_reserved_usd(8.0) is None
+    assert authorized_additional_reserved_usd(None) is None
+
+
+def _release_scope_authorized_copy(tmp_path: Path) -> Path:
+    src = json.loads(DEFAULT_INACTIVE_POLICY.read_text())
+    src["active"] = True
+    src["max_additional_reserved_usd"] = 2.5
+    src["max_additional_reserved_units"] = 5_000_000
+    src["global_attempt_cap_when_active"] = 35
+    src["additional_allowance"] = {
+        "primary": 4,
+        "bootstrap_parse": 4,
+        "parse": 4,
+        "clarification": 4,
+        "repair": 4,
+        "revision": 0,
+        "negotiation": 0,
+        "bootstrap_one_pager": 0,
+    }
+    src["authorization"] = {
+        "kind": "explicit_increment_approval",
+        "max_additional_reserved_usd": 2.5,
+    }
+    dest = tmp_path / "quality-eval-increment-release-scope-copy.json"
+    dest.write_text(json.dumps(src, indent=2) + "\n")
+    return dest
+
+
+def test_two_dollar_fifty_authorized_copy_is_accepted(tmp_path):
+    selection = resolve_increment_selection(_release_scope_authorized_copy(tmp_path), authorize=True)
+    assert selection["authorized"] is True
+    assert selection["reason"] == "authorized_increment_copy"
+
+
+def test_mismatched_or_unapproved_dollar_grant_is_rejected(tmp_path):
+    dest = _release_scope_authorized_copy(tmp_path)
+    policy = json.loads(dest.read_text())
+    policy["authorization"]["max_additional_reserved_usd"] = 3.0
+    dest.write_text(json.dumps(policy) + "\n")
+    selection = resolve_increment_selection(dest, authorize=True)
+    assert selection["authorized"] is False
+    assert selection["reason"] == "increment_authorization_record_required"
+    policy["authorization"]["max_additional_reserved_usd"] = 2.5
+    policy["max_additional_reserved_usd"] = 1.0
+    dest.write_text(json.dumps(policy) + "\n")
+    mismatched = resolve_increment_selection(dest, authorize=True)
+    assert mismatched["authorized"] is False
 
 
 def test_default_policy_stays_inactive_and_unauthorized():

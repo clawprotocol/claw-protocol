@@ -6,9 +6,7 @@ Prepared 2026-09-14 after local acceptance on
 **This card supersedes the earlier two-sample Harbor/SaaS-only proposal on this filename.**  
 The two-sample inventory (2+2+2, repair 0, clarification 0) is not enough for the fixed release scope.
 
-**Do not run `--live`. Do not create or activate a sidecar. Do not spend or renew allowances now.**
-
-This is not a live-quality pass and not launch authorization.
+Owner authorized this card’s four-sample grant on 2026-09-15: $2.50 additional reserved, 4+4+4 primary/parse/bootstrap_parse, 4 conditional clarification, 4 conditional repair, attempt ceiling 35. That supersedes the pending-approval wording for this grant only. It is not launch authorization and does not activate `quality-eval-increment-20260914.inactive.json`.
 
 Campaign facts: `RELEASE_SCOPE_QUALIFICATION_CAMPAIGN_2026-09-14.md` and
 `frontend/src/launch/releaseScopeQualificationCampaign.ts`.
@@ -93,9 +91,9 @@ These counts match the authentic paid Create path: one basic parse, one premium 
 
 `canProceedWithoutAnswer: true` stays unchanged. Official I2 stays party-name `agreement-intake-clarification`.
 
-### Sidecar contents to create only after a later written approval
+### Sidecar contents for this authorized grant
 
-Do not write this file now. When authorized, create a **new** inactive-then-activated copy; do not flip `quality-eval-increment-20260914.inactive.json`.
+Create a **new** authorized copy; do not flip `quality-eval-increment-20260914.inactive.json`. The copy is not committed.
 
 ```json
 {

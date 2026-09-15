@@ -3,7 +3,7 @@
 Authoritative repository: `lawdog-repo`  
 Branch: `stabilize/phase3b-paid-entry`  
 Register date: 2026-09-14 (America/Chicago) / 2026-09-14 UTC  
-Live-eval increment proposal: `QUALITY_EVAL_INCREMENTAL_AUTHORIZATION_2026-09-14.md` (inactive sidecar prepared; not authorized, not executed)  
+Four-sample live increment: `QUALITY_EVAL_NEXT_LIVE_AUTHORIZATION_PREPARED_2026-09-14.md` (owner-authorized 2026-09-15 for the stated $2.50 / 4-sample grant; two-sample inactive sidecar preserved and not activated)  
 Continuity C3/C4 close: `68775a946b09a48708fb4ef6eff55e327acea7ed+src-185caa72f8f6a3c6c444dd22163afa65d032219b+run-20260914T143749Z-71780`  
 Date/completion official identity: `96cd7248d803a8bdf2d8072ab409d242e6a255f5+src-ba7dbe25691bf522da2a95a9b68db31fbacc694b+run-20260914T155024Z-82989`  
 Official verified fingerprint (C5 close, unchanged): `ba7dbe25691bf522da2a95a9b68db31fbacc694b`  

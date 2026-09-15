@@ -18,10 +18,23 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INACTIVE_POLICY = ROOT / "evals/commercial-readiness/quality-eval-increment-20260914.inactive.json"
 OFFICIAL_LEDGER = ROOT / "evals/commercial-readiness/results/quality-eval-approved-20260913.sqlite3"
 AUTHORIZATION_KIND = "explicit_increment_approval"
+# Only owner-approved increment sizes. Do not accept arbitrary dollar grants.
+AUTHORIZED_ADDITIONAL_RESERVED_USD = frozenset({1.0, 2.5})
 
 
 class LivePrepareBlocked(RuntimeError):
     """Metadata-only; never include credentials or request content."""
+
+
+def authorized_additional_reserved_usd(value: Any) -> float | None:
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return None
+    for allowed in AUTHORIZED_ADDITIONAL_RESERVED_USD:
+        if abs(amount - allowed) < 1e-9:
+            return allowed
+    return None
 
 
 def is_increment_policy_file(name: str) -> bool:
@@ -60,9 +73,13 @@ def resolve_increment_selection(
         raise LivePrepareBlocked("increment_policy_invalid")
     active = policy.get("active") is True
     auth = policy.get("authorization") if isinstance(policy.get("authorization"), dict) else {}
+    auth_usd = authorized_additional_reserved_usd(auth.get("max_additional_reserved_usd"))
+    policy_usd = authorized_additional_reserved_usd(policy.get("max_additional_reserved_usd"))
     authorization_ok = (
         auth.get("kind") == AUTHORIZATION_KIND
-        and auth.get("max_additional_reserved_usd") == 1.0
+        and auth_usd is not None
+        and policy_usd is not None
+        and auth_usd == policy_usd
     )
     authorized = bool(authorize) and active and authorization_ok
     if authorized:

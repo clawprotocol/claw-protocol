@@ -280,12 +280,28 @@ def main() -> int:
                 + '; independent human document review still required',
                 flush=True,
             )
-            (out/'status.json').write_text(json.dumps({'status':'DRAFT_BROWSER_PASS',
+            recipient_paths = []
+            for name in sorted(p.name for p in out.glob('*-continuation.json')):
+                row = json.loads((out / name).read_text())
+                recipient_paths.append({
+                    'file': name,
+                    'case_id': row.get('case_id'),
+                    'viewport': row.get('viewport'),
+                    'recipient_path': row.get('recipient_path'),
+                    'stage': row.get('stage'),
+                    'receipt_id': row.get('receipt_id'),
+                })
+            exercised = [row['recipient_path'] for row in recipient_paths if row.get('recipient_path') and row['recipient_path'] != 'not_yet_exercised']
+            (out/'status.json').write_text(json.dumps({
+                'status': 'DRAFT_BROWSER_PASS',
                 'cases': identity['selected_cases'],
                 'independent_model_samples': identity['independent_model_samples'],
-                'quality_review':'pending','recipient_paths':'not_yet_exercised',
-                'live_quality':'not_claimed',
-                'sample_limitation': identity['sample_limitation']})+'\n')
+                'quality_review': 'pending',
+                'recipient_paths': exercised or 'not_yet_exercised',
+                'recipient_path_records': recipient_paths,
+                'live_quality': 'not_claimed',
+                'sample_limitation': identity['sample_limitation'],
+            })+'\n')
         elif args.offline_journey:
             case_filter = [] if args.case in {'all', 'release_scope'} else ['--grep', f'real drafting: {args.case}$']
             browser_timeout = 2400 if args.case in {'four_party', 'three_party', 'release_scope'} else 1500
