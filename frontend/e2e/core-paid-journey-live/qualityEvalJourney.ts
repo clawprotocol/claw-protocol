@@ -700,31 +700,43 @@ export async function applyIdentityClarificationAnswer(
   const partiesUpdateDone = page.waitForResponse((res) => {
     if (res.request().method() !== "POST") return false;
     try {
-      return new URL(res.url()).pathname.endsWith(
-        `/agreements/${agreementId}/update-field`,
-      );
+      const path = new URL(res.url()).pathname;
+      return path.endsWith(`/agreements/${agreementId}/update-field`) && res.ok();
     } catch {
       return false;
     }
   }, { timeout: 90_000 });
   await page.getByTestId("paid-draft-content-clarification-apply").click();
   const applyAlert = page.getByTestId("paid-draft-content-clarification-panel").locator("[role='alert']");
-  const snapshotOrError = await Promise.race([
+  const persistOrError = await Promise.race([
     snapshotPostDone.then((res) => ({ kind: "snapshot" as const, res })),
+    partiesUpdateDone.then(() => ({ kind: "parties" as const })),
     applyAlert
       .waitFor({ state: "visible", timeout: 15_000 })
       .then(async () => ({ kind: "error" as const, message: (await applyAlert.innerText()).trim() }))
       .catch(() => ({ kind: "none" as const })),
   ]);
-  if (snapshotOrError.kind === "error" && snapshotOrError.message) {
-    throw new Error(`identity_apply_failed ${snapshotOrError.message}`);
+  if (persistOrError.kind === "error" && persistOrError.message) {
+    throw new Error(`identity_apply_failed ${persistOrError.message}`);
   }
-  if (snapshotOrError.kind === "none") {
+  if (persistOrError.kind === "none") {
     return null;
   }
-  const snapshotRes = snapshotOrError.kind === "snapshot" ? snapshotOrError.res : await snapshotPostDone;
   await partiesUpdateDone.catch(() => null);
-  return observeSnapshotCreateResponse(snapshotRes, agreementId, "identity_apply_snapshot_create", startedAt);
+  await expect(panel.getByTestId("identity-clarification-question")).toHaveCount(0, {
+    timeout: 20_000,
+  });
+  if (persistOrError.kind === "snapshot") {
+    return observeSnapshotCreateResponse(persistOrError.res, agreementId, "identity_apply_snapshot_create", startedAt);
+  }
+  const current = await fetchOwnerCanonicalSnapshot(page, agreementId);
+  return {
+    snapshotId: current.snapshotId,
+    digest: current.digest,
+    corpus: current.corpus,
+    length: current.length,
+    agreementId: current.agreementId,
+  };
 }
 
 export async function applyHarborContentAnswers(

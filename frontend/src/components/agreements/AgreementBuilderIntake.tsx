@@ -18569,6 +18569,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return;
         }
       }
+      if (identityLines.length) {
+        await persistConfirmedIdentityIntoLiveDraft({
+          agreementId: captured.agreementId,
+          parties: structured.parties || [],
+          unresolvedSubjects: identityApplied.unresolvedSubjects,
+          additionalTerms: structured.additional_terms,
+        });
+        markPaymentClarificationApplied(
+          {
+            userId: captured.userId,
+            organizationId: captured.organizationId,
+            agreementId: captured.agreementId,
+            revisionId: captured.revisionId,
+          },
+          userGapAnswers,
+          captured.revisionId,
+          captured.requestId,
+        );
+        setReviewDocRefreshTick((n) => n + 1);
+        if (
+          samePaymentApplyOwner(captured, {
+            userId: resolveCurrentUser().id,
+            organizationId: getOrgId(),
+            agreementId: reviewAgreementIdRef.current || undefined,
+          })
+        ) {
+          premiumLastGapAnswersRef.current = userGapAnswers;
+        }
+        return;
+      }
       const currentTarget = () => ({
         userId: resolveCurrentUser().id,
         organizationId: (getOrgId() || "").trim(),

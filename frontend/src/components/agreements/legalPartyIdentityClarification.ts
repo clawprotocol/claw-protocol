@@ -141,6 +141,7 @@ export function customerMentionedUnresolvedFromIntake(
   const boundSigners = [
     ...extractEntitySignerInstructions(intake).map((row) => row.signerName),
     ...extractRoleSignerInstructions(intake).map((row) => row.signerName),
+    ...confirmedParties.map((row) => String(row.signerName || "").trim()).filter(Boolean),
   ];
   const confirmed = confirmedParties.map((row) => row.name);
   const found: UnresolvedIdentitySubject[] = [];

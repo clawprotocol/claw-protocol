@@ -261,6 +261,17 @@ describe("legal party identity clarification", () => {
         additionalTerms: `${IDENTITY_RESOLUTION_MARKER} Harbor Peak Analytics LLC signer: Alex Rivera`,
       }),
     ).not.toContain(QUESTION);
+    expect(
+      contentClarificationQuestions({
+        intake: INTAKE,
+        body,
+        parsedParties: [
+          { name: HARBOR, role: "Consultant", signerName: "Alex Rivera" },
+          { name: IRONVALE, role: "Client" },
+        ],
+        unresolvedSubjects: [],
+      }),
+    ).not.toContain(QUESTION);
     const added = applyIdentityClarificationAnswers({
       parties: [
         ...NORMALIZED_PARTIES,
@@ -328,6 +339,36 @@ describe("legal party identity clarification", () => {
     });
     expect(item?.question || "").not.toMatch(/Either Party/);
     expect(item).toBeNull();
+    expect(
+      identityClarificationMaterialItem({
+        intakeRaw: intake,
+        parsedParties: applied.parties,
+        additionalTerms: mergeUnresolvedIdentityIntoText("", [
+          { name: "Riley Chen", source: "extraction_only" },
+          { name: "Either Party", source: "customer_mentioned" },
+        ]),
+        body: paper,
+        unresolvedSubjects: [
+          { name: "Riley Chen", source: "extraction_only" },
+          { name: "Either Party", source: "customer_mentioned" },
+        ],
+      }),
+    ).toBeNull();
+    expect(
+      contentClarificationQuestions({
+        intake,
+        body: paper,
+        parsedParties: applied.parties,
+        additionalTerms: mergeUnresolvedIdentityIntoText("", [
+          { name: "Riley Chen", source: "extraction_only" },
+          { name: "Either Party", source: "customer_mentioned" },
+        ]),
+        unresolvedSubjects: [
+          { name: "Riley Chen", source: "extraction_only" },
+          { name: "Either Party", source: "customer_mentioned" },
+        ],
+      }).filter(isIdentityClarificationQuestion),
+    ).toEqual([]);
   });
 
   it("does not ask again for an individual already stated in customer input", () => {
