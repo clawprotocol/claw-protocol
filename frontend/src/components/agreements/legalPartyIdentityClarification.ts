@@ -665,6 +665,21 @@ function remapInvertedConsultantClientHeadings(doc: string): string {
   return `${prefix}${tail}`;
 }
 
+function clearStaleSignerNameFromOtherExecutionBlocks(doc: string, person: BindableParty): string {
+  const heading = displayRoleForParty(person).toUpperCase();
+  const witness = doc.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witness < 0) return doc;
+  const prefix = doc.slice(0, witness);
+  const blocks = doc.slice(witness).split(/(?=^[A-Z][A-Z\s]+:\s*$)/m);
+  const nameRe = new RegExp(`^(\\s*Name:\\s*)${escapeRe(person.name)}\\s*$`, "im");
+  const rewritten = blocks.map((block) => {
+    const first = block.split("\n").find((line) => line.trim()) || "";
+    const ownHeading = new RegExp(`^\\s*${escapeRe(heading)}\\s*:`, "i").test(first);
+    return ownHeading ? block : block.replace(nameRe, "$1__________________________");
+  });
+  return `${prefix}${rewritten.join("")}`;
+}
+
 function ensureIndividualExecutionBlock(doc: string, person: BindableParty): string {
   const role = displayRoleForParty(person);
   const heading = role.toUpperCase();
@@ -742,6 +757,7 @@ export function applyIdentityResolutionToAuthorizedPaper(
   doc = remapInvertedConsultantClientHeadings(doc);
   for (const person of individuals) {
     doc = ensureIndividualExecutionBlock(doc, person);
+    doc = clearStaleSignerNameFromOtherExecutionBlocks(doc, person);
   }
   return doc;
 }

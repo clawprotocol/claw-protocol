@@ -452,7 +452,7 @@ describe("legal party identity clarification", () => {
       "CLIENT:",
       HARBOR,
       "By: __________________________",
-      "Name: __________________________",
+      "Name: Alex Rivera",
       "Title: _________________________",
       "Date: _____________________________",
       "",
@@ -472,6 +472,7 @@ describe("legal party identity clarification", () => {
     expect(accepted).toMatch(/CLIENT:\s*\nIronvale Manufacturing Inc/);
     expect(accepted).toMatch(/ADVISOR:\s*\nAlex Rivera/);
     expect(accepted).not.toContain("Consultant's authorized signer is Alex Rivera");
+    expect(accepted).not.toMatch(/CLIENT:[\s\S]{0,160}Name: Alex Rivera/);
     expect(shouldPreserveApprovedAddedPartyExecutionTail(accepted, [HARBOR, IRONVALE, "Alex Rivera"])).toBe(
       true,
     );
