@@ -69,14 +69,8 @@ async function startFromIntake(page: import("@playwright/test").Page, intake: st
     }
   }, { timeout: 120_000 });
   await submitIntake(page, intake);
-  let parseBody: { draft?: { parties?: Array<{ name?: string }> } };
-  try {
-    parseBody = (await (await parseResponse).json()) as { draft?: { parties?: Array<{ name?: string }> } };
-  } catch {
-    const agreementId = await waitForServerAgreementId(page, capturedIds);
-    const saved = await fetchOwnerIdentityState(page, agreementId);
-    parseBody = { draft: { parties: saved.parties } };
-  }
+  const parsed = await parseResponse;
+  const parseBody = (await parsed.json()) as { draft?: { parties?: Array<{ name?: string }> } };
   writeQualityEvalArtifact("parse-response.json", JSON.stringify(parseBody, null, 2), "identity");
   const parsedNames = (parseBody.draft?.parties || []).map((row) => String(row.name || ""));
   expect(parsedNames).toHaveLength(2);
