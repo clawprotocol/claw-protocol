@@ -28,14 +28,14 @@ def test_binds_six_row_premium_parse_to_two_legal_parties() -> None:
     assert out["clarification_question"] is None
 
 
-def test_asks_when_unbound_human_is_not_an_individual_party() -> None:
+def test_asks_when_customer_mentions_an_unbound_human() -> None:
     out = bind_representatives_to_legal_parties(
         [
             {"name": "Harbor Peak Analytics LLC", "role": "Consultant"},
             {"name": "Ironvale Manufacturing Inc.", "role": "Client"},
             {"name": "Alex Rivera", "role": "party"},
         ],
-        "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client).",
+        "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Alex Rivera is involved.",
     )
     assert [p["name"] for p in out["parties"]] == [
         "Harbor Peak Analytics LLC",
@@ -43,6 +43,23 @@ def test_asks_when_unbound_human_is_not_an_individual_party() -> None:
     ]
     assert any(p["name"] == "Alex Rivera" for p in out["unresolved_extraction_rows"])
     assert out["clarification_question"] and "Alex Rivera" in out["clarification_question"]
+
+
+def test_does_not_ask_about_extraction_only_invented_person() -> None:
+    out = bind_representatives_to_legal_parties(
+        [
+            {"name": "Harbor Peak Analytics LLC", "role": "Consultant"},
+            {"name": "Ironvale Manufacturing Inc.", "role": "Client"},
+            {"name": "Riley Chen", "role": "party"},
+        ],
+        "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client).",
+    )
+    assert [p["name"] for p in out["parties"]] == [
+        "Harbor Peak Analytics LLC",
+        "Ironvale Manufacturing Inc.",
+    ]
+    assert any(p["name"] == "Riley Chen" for p in out["unresolved_extraction_rows"])
+    assert out["clarification_question"] is None
 
 
 def test_keeps_individual_advisor_and_does_not_steal_their_email_by_domain() -> None:
@@ -140,7 +157,7 @@ def test_parse_extract_surfaces_identity_clarification() -> None:
                 {"name": "Alex Rivera", "role": "party"},
             ],
         },
-        "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client).",
+        "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Alex Rivera is involved.",
     )
     assert [p.name for p in draft.parties] == [
         "Harbor Peak Analytics LLC",

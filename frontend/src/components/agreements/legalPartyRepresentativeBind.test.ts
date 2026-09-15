@@ -97,7 +97,7 @@ describe("bindRepresentativesToLegalParties", () => {
         { name: "Ironvale Manufacturing Inc.", role: "Client" },
         { name: "Alex Rivera", role: "party" },
       ],
-      "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Scope is AI workflow implementation.",
+      "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Alex Rivera is involved.",
     );
     expect(result.parties.map((p) => p.name)).toEqual([
       "Harbor Peak Analytics LLC",
@@ -105,6 +105,23 @@ describe("bindRepresentativesToLegalParties", () => {
     ]);
     expect(result.unresolvedExtractionRows.map((p) => p.name)).toEqual(["Alex Rivera"]);
     expect(result.clarificationQuestion || "").toMatch(/Alex Rivera/);
+  });
+
+  it("does not ask the customer to confirm an extraction-only invented person", () => {
+    const result = bindRepresentativesToLegalParties(
+      [
+        { name: "Harbor Peak Analytics LLC", role: "Consultant" },
+        { name: "Ironvale Manufacturing Inc.", role: "Client" },
+        { name: "Riley Chen", role: "party" },
+      ],
+      "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client).",
+    );
+    expect(result.parties.map((p) => p.name)).toEqual([
+      "Harbor Peak Analytics LLC",
+      "Ironvale Manufacturing Inc.",
+    ]);
+    expect(result.unresolvedExtractionRows.map((p) => p.name)).toEqual(["Riley Chen"]);
+    expect(result.clarificationQuestion).toBeNull();
   });
 
   it("keeps an individual Advisor and does not move their email by domain resemblance", () => {

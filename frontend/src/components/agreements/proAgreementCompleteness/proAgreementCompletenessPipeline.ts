@@ -57,6 +57,7 @@ export function applyProAgreementCompletenessPipeline(
     serverMissing: ctx.serverMissingMaterial,
     parsedParties: ctx.parsedParties,
     additionalTerms: ctx.additionalTerms,
+    unresolvedSubjects: ctx.unresolvedSubjects,
   });
 
   const structuralOk =

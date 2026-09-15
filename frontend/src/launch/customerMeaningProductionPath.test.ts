@@ -57,6 +57,11 @@ import {
   synthesizePremiumScopeAndOperativeFields,
 } from "../components/agreements/premiumDraftTransform";
 import type { ParsedDraftShape } from "../components/agreements/intakeSmartDefaults";
+import {
+  applyIdentityClarificationAnswers,
+  canonicalizeIdentityAnswer,
+  identityClarificationResolved,
+} from "../components/agreements/legalPartyIdentityClarification";
 
 const HARBOR_INTAKE = CORE_PAID_JOURNEY_FILLED_INTAKE;
 const QUALITY_EVAL_SAAS =
@@ -382,6 +387,33 @@ describe("Harbor 20260915 live-failure local correction", () => {
     const ask = dateMeaningMaterialItem({ intakeRaw: HARBOR_LIVE_20260915_INTAKE, body: "" });
     expect(ask?.canProceedWithoutAnswer).toBe(true);
     expect(ask?.question).toMatch(/October 1, 2026 service start/);
+  });
+
+  it("adds a customer-mentioned individual from the answer after normalize removed the extraction row", () => {
+    const intake =
+      "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Alex Rivera is involved.";
+    const normalized = [
+      { name: "Harbor Peak Analytics LLC", role: "Consultant" },
+      { name: "Ironvale Manufacturing Inc.", role: "Client" },
+    ];
+    const answer = "Alex Rivera is contracting as their own legal party (Advisor).";
+    const applied = applyIdentityClarificationAnswers({
+      parties: normalized,
+      intake,
+      answers: answer,
+    });
+    const persisted = structuredClone(applied.parties);
+    const reopened = structuredClone(persisted);
+    expect(persisted.map((party) => party.name)).toEqual([
+      "Harbor Peak Analytics LLC",
+      "Ironvale Manufacturing Inc.",
+      "Alex Rivera",
+    ]);
+    expect(reopened).toEqual(persisted);
+    expect(canonicalizeIdentityAnswer("Alex Rivera is not signing for Harbor Peak Analytics LLC.")).toBeNull();
+    expect(
+      identityClarificationResolved("Alex Rivera is not signing for Harbor Peak Analytics LLC.", applied.clarificationQuestion || "Is Alex Rivera signing for one of the named companies, or contracting as their own legal party?"),
+    ).toBe(false);
   });
 
   it("retains three- and four-party who-owes-what controls", () => {

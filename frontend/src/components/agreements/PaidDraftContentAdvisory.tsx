@@ -18,6 +18,12 @@ import {
   isDateMeaningQuestion,
   isMilestonePayerQuestion,
 } from "./proAgreementCompleteness";
+import {
+  isIdentityClarificationQuestion,
+  serializeUnresolvedIdentity,
+  type UnresolvedIdentitySubject,
+} from "./legalPartyIdentityClarification";
+import type { BindableParty } from "./legalPartyRepresentativeBind";
 
 export function contentClarificationQuestions(args: {
   intake: string;
@@ -25,13 +31,25 @@ export function contentClarificationQuestions(args: {
   answers?: string;
   body: string;
   serverMissing?: readonly string[];
+  parsedParties?: readonly BindableParty[] | null;
+  additionalTerms?: string | null;
+  unresolvedSubjects?: readonly UnresolvedIdentitySubject[] | null;
 }): string[] {
   const applied = (args.appliedAnswers || args.answers || "").trim();
+  const additionalTerms = [
+    args.additionalTerms || "",
+    args.unresolvedSubjects?.length ? serializeUnresolvedIdentity(args.unresolvedSubjects) : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
   const items = buildMaterialMissingItems({
     intakeRaw: args.intake,
     userGapAnswers: applied,
     body: args.body,
     serverMissing: args.serverMissing,
+    parsedParties: args.parsedParties,
+    additionalTerms,
+    unresolvedSubjects: args.unresolvedSubjects,
   });
   return items
     .map((item) => item.question)
@@ -39,7 +57,8 @@ export function contentClarificationQuestions(args: {
       (question) =>
         isDateMeaningQuestion(question) ||
         isCompletionCriteriaQuestion(question) ||
-        isMilestonePayerQuestion(question),
+        isMilestonePayerQuestion(question) ||
+        isIdentityClarificationQuestion(question),
     );
 }
 
@@ -49,6 +68,9 @@ export function PaidDraftContentAdvisory(args: {
   intakeText?: string | null;
   body: string;
   accepted?: boolean;
+  parsedParties?: readonly BindableParty[] | null;
+  additionalTerms?: string | null;
+  unresolvedSubjects?: readonly UnresolvedIdentitySubject[] | null;
 }): ReactElement | null {
   const [, setTick] = useState(0);
   const [draft, setDraft] = useState("");
@@ -69,7 +91,9 @@ export function PaidDraftContentAdvisory(args: {
     revisionId: revisionId || undefined,
   });
   const stored = readPaymentClarification(scope);
-  const intake = (stored?.intake || args.intakeText || "").trim();
+  const storedIntake = (stored?.intake || "").trim();
+  const propIntake = (args.intakeText || "").trim();
+  const intake = storedIntake.length >= propIntake.length ? storedIntake : propIntake;
   const storedApplied =
     stored?.revisionId && stored.revisionId === revisionId ? (stored.appliedAnswers || "").trim() : "";
   const appliedAnswers =
@@ -88,8 +112,11 @@ export function PaidDraftContentAdvisory(args: {
         intake: intake || args.body || "",
         appliedAnswers,
         body: args.body,
+        parsedParties: args.parsedParties,
+        additionalTerms: args.additionalTerms,
+        unresolvedSubjects: args.unresolvedSubjects,
       }),
-    [intake, appliedAnswers, args.body],
+    [intake, appliedAnswers, args.body, args.parsedParties, args.additionalTerms, args.unresolvedSubjects],
   );
 
   useEffect(() => {
@@ -104,6 +131,7 @@ export function PaidDraftContentAdvisory(args: {
   const dateQuestions = questions.filter((question) => isDateMeaningQuestion(question));
   const completionQuestions = questions.filter((question) => isCompletionCriteriaQuestion(question));
   const payerQuestions = questions.filter((question) => isMilestonePayerQuestion(question));
+  const identityQuestions = questions.filter((question) => isIdentityClarificationQuestion(question));
 
   return (
     <section
@@ -133,6 +161,11 @@ export function PaidDraftContentAdvisory(args: {
         ))}
         {payerQuestions.map((question) => (
           <li key={question} data-testid="milestone-payer-clarification-question">
+            {question}
+          </li>
+        ))}
+        {identityQuestions.map((question) => (
+          <li key={question} data-testid="identity-clarification-question">
             {question}
           </li>
         ))}

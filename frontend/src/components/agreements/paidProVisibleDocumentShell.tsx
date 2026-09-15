@@ -402,6 +402,9 @@ export function PaidProVisibleDocumentShell({
         revisionId={authorityHash || undefined}
         intakeText={displayContext?.intakeText}
         body={renderPlain || authoritativePlain}
+        parsedParties={displayContext?.draft?.parties}
+        additionalTerms={displayContext?.draft?.additional_terms}
+        unresolvedSubjects={displayContext?.draft?.unresolvedIdentitySubjects}
       />
     <div
       ref={shellRef}

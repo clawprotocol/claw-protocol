@@ -1158,7 +1158,14 @@ import {
 import {
   appendIdentityQuestionToMaterialAsks,
   applyIdentityClarificationAnswers,
+  applyIdentityResolutionToAuthorizedPaper,
+  classifyUnresolvedIdentitySubjects,
+  customerMentionedUnresolvedFromIntake,
+  mergeUnresolvedIdentityIntoText,
+  parseUnresolvedIdentity,
   persistableIdentityResolution,
+  personNamedInIdentityQuestion,
+  type UnresolvedIdentitySubject,
 } from "./legalPartyIdentityClarification";
 import { getOrInitSessionAgreementGenerationId, shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
@@ -5797,15 +5804,44 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const at = String(o.additional_terms).trim();
       if (at) out.additional_terms = at;
     }
+    const persistedUnresolved: UnresolvedIdentitySubject[] = Array.isArray(o.unresolved_identity_v1)
+      ? (o.unresolved_identity_v1 as Array<{ name?: string; source?: string; email?: string; roleHint?: string }>)
+          .map((row) => {
+            const next: UnresolvedIdentitySubject = {
+              name: String(row?.name || "").trim(),
+              source: row?.source === "customer_mentioned" ? "customer_mentioned" : "extraction_only",
+            };
+            if (row?.email) next.email = String(row.email);
+            if (row?.roleHint) next.roleHint = String(row.roleHint);
+            return next;
+          })
+          .filter((row) => row.name)
+      : parseUnresolvedIdentity(out.additional_terms);
+    const identityApplied = applyIdentityClarificationAnswers({
+      parties: boundParties,
+      intake: intakeForBind,
+      unresolvedSubjects: [
+        ...persistedUnresolved,
+        ...classifyUnresolvedIdentitySubjects(boundParse.unresolvedExtractionRows, intakeForBind),
+        ...customerMentionedUnresolvedFromIntake(intakeForBind, boundParties),
+      ],
+    });
     const identityAsks = appendIdentityQuestionToMaterialAsks(
       Array.isArray(o.material_asks) ? o.material_asks.map((x) => String(x)) : [],
-      boundParse.clarificationQuestion,
+      identityApplied.clarificationQuestion,
     );
     if (identityAsks.length) out.material_asks = identityAsks;
+    if (identityApplied.unresolvedSubjects.length) {
+      out.unresolvedIdentitySubjects = identityApplied.unresolvedSubjects;
+      out.additional_terms = mergeUnresolvedIdentityIntoText(out.additional_terms, identityApplied.unresolvedSubjects);
+    }
     const purposeTrim = (out.purpose || "").trim();
     const addTrim = (out.additional_terms || "").trim();
     if (purposeTrim.includes(FULL_DRAFT_EXPANSION_MARKER) && !addTrim.includes(FULL_DRAFT_EXPANSION_MARKER)) {
-      out.additional_terms = FULL_DRAFT_EXPANSION_MARKER;
+      out.additional_terms = mergeUnresolvedIdentityIntoText(
+        FULL_DRAFT_EXPANSION_MARKER,
+        out.unresolvedIdentitySubjects || [],
+      );
     }
     return preserveInstallmentPaymentTermsOnDraft({ ...out, agreement_family: family }, intakeFallback);
   }
@@ -6026,6 +6062,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       additional_terms: _at,
       agreement_family: _fam,
       material_asks: _ma,
+      unresolvedIdentitySubjects: _unresolvedIdentity,
       premium_full_document_text: _pfd,
       premium_server_full_document_text: _psf,
       premium_server_repair_document_text: _psr,
@@ -6063,6 +6100,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       duration: rest.duration ?? null,
       due_date: rest.due_date ?? null,
       effective_date: rest.effective_date ?? null,
+      ...(_unresolvedIdentity?.length
+        ? {
+            unresolved_identity_v1: _unresolvedIdentity.map((row) => ({
+              name: row.name,
+              source: row.source,
+              ...(row.email ? { email: row.email } : {}),
+              ...(row.roleHint ? { roleHint: row.roleHint } : {}),
+            })),
+          }
+        : {}),
     };
     const draftUrl = resolvePaidContinuePersistDraftUrl();
     const draftHeaders = clawAgreementHeaders({
@@ -18244,6 +18291,83 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const persistConfirmedIdentityIntoLiveDraft = React.useCallback(
+    async (args: {
+      agreementId: string;
+      parties: ParsedDraftShape["parties"];
+      unresolvedSubjects: UnresolvedIdentitySubject[];
+      additionalTerms?: string | null;
+    }) => {
+      const nextParties = (args.parties || [])
+        .filter((party) => {
+          const name = String(party.name || "").trim();
+          return name && !/^\d+\s+/.test(name);
+        })
+        .map((party) => ({
+          name: party.name,
+          role: party.role,
+          ...(party.email ? { email: party.email } : {}),
+          ...(party.signerName ? { signerName: party.signerName } : {}),
+          ...(party.signerTitle ? { signerTitle: party.signerTitle } : {}),
+        }));
+      await postAgreementFieldUpdate(args.agreementId, "parties", nextParties);
+      await postAgreementFieldUpdate(args.agreementId, "unresolved_identity_v1", args.unresolvedSubjects);
+      const nextDraft = {
+        ...(draftSnapshotRef.current || {}),
+        parties: nextParties,
+        unresolvedIdentitySubjects: args.unresolvedSubjects,
+        additional_terms: args.additionalTerms ?? draftSnapshotRef.current?.additional_terms,
+      } as ParsedDraftShape;
+      draftSnapshotRef.current = nextDraft;
+      setDraft((prev) =>
+        prev
+          ? {
+              ...prev,
+              parties: nextParties,
+              unresolvedIdentitySubjects: args.unresolvedSubjects,
+              additional_terms: args.additionalTerms ?? prev.additional_terms,
+            }
+          : nextDraft,
+      );
+      writeCreateReviewDraftSnapshot(nextDraft);
+      const persistedUi = liveSignerUiFieldsFromDraftParties(nextParties);
+      if (persistedUi.legal[0]) setRecipient1Name(persistedUi.legal[0]!);
+      if (persistedUi.legal[1]) setRecipient2Name(persistedUi.legal[1]!);
+      if (persistedUi.emails[0]) setRecipient1Email((prev) => prev.trim() || persistedUi.emails[0]!);
+      if (persistedUi.emails[1]) setRecipient2Email((prev) => prev.trim() || persistedUi.emails[1]!);
+      if (persistedUi.legal.length > 2) {
+        setExtraPartyLegalNames((prev) => {
+          const next = prev.slice();
+          while (next.length < persistedUi.legal.length - 2) next.push("");
+          persistedUi.legal.slice(2).forEach((name, idx) => {
+            if (name && !(next[idx] || "").trim()) next[idx] = name;
+          });
+          return next;
+        });
+      }
+      if (persistedUi.emails.length > 2) {
+        setExtraPartyReviewEmails((prev) => {
+          const next = prev.slice();
+          while (next.length < persistedUi.emails.length - 2) next.push("");
+          persistedUi.emails.slice(2).forEach((email, idx) => {
+            if (email && !(next[idx] || "").trim()) next[idx] = email;
+          });
+          return next;
+        });
+      }
+      setPartySignerNames((prev) => {
+        const next = prev.slice();
+        while (next.length < nextParties.length) next.push("");
+        persistedUi.names.forEach((name, idx) => {
+          if (name && !(next[idx] || "").trim()) next[idx] = name;
+        });
+        return next;
+      });
+      setSignerSetupUiPartyCount(Math.max(nextParties.length, 2));
+    },
+    [],
+  );
+
   useEffect(() => {
     runPaymentClarificationRevisionRef.current = async (
       userGapAnswers: string,
@@ -18306,21 +18430,41 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         parties: structured.parties || [],
         intake: [intakeText, structured.additional_terms || ""].filter(Boolean).join("\n"),
         answers: userGapAnswers,
+        unresolvedSubjects: structured.unresolvedIdentitySubjects,
       });
       const identityLines = String(userGapAnswers || "")
         .split(/\n+/)
-        .map((line) => persistableIdentityResolution(line))
+        .map((line) =>
+          persistableIdentityResolution(line, {
+            knownEntities: (structured?.parties || []).map((party) => party.name),
+          }),
+        )
         .filter((line): line is string => Boolean(line));
       structured = {
         ...structured,
         parties: applyExplicitIntakeRolesToParties(identityApplied.parties, intakeText),
-        additional_terms: identityLines.length
-          ? [structured.additional_terms || "", ...identityLines].filter(Boolean).join("\n").trim()
-          : structured.additional_terms,
+        unresolvedIdentitySubjects: identityApplied.unresolvedSubjects,
+        additional_terms: mergeUnresolvedIdentityIntoText(
+          identityLines.length
+            ? [structured.additional_terms || "", ...identityLines].filter(Boolean).join("\n").trim()
+            : structured.additional_terms,
+          identityApplied.unresolvedSubjects,
+        ),
         material_asks: (structured.material_asks || []).filter(
           (ask) => !identityApplied.clarificationQuestion || ask !== identityApplied.clarificationQuestion,
         ),
       };
+      if (identityApplied.clarificationQuestion && !identityLines.length) {
+        const person = personNamedInIdentityQuestion(identityApplied.clarificationQuestion);
+        if (person && new RegExp(person.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(userGapAnswers || "")) {
+          await postAgreementFieldUpdate(
+            captured.agreementId,
+            "unresolved_identity_v1",
+            identityApplied.unresolvedSubjects,
+          );
+          throw new Error("identity_clarification_answer_not_specific");
+        }
+      }
       const authorizedPaper = (
         getPaidProSourceOfTruthText().trim() ||
         selectVerifiedPaidReviewPaper({ agreementId: captured.agreementId })?.plain ||
@@ -18332,10 +18476,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           intakeText,
           userGapAnswers,
         );
-        const patched = applySuppliedContentFactsToAuthorizedPaper(
-          afterPayment,
-          intakeText,
-          userGapAnswers,
+        const patched = applyIdentityResolutionToAuthorizedPaper(
+          applySuppliedContentFactsToAuthorizedPaper(
+            afterPayment,
+            intakeText,
+            userGapAnswers,
+          ),
+          structured.parties || [],
         ).trim();
         if (patched.length >= PAID_PRO_AUTHORITY_MIN_LEN && patched !== authorizedPaper) {
           const committed = await commitPaidProUserApprovedRevision(
@@ -18378,6 +18525,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             newRevision,
             captured.requestId,
           );
+          await persistConfirmedIdentityIntoLiveDraft({
+            agreementId: captured.agreementId,
+            parties: structured.parties || [],
+            unresolvedSubjects: identityApplied.unresolvedSubjects,
+            additionalTerms: structured.additional_terms,
+          });
           if (
             samePaymentApplyOwner(captured, {
               userId: resolveCurrentUser().id,
@@ -18478,6 +18631,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         newRevision,
         captured.requestId,
       );
+      await persistConfirmedIdentityIntoLiveDraft({
+        agreementId: captured.agreementId,
+        parties: structured.parties || [],
+        unresolvedSubjects: identityApplied.unresolvedSubjects,
+        additionalTerms: structured.additional_terms,
+      });
       if (
         samePaymentApplyOwner(captured, {
           userId: resolveCurrentUser().id,
@@ -18488,7 +18647,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumLastGapAnswersRef.current = userGapAnswers;
       }
     };
-  }, [commitPaidProUserApprovedRevision, simpleProductFlow, intakePartyRoleLabels]);
+  }, [commitPaidProUserApprovedRevision, persistConfirmedIdentityIntoLiveDraft, simpleProductFlow, intakePartyRoleLabels]);
 
   const openPaidProDraftCardEditor = React.useCallback(() => {
     setPaidProCardAiInstruction("");
@@ -21529,12 +21688,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const paidProFirstReviewDisplayContext = useMemo(
     () => {
       const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
-      const resolvedIntakeText = (
-        intakeCombined ||
-        currentPremiumMergedIntakeKey ||
-        checkoutBackSnap?.intakeText ||
-        ""
-      ).trim();
+      const resolvedIntakeText = pickLongestPremiumIntakeCorpus(
+        20,
+        intakeCombined,
+        currentPremiumMergedIntakeKey,
+        checkoutBackSnap?.intakeText,
+      );
       const draftBase = (reviewDraft ?? draft) ?? checkoutBackSnap?.draft ?? null;
       const repairedDraft =
         draftBase && resolvedIntakeText.length >= 20
@@ -38202,6 +38361,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             intakeCombined ||
                                             ""
                                           ).trim()}
+                                          parsedParties={(reviewDraft ?? draft)?.parties}
+                                          additionalTerms={(reviewDraft ?? draft)?.additional_terms}
+                                          unresolvedSubjects={(reviewDraft ?? draft)?.unresolvedIdentitySubjects}
                                           agreementHtml={simpleProFinalReviewHtml}
                                           paidReviewPlain={
                                             simpleProFinalReviewDisplayPlain.trim() ||

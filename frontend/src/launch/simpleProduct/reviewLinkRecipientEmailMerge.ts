@@ -18,6 +18,30 @@ function normalizeRole(role: string | undefined): string {
   return String(role ?? "").trim().toLowerCase();
 }
 
+function normalizeLegalPartyKey(name: string | undefined | null): string {
+  return String(name || "")
+    .replace(/\.$/, "")
+    .replace(/^\d+\s+/, "")
+    .trim()
+    .toLowerCase();
+}
+
+/** Keep confirmed legal parties that exist on only one of the two drafts. */
+export function unionNamedLegalParties(
+  primary: readonly AgreementParty[],
+  secondary: readonly AgreementParty[] = [],
+): AgreementParty[] {
+  const out = primary.map((party) => ({ ...party }));
+  const seen = new Set(out.map((party) => normalizeLegalPartyKey(party.name)).filter(Boolean));
+  for (const party of secondary) {
+    const key = normalizeLegalPartyKey(party.name);
+    if (!key || seen.has(key)) continue;
+    out.push({ ...party });
+    seen.add(key);
+  }
+  return out;
+}
+
 /**
  * Row treated as agreement owner/sender for review-link counterparty math.
  * Prefer the first explicit `owner` role; if none, assume index 0 (create-flow convention).
@@ -156,6 +180,7 @@ export function mergeReviewLinkRecipientEmailsOntoHydratedDraft(
   if (handoff) {
     next = mergeHandoffOntoParties(next, handoff);
   }
+  next = unionNamedLegalParties(next, primedList);
 
   return { ...fetchedDraft, parties: next };
 }

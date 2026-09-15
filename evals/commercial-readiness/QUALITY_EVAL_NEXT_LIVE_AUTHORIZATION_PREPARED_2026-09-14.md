@@ -15,14 +15,15 @@ Campaign facts: `RELEASE_SCOPE_QUALIFICATION_CAMPAIGN_2026-09-14.md` and
 
 Matching no-spend evidence for a later live run of the **same product files**:
 
-- Harbor six-row parse replay persist (current tree): `quality-eval-offline-journey/20260915T153058Z-80080`. Drafting was the labeled acceptance stub, **not** the withheld 20260915 rejected corpus. StructuredClone customer-meaning coverage is function-level only.
+- Harbor six-row parse replay persist: `quality-eval-offline-journey/20260915T153058Z-80080`. Drafting was the labeled acceptance stub, **not** the withheld 20260915 rejected corpus. StructuredClone coverage is function-level only.
+- Sequential SaaS rematch: `quality-eval-offline-journey/20260915T172628Z-92994`.
 - Three-party Oklahoma review/sign/final: `quality-eval-offline-journey/20260915T153707Z-81175`.
 - Four-party Massachusetts review/sign/final: `quality-eval-offline-journey/20260915T154454Z-81794`.
-- Official stub on this tree: `4742fa2c76160fa02f2aaa4319c7c422337c84ee+src-2b1586295617893823fa43b79cd1a406b58ab8ae+run-20260915T154940Z-82412` (`gate_green=true`). Historical `src-97cb23bd` / `src-1ddff56f95ef` / `src-60a08067992d` do not certify these official hashed files.
-- Older Harbor+SaaS offline `20260915T032105Z-61873` is preserved and is not hash-identical to this candidate.
+- Identity-resolution production journey: `quality-eval-offline-journey/20260915T172424Z-92600` (desktop; identity-parse-replay; representative / individual / negative / extraction-only). Added-party sign/final after review is **not** closed; later failed signing dirs are preserved and are not this PASS.
+- Official stub `src-2b158629` / `run-20260915T154940Z-82412` **does not certify** this identity-changed hash list. Rematch official on the checkpoint tree before claiming A1–B3 on this candidate.
 
-Campaign, identity-bind, and register files change quality-eval `source_files_sha256`.  
-Before any later `--live`, rematch `--offline-journey --case all` on the checkpoint tree and use **that** PASS dir. Official fingerprint `src-2b158629` maps the current official hashed product files unless those files change. This local correction is **not** a new live grant.
+Campaign, identity-bind, review-email role, and register files change quality-eval `source_files_sha256`.  
+Before any later `--live`, rematch `--offline-journey --case all` on the checkpoint tree and use **that** PASS dir. This local correction is **not** a new live grant.
 
 ## Ledger (official; not reset)
 
@@ -69,9 +70,11 @@ Failed live Harbor sample: `quality-eval-live/20260914T195201Z-5037`. SaaS was n
 
 Offline correction `20260914T220448Z-23971` made **no provider calls**.
 
-## Proposed new increment (not created, not activated)
+## Proposed successor increment (not created, not activated)
 
-Preserve this ledger. No replacement, no counter reset, no `LIMITS` raise in `quality_eval_budget.py`.
+The 2026-09-15 four-sample grant on this filename was **executed once** and **stopped after Harbor 503**. Leftover inventory from that grant is **not** a new authorization.
+
+Prepare the **same four-sample framework** against the **current ledger**. Preserve this ledger. No replacement, no counter reset, no `LIMITS` raise in `quality_eval_budget.py`. Local identity-resolution work on this tree is **not** a live grant and does **not** spend.
 
 Four filled independent samples through the current runner (`--case release_scope`). Sparse interview stays offline-only. Harbor date/completion Apply remains local persist on this candidate — not `call_legal_llm`. After the four samples exist, reopen the **same** saved agreements in fresh desktop and mobile contexts **without regeneration**.
 
@@ -95,8 +98,9 @@ These counts match the authentic paid Create path: one basic parse, one premium 
 | `clarification` | **4** (conditional) | one `missing_facts` per sample if production calls it; Harbor date/completion Apply is still local persist |
 | `revision` / `negotiation` / `bootstrap_one_pager` / excluded purposes | **0** | leftover one-pager and excluded routes remain unspendable |
 
-**Total attempt ceiling for this increment:** 15 existing + **20** new = **35**.  
-**Maximum additional reservation:** **$2.50** / **5,000,000** units above the current reserved **$0.970711**. Do not refund prior reservations. Do not spend the unused $7.03 without this cap.
+**Current ledger baseline (do not reset):** 19 attempts / 2,659,230 units / **$1.329615** reserved.  
+**Total attempt ceiling for this successor increment:** 19 existing + **20** new = **39**.  
+**Maximum additional reservation:** **$2.50** / **5,000,000** units above the current reserved **$1.329615**. Do not refund prior reservations. Do not spend the unused room under the $8.00 ceiling without this cap. Leftover slots from the executed 2026-09-15 grant are **not** reusable without a new sidecar.
 
 `canProceedWithoutAnswer: true` stays unchanged. Official I2 stays party-name `agreement-intake-clarification`.
 
@@ -112,12 +116,12 @@ Create a **new** authorized copy; do not flip `quality-eval-increment-20260914.i
     "max_additional_reserved_usd": 2.5
   },
   "ledger_required_basename": "quality-eval-approved-20260913.sqlite3",
-  "approval_baseline_attempts": 15,
-  "approval_baseline_reserved_units": 1941421,
-  "approval_baseline_reserved_usd": 0.970711,
+  "approval_baseline_attempts": 19,
+  "approval_baseline_reserved_units": 2659230,
+  "approval_baseline_reserved_usd": 1.329615,
   "max_additional_reserved_usd": 2.5,
   "max_additional_reserved_units": 5000000,
-  "global_attempt_cap_when_active": 35,
+  "global_attempt_cap_when_active": 39,
   "additional_allowance": {
     "primary": 4,
     "bootstrap_parse": 4,
@@ -154,7 +158,7 @@ Stop, keep evidence, and write a revised authorization (do not improvise spend) 
 
 1. A call would use an excluded purpose (`free_one_pager`, `explicit_revision`, `structured_revision`, `recipient_negotiation`, `premium_review`, `finalize_audit`, `review_route`).
 2. A sample would need a second repair, a second clarification, or any extra primary/parse beyond the one-each inventory.
-3. Global attempts would exceed **35**, or additional reserved would exceed **$2.50**.
+3. Global attempts would exceed **39**, or additional reserved would exceed **$2.50** above **$1.329615**.
 4. Ledger `halted` becomes true, or the model is not `gpt-5.4` for premium / `gpt-4o-mini` for bootstrap.
 5. Preflight or offline-journey `source_files_sha256` does not match the live tree.
 6. The authentic production journey requires more than this inventory. Do **not** shorten customer inputs/outputs, skip Apply, skip repair, or downgrade models to finish cheaper.

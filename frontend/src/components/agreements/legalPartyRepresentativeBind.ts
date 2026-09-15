@@ -352,9 +352,12 @@ export function bindRepresentativesToLegalParties(
   );
 
   const unresolvedHumans = unresolved.filter((row) => isLikelyHumanSignerName(row.name));
+  const askable = unresolvedHumans.filter((row) =>
+    new RegExp(`\\b${row.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(intake),
+  );
   const clarificationQuestion =
-    unresolvedHumans.length > 0 && entities.length >= 2
-      ? `Is ${unresolvedHumans[0]!.name} signing for one of the named companies, or contracting as their own legal party?`
+    askable.length > 0 && entities.length >= 2
+      ? `Is ${askable[0]!.name} signing for one of the named companies, or contracting as their own legal party?`
       : null;
 
   return {

@@ -70,6 +70,13 @@ export type ParsedDraftShape = {
   uploaded_source_document_text?: string | null;
   /** Premium parse extract: grounded bullets; merged into additional_terms for review. Omitted from POST /draft. */
   material_asks?: string[];
+  /** Unresolved identity subjects kept off the confirmed party list. */
+  unresolvedIdentitySubjects?: {
+    name: string;
+    source: "customer_mentioned" | "extraction_only";
+    email?: string;
+    roleHint?: string;
+  }[];
   /** Operating-agreement shell: company display name when known. */
   llc_company_name?: string | null;
   management_structure?: string | null;

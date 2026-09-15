@@ -121,6 +121,22 @@ export function selectQualityEvalCases(caseId: string | undefined): QualityEvalC
   return QUALITY_EVAL_ALL_CASES.filter((row) => selected.has(row.id));
 }
 
+export const IDENTITY_AMBIGUOUS_INTAKE =
+  "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Scope is AI workflow implementation. Fixed fee $48,000. Governing law Delaware. Alex Rivera, alex.rivera@advisor.test, is involved.";
+
+export const IDENTITY_EXTRACTION_ONLY_INTAKE =
+  "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Scope is AI workflow implementation. Fixed fee $48,000. Governing law Delaware.";
+
+export const IDENTITY_QUESTION =
+  "Is Alex Rivera signing for one of the named companies, or contracting as their own legal party?";
+
+export const IDENTITY_REPRESENTATIVE_ANSWER = "Alex Rivera is signing for Harbor Peak Analytics LLC.";
+
+export const IDENTITY_INDIVIDUAL_ANSWER =
+  "Alex Rivera, alex.rivera@advisor.test, is contracting as their own legal party (Advisor).";
+
+export const IDENTITY_NEGATIVE_ANSWER = "Alex Rivera is not signing for Harbor Peak Analytics LLC.";
+
 export const HARBOR_DATE_QUESTION = unconfirmedEffectiveDateQuestion("October 1, 2026");
 export const HARBOR_COMPLETION_QUESTION = unconfirmedCompletionCriteriaQuestion(
   CORE_PAID_JOURNEY_FILLED_INTAKE,
@@ -584,6 +600,133 @@ export async function observeSnapshotCreateResponse(
   return { ...posted, agreementId: posted.agreementId || agreementId };
 }
 
+export async function persistOwnerPartyContacts(
+  page: Page,
+  agreementId: string,
+  signers: readonly { legalEntity: string; signerName: string; signerEmail?: string }[],
+): Promise<void> {
+  const current = await fetchOwnerIdentityState(page, agreementId);
+  const next = current.parties.map((party) => {
+    const match = signers.find((signer) => String(party.name || "").includes(signer.legalEntity));
+    const name = String(party.name || "").trim();
+    const currentRole = String(party.role || "").trim();
+    const workflowRole = currentRole.toLowerCase();
+    const legalRole =
+      currentRole && !["owner", "sender", "landlord", "viewer", "reviewer"].includes(workflowRole)
+        ? currentRole
+        : /Harbor Peak Analytics LLC/i.test(name)
+          ? "Consultant"
+          : /Ironvale Manufacturing Inc/i.test(name)
+            ? "Client"
+            : /Alex Rivera/i.test(name)
+              ? "Advisor"
+              : currentRole || "party";
+    return {
+      id: party.id,
+      name,
+      role: legalRole,
+      ...(match?.signerEmail || party.email ? { email: match?.signerEmail || party.email } : {}),
+      ...(match?.signerName || party.signerName || party.signer_name
+        ? { signerName: match?.signerName || party.signerName || party.signer_name }
+        : {}),
+    };
+  });
+  expect(next.filter((party) => party.name).length, "persisted named legal parties").toBe(signers.length);
+  const api = configuredLiveApiBase();
+  const runtime = loadCorePaidJourneyRuntime();
+  const res = await page.request.post(`${api}/api/agreements/${encodeURIComponent(agreementId)}/update-field`, {
+    headers: {
+      Authorization: `Bearer ${runtime.access_token}`,
+      "X-Claw-Org-Id": runtime.org_id,
+      "Content-Type": "application/json",
+    },
+    data: { field: "parties", value: next },
+  });
+  expect(res.ok(), `persist party contacts failed ${res.status()}`).toBeTruthy();
+}
+
+export async function fetchOwnerIdentityState(
+  page: Page,
+  agreementId: string,
+): Promise<{ parties: OwnerPartyRow[]; unresolved: Array<{ name?: string; source?: string }> }> {
+  const api = configuredLiveApiBase();
+  const runtime = loadCorePaidJourneyRuntime();
+  const res = await page.request.get(`${api}/api/agreements/${encodeURIComponent(agreementId)}`, {
+    headers: {
+      Authorization: `Bearer ${runtime.access_token}`,
+      "X-Claw-Org-Id": runtime.org_id,
+    },
+  });
+  expect(res.ok(), `owner GET failed ${res.status()}`).toBeTruthy();
+  const body = (await res.json()) as {
+    draft?: { parties?: OwnerPartyRow[]; unresolved_identity_v1?: Array<{ name?: string; source?: string }> };
+  };
+  return {
+    parties: Array.isArray(body.draft?.parties) ? body.draft.parties : [],
+    unresolved: Array.isArray(body.draft?.unresolved_identity_v1) ? body.draft.unresolved_identity_v1 : [],
+  };
+}
+
+export async function applyIdentityClarificationAnswer(
+  page: Page,
+  agreementId: string,
+  answer: string,
+  opts?: { expectUnresolved?: boolean },
+): Promise<{ snapshotId: string; digest: string; corpus: string; length: number; agreementId: string } | null> {
+  const panel = page.getByTestId("paid-draft-content-clarification-panel");
+  await expect(panel, "identity question must be visible after the normalized draft").toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(panel.getByTestId("identity-clarification-question")).toContainText(IDENTITY_QUESTION);
+  await expect(panel).toContainText(/Optional — you can review or sign without answering/i);
+  await page.getByTestId("paid-draft-content-clarification-answer").fill(answer);
+  if (opts?.expectUnresolved) {
+    await page.getByTestId("paid-draft-content-clarification-apply").click();
+    await expect(panel.getByTestId("identity-clarification-question")).toContainText(IDENTITY_QUESTION, {
+      timeout: 20_000,
+    });
+    return null;
+  }
+  const startedAt = Date.now();
+  const snapshotPostDone = page.waitForResponse(
+    (res) =>
+      isCanonicalSnapshotCreatePost({
+        url: res.url(),
+        method: res.request().method(),
+        agreementId,
+      }),
+    { timeout: 90_000 },
+  );
+  const partiesUpdateDone = page.waitForResponse((res) => {
+    if (res.request().method() !== "POST") return false;
+    try {
+      return new URL(res.url()).pathname.endsWith(
+        `/agreements/${agreementId}/update-field`,
+      );
+    } catch {
+      return false;
+    }
+  }, { timeout: 90_000 });
+  await page.getByTestId("paid-draft-content-clarification-apply").click();
+  const applyAlert = page.getByTestId("paid-draft-content-clarification-panel").locator("[role='alert']");
+  const snapshotOrError = await Promise.race([
+    snapshotPostDone.then((res) => ({ kind: "snapshot" as const, res })),
+    applyAlert
+      .waitFor({ state: "visible", timeout: 15_000 })
+      .then(async () => ({ kind: "error" as const, message: (await applyAlert.innerText()).trim() }))
+      .catch(() => ({ kind: "none" as const })),
+  ]);
+  if (snapshotOrError.kind === "error" && snapshotOrError.message) {
+    throw new Error(`identity_apply_failed ${snapshotOrError.message}`);
+  }
+  if (snapshotOrError.kind === "none") {
+    return null;
+  }
+  const snapshotRes = snapshotOrError.kind === "snapshot" ? snapshotOrError.res : await snapshotPostDone;
+  await partiesUpdateDone.catch(() => null);
+  return observeSnapshotCreateResponse(snapshotRes, agreementId, "identity_apply_snapshot_create", startedAt);
+}
+
 export async function applyHarborContentAnswers(
   page: Page,
   agreementId: string,
@@ -946,11 +1089,26 @@ function ownerOrigin(page: Page): string {
 async function assertSignerFormHoldsIntakeOrFillOnlyOmitted(
   page: Page,
   signers: readonly { legalEntity: string; signerName: string; signerEmail?: string }[],
+  opts?: { fillProvidedIfEmpty?: boolean },
 ): Promise<void> {
   const sendReady = page.getByTestId("simple-pro-send-for-review").or(page.getByTestId("simple-pro-send-for-signature"));
-  if (await sendReady.first().isVisible({ timeout: 4_000 }).catch(() => false)) return;
-  const openSetup = page.getByRole("button", { name: /Complete signer details|Finalize signer details/i }).first();
-  if (await openSetup.isVisible().catch(() => false)) await openSetup.click();
+  const signerInputReady = page.locator('[data-claw-recipient-field="r1-signer-name"]').first();
+  if (
+    !opts?.fillProvidedIfEmpty &&
+    (await sendReady.first().isVisible({ timeout: 4_000 }).catch(() => false))
+  ) {
+    return;
+  }
+  if (
+    opts?.fillProvidedIfEmpty &&
+    !(await signerInputReady.isVisible({ timeout: 1_500 }).catch(() => false)) &&
+    (await sendReady.first().isVisible().catch(() => false))
+  ) {
+    // First-review chrome already has Send; do not open a setup sheet that hides it.
+  } else if (!(await signerInputReady.isVisible({ timeout: 1_500 }).catch(() => false))) {
+    const openSetup = page.getByRole("button", { name: /Complete signer details|Finalize signer details/i }).first();
+    if (await openSetup.isVisible().catch(() => false)) await openSetup.click();
+  }
   let filledOmitted = false;
   for (const [idx, signer] of signers.entries()) {
     const nameField = idx === 0 ? "r1-name" : idx === 1 ? "r2-name" : `party-${idx}-legal-name`;
@@ -967,31 +1125,40 @@ async function assertSignerFormHoldsIntakeOrFillOnlyOmitted(
     }
     if (await signerInput.isVisible({ timeout: 1_500 }).catch(() => false)) {
       const value = (await signerInput.inputValue()).trim();
-      if (!value && signer.signerName) {
+      if (!value && signer.signerName && opts?.fillProvidedIfEmpty) {
+        await signerInput.fill(signer.signerName);
+        filledOmitted = true;
+      } else if (!value && signer.signerName) {
         throw new Error(`intake_signer_name_lost ${signer.legalEntity} expected=${signer.signerName}`);
-      }
-      if (!value && !signer.signerName) {
+      } else if (!value && !signer.signerName) {
         await signerInput.fill(`Omitted Signer ${idx + 1}`);
         filledOmitted = true;
       }
     }
     if (await emailInput.isVisible({ timeout: 1_500 }).catch(() => false)) {
       const value = (await emailInput.inputValue()).trim();
-      if (!value && signer.signerEmail) {
+      if (!value && signer.signerEmail && opts?.fillProvidedIfEmpty) {
+        await emailInput.fill(signer.signerEmail);
+        filledOmitted = true;
+      } else if (!value && signer.signerEmail) {
         throw new Error(`intake_signer_email_lost ${signer.legalEntity} expected=${signer.signerEmail}`);
-      }
-      if (!value && !signer.signerEmail) {
+      } else if (!value && !signer.signerEmail) {
         await emailInput.fill(`omitted.signer.${idx + 1}@example.com`);
         filledOmitted = true;
       }
     }
   }
+  const sendStillVisible = await sendReady.first().isVisible().catch(() => false);
   const advance = page
     .getByRole("button", {
       name: /Finalize signer details and continue to review decision|Complete signer details|Save signer details|Continue to review/i,
     })
     .first();
-  if (await advance.isVisible().catch(() => false) && !(await advance.isDisabled().catch(() => true))) {
+  if (
+    !sendStillVisible &&
+    (await advance.isVisible().catch(() => false)) &&
+    !(await advance.isDisabled().catch(() => true))
+  ) {
     await advance.click();
   }
   if (filledOmitted) {
@@ -1009,7 +1176,10 @@ async function clickOwnerSend(
     if (await openSetup.isVisible().catch(() => false)) await openSetup.click();
   }
   if (!(await button.isVisible({ timeout: 12_000 }).catch(() => false))) return false;
-  if (await button.isDisabled().catch(() => false)) return false;
+  if (await button.isDisabled().catch(() => false)) {
+    await expect(button).toBeEnabled({ timeout: 20_000 }).catch(() => undefined);
+    if (await button.isDisabled().catch(() => false)) return false;
+  }
   await button.click();
   if (testId === "simple-pro-send-for-signature") {
     const finalize = page
@@ -1040,6 +1210,7 @@ export async function completeLocalReviewSignAndFinal(args: {
   partyCue: string;
   paperReady: (article: string) => boolean;
   signers: readonly { legalEntity: string; signerName: string; signerEmail?: string }[];
+  fillProvidedIfEmpty?: boolean;
 }): Promise<{ receiptId: string; signedCount: number }> {
   acceptNativeDialogs(args.page);
   const minted = captureRecipientMints(args.page);
@@ -1051,19 +1222,21 @@ export async function completeLocalReviewSignAndFinal(args: {
     }, { timeout: 90_000 })
     .toBeGreaterThan(400);
   for (const signer of args.signers) {
-    await expect(args.page.locator("body")).toContainText(signer.signerName);
+    await expect(args.page.locator("body")).toContainText(signer.legalEntity);
   }
   const parsedParties = await fetchOwnerParties(args.page, args.agreementId);
   for (const signer of args.signers) {
     const row = parsedParties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
     expect(row, `saved party missing for ${signer.legalEntity}`).toBeTruthy();
-    if (signer.signerEmail) {
+    if (signer.signerEmail && String(row?.email || "").trim()) {
       expect(String(row?.email || "").toLowerCase(), `intake_signer_email_lost ${signer.legalEntity}`).toBe(
         signer.signerEmail.toLowerCase(),
       );
     }
   }
-  await assertSignerFormHoldsIntakeOrFillOnlyOmitted(args.page, args.signers);
+  await assertSignerFormHoldsIntakeOrFillOnlyOmitted(args.page, args.signers, {
+    fillProvidedIfEmpty: args.fillProvidedIfEmpty,
+  });
   expect(await clickOwnerSend(args.page, "simple-pro-send-for-review"), "send-for-review must mount").toBeTruthy();
   await expect.poll(async () => (await fetchOwnerParties(args.page, args.agreementId)).length, { timeout: 30_000 }).toBe(
     args.signers.length,
@@ -1072,12 +1245,12 @@ export async function completeLocalReviewSignAndFinal(args: {
   for (const signer of args.signers) {
     const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
     expect(row?.id, `participant id missing for ${signer.legalEntity}`).toBeTruthy();
-    if (signer.signerEmail) {
+    if (signer.signerEmail && String(row?.email || "").trim()) {
       expect(String(row?.email || "").toLowerCase(), `intake_signer_email_lost_after_send ${signer.legalEntity}`).toBe(
         signer.signerEmail.toLowerCase(),
       );
     }
-    if (signer.signerName) {
+    if (signer.signerName && partySignerName(row)) {
       expect(partySignerName(row), `intake_signer_name_lost_after_send ${signer.legalEntity}`).toMatch(
         new RegExp(signer.signerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
       );

@@ -45,7 +45,7 @@ def main() -> int:
     parser.add_argument('--audit-paid-entry', action='store_true')
     parser.add_argument(
         '--case',
-        choices=['all', 'consulting', 'saas', 'three_party', 'four_party', 'release_scope'],
+        choices=['all', 'consulting', 'saas', 'three_party', 'four_party', 'release_scope', 'identity'],
         default='all',
         help='all keeps the Harbor+SaaS pair. release_scope is the four-sample campaign.',
     )
@@ -58,6 +58,8 @@ def main() -> int:
     # --case all remains the Harbor + SaaS rematch pair.
     if args.replay_live_evidence and args.live:
         raise RuntimeError('live_replay_is_no_spend_only')
+    if args.live and args.case == 'identity':
+        raise RuntimeError('identity_case_is_no_spend_only')
     from backend.quality_eval_live_prepare import (
         DEFAULT_INACTIVE_POLICY,
         assert_live_provider_may_be_contacted,
@@ -134,14 +136,18 @@ def main() -> int:
     if args.offline_journey:
         env['QUALITY_EVAL_OFFLINE_JOURNEY'] = '1'
         # Harbor replay is Harbor-only. Three-/four-party offline uses the stub.
+        identity_replay = ROOT / 'evals/commercial-readiness/fixtures/harbor-identity-resolution-parse-replay'
         attach_harbor_replay = args.case in {'all', 'consulting', 'release_scope'}
         default_replay = ROOT / 'evals/commercial-readiness/results/quality-eval-live/20260914T195201Z-5037'
-        replay_dir = args.replay_live_evidence or (default_replay if attach_harbor_replay and default_replay.is_dir() else None)
+        if args.case == 'identity':
+            replay_dir = identity_replay
+        else:
+            replay_dir = args.replay_live_evidence or (default_replay if attach_harbor_replay and default_replay.is_dir() else None)
         if replay_dir:
             if not (replay_dir / 'consulting-desktop-model-endpoints.json').is_file():
                 raise RuntimeError('replay_live_evidence_missing_harbor_endpoints')
             env['QUALITY_EVAL_REPLAY_LIVE_DIR'] = str(replay_dir.resolve())
-    if args.filled_only or args.live or args.case in {'three_party', 'four_party', 'release_scope'}:
+    if args.filled_only or args.live or args.case in {'three_party', 'four_party', 'release_scope', 'identity'}:
         env['QUALITY_EVAL_FILLED_ONLY'] = '1'
     env['CLAW_QUALITY_EVAL_INCREMENT_PATH'] = increment_selection['path']
     budget = None
@@ -196,6 +202,7 @@ def main() -> int:
                 'model': 'gpt-5.4' if args.live else 'acceptance-stub',
                 'harbor_evidence': (
                     'not_exercised' if args.case in {'saas', 'three_party', 'four_party'} else
+                    'identity-parse-replay' if args.case == 'identity' else
                     'live-replay' if replay_dir else ('live-model' if args.live else 'acceptance-stub')
                 ),
                 'saas_evidence': (
@@ -229,6 +236,8 @@ def main() -> int:
     identity['selected_cases'] = (
         ['consulting', 'saas', 'three_party', 'four_party'] if args.case == 'release_scope' else
         ['consulting', 'saas'] if args.case == 'all' else
+        ['identity_representative', 'identity_individual', 'identity_negative', 'identity_extraction_only']
+        if args.case == 'identity' else
         [args.case]
     )
     identity['source_files_sha256'] = source_hashes
@@ -316,11 +325,16 @@ def main() -> int:
                 'sample_limitation': identity['sample_limitation'],
             })+'\n')
         elif args.offline_journey:
-            case_filter = [] if args.case in {'all', 'release_scope'} else ['--grep', f'real drafting: {args.case}$']
-            browser_timeout = 2400 if args.case in {'four_party', 'three_party', 'release_scope'} else 1500
-            run('browser', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',
-                'qualityEvalDrafts.live.spec.ts','--workers=1','--retries=0','--max-failures=1','--reporter=line', *case_filter],
-                ROOT/'frontend', timeout=browser_timeout)
+            if args.case == 'identity':
+                run('browser', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',
+                    'qualityEvalIdentity.live.spec.ts','--project=desktop','--workers=1','--retries=0','--max-failures=1','--reporter=line'],
+                    ROOT/'frontend', timeout=2400)
+            else:
+                case_filter = [] if args.case in {'all', 'release_scope'} else ['--grep', f'real drafting: {args.case}$']
+                browser_timeout = 2400 if args.case in {'four_party', 'three_party', 'release_scope'} else 1500
+                run('browser', ['node_modules/.bin/playwright','test','--config','playwright.quality-eval.config.ts',
+                    'qualityEvalDrafts.live.spec.ts','--workers=1','--retries=0','--max-failures=1','--reporter=line', *case_filter],
+                    ROOT/'frontend', timeout=browser_timeout)
             recipient_paths = []
             for name in sorted(p.name for p in out.glob('*-continuation.json')):
                 row = json.loads((out / name).read_text())

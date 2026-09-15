@@ -8,6 +8,7 @@ import {
   mergeLiveDraftWithRecipientSetupForReviewLinks,
   mergeReviewLinkRecipientEmailsOntoHydratedDraft,
   resolveReviewLinkAssumedOwnerPartyIndex,
+  unionNamedLegalParties,
 } from "./reviewLinkRecipientEmailMerge";
 
 const OWNER_NORMALIZED = new Set(["owner", "sender", "landlord"]);
@@ -33,10 +34,13 @@ export function ensureExplicitReviewEmailPartyRoles(
 
   const ownerIdx = resolveReviewLinkAssumedOwnerPartyIndex(list);
 
-  // Three- and four-party deals: every named legal party reviews. Do not rewrite a
-  // commercial role (Platform Developer, etc.) into workspace-owner. Two-party
-  // Harbor-style drafts still stamp index 0 as owner for Resend exclusion.
-  if (namedLegalPartyCount(list) < 3 && !isOwnerNormalizedWorkflowRole(list[ownerIdx]?.role)) {
+  // Three- and four-party deals: every named legal party reviews and signs.
+  // Do not rewrite a commercial role into workspace-owner or reviewer.
+  // Two-party Harbor-style drafts still stamp index 0 as owner for Resend exclusion.
+  if (namedLegalPartyCount(list) >= 3) {
+    return list;
+  }
+  if (!isOwnerNormalizedWorkflowRole(list[ownerIdx]?.role)) {
     const prev = list[ownerIdx];
     if (prev) list[ownerIdx] = { ...prev, role: "owner" };
   }
@@ -94,7 +98,11 @@ export function prepareReviewEmailPartyRowsForServer(
 ): AgreementParty[] {
   const localWithContact = mergeLocalRecipientContactOntoDraft(localDraft, recipientSetup);
   const merged = mergeReviewLinkRecipientEmailsOntoHydratedDraft(serverDraft, localWithContact);
-  return rejectCrossPartyEmailReuse(ensureExplicitReviewEmailPartyRoles(merged.parties ?? []));
+  const parties = unionNamedLegalParties(merged.parties ?? [], [
+    ...(serverDraft.parties ?? []),
+    ...(localWithContact.parties ?? []),
+  ]);
+  return rejectCrossPartyEmailReuse(ensureExplicitReviewEmailPartyRoles(parties));
 }
 
 /** A persisted email belongs to one legal party. Never copy a sibling's address onto another row. */
@@ -122,6 +130,9 @@ export async function persistReviewEmailPartyRolesOnServer(
   const { ok: fetchOk, draft: serverDraft } = await fetchAgreementDraft(id);
   const serverBase = fetchOk && serverDraft ? serverDraft : draft;
   const parties = prepareReviewEmailPartyRowsForServer(serverBase, draft, recipientSetup);
+  if (namedLegalPartyCount(parties) < namedLegalPartyCount(serverBase.parties ?? [])) {
+    return { ok: false, draft: serverBase, rolesPersisted: false };
+  }
   const nextDraft = { ...serverBase, parties };
 
   const needPersist = reviewEmailPartyContactNeedPersist(serverBase.parties ?? [], parties);

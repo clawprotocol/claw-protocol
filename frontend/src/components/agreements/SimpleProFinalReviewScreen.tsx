@@ -141,6 +141,9 @@ export type SimpleProFinalReviewScreenProps = {
   signaturePreparationRequested?: boolean;
   agreementId?: string | null;
   intakeText?: string | null;
+  parsedParties?: readonly { name: string; role: string; email?: string; signerName?: string }[] | null;
+  additionalTerms?: string | null;
+  unresolvedSubjects?: readonly { name: string; source: "customer_mentioned" | "extraction_only"; email?: string; roleHint?: string }[] | null;
 };
 
 export function SimpleProFinalReviewScreen({
@@ -210,6 +213,9 @@ export function SimpleProFinalReviewScreen({
   signaturePreparationRequested = false,
   agreementId = null,
   intakeText = null,
+  parsedParties = null,
+  additionalTerms = null,
+  unresolvedSubjects = null,
 }: SimpleProFinalReviewScreenProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const reviewFirstErrorRef = useRef<HTMLDivElement>(null);
@@ -783,6 +789,9 @@ export function SimpleProFinalReviewScreen({
             revisionId={getPaidProSourceOfTruth()?.hash}
             intakeText={intakeText}
             body={canonicalPlainForRender || paidReviewPlain}
+            parsedParties={parsedParties}
+            additionalTerms={additionalTerms}
+            unresolvedSubjects={unresolvedSubjects}
           />
           {documentBlock}
           {postDocumentGuidance}
@@ -804,6 +813,9 @@ export function SimpleProFinalReviewScreen({
             revisionId={getPaidProSourceOfTruth()?.hash}
             intakeText={intakeText}
             body={canonicalPlainForRender || paidReviewPlain}
+            parsedParties={parsedParties}
+            additionalTerms={additionalTerms}
+            unresolvedSubjects={unresolvedSubjects}
           />
           {documentBlock}
           {!suppressPostDocumentScrollSpacer && stickyBottomScrollInsetPx > 0 ? (

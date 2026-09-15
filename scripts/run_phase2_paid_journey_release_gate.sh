@@ -30,6 +30,7 @@ CRITICAL_BE=(
   backend/tests/test_legal_party_representative_bind.py
   backend/tests/test_harbor_six_row_production_path.py
   backend/tests/test_draft_quality_trace.py
+  backend/tests/test_identity_resolution_production_path.py
 )
 
 echo "== Phase 2 paid-journey release gate =="

@@ -256,9 +256,14 @@ def bind_representatives_to_legal_parties(
 
     question = None
     unresolved_humans = [row for row in unresolved if _is_human(str(row.get("name") or ""))]
-    if unresolved_humans and len(entities) >= 2:
+    askable = [
+        row
+        for row in unresolved_humans
+        if re.search(rf"\b{re.escape(str(row.get('name') or ''))}\b", intake or "", re.I)
+    ]
+    if askable and len(entities) >= 2:
         question = (
-            f"Is {unresolved_humans[0].get('name')} signing for one of the named companies, "
+            f"Is {askable[0].get('name')} signing for one of the named companies, "
             "or contracting as their own legal party?"
         )
     return {

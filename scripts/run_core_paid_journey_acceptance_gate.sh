@@ -63,6 +63,8 @@ CONTENT_FP="$(
       backend/tests/test_legal_party_representative_bind.py \
       backend/tests/test_harbor_six_row_production_path.py \
       backend/tests/test_draft_quality_trace.py \
+      backend/tests/test_identity_resolution_production_path.py \
+      frontend/e2e/core-paid-journey-live/qualityEvalIdentity.live.spec.ts \
       scripts/run_quality_eval_local.py \
       frontend/e2e/core-paid-journey-live/corePaidJourneyLiveAuth.ts \
       backend/tests/test_core_paid_journey_acceptance.py \

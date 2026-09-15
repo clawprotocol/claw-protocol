@@ -779,6 +779,7 @@ class AgreementDraftCreate(BaseModel):
     # Stub: no processor — persisted for UI + future billing (amount, type, payer, condition).
     payment_request: Optional[Dict[str, Any]] = None
     payment_required: bool = False
+    unresolved_identity_v1: Optional[List[Dict[str, Any]]] = None
 
 
 class AgreementDraft(AgreementDraftCreate):
@@ -3714,6 +3715,7 @@ def _normalize_parsed_draft(raw: Dict[str, Any], intake_text: str = "") -> Agree
                 **_party_signer_kwargs(p),
             )
         )
+    unresolved_identity: List[Dict[str, Any]] = []
     if intake_text:
         from backend.agreements.legal_party_representative_bind import bind_representatives_to_legal_parties
 
@@ -3732,6 +3734,26 @@ def _normalize_parsed_draft(raw: Dict[str, Any], intake_text: str = "") -> Agree
             )
         if rebound:
             tmp = rebound
+        for row in bound.get("unresolved_extraction_rows") or []:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("name") or "").strip()
+            if not name:
+                continue
+            mentioned = bool(re.search(rf"\b{re.escape(name)}\b", intake_text or "", re.I))
+            unresolved_identity.append(
+                {
+                    "name": name,
+                    "source": "customer_mentioned" if mentioned else "extraction_only",
+                    **({"email": str(row.get("email")).strip()} if str(row.get("email") or "").strip() else {}),
+                    **(
+                        {"roleHint": str(row.get("role") or "").strip()}
+                        if str(row.get("role") or "").strip()
+                        and str(row.get("role") or "").strip().lower() not in {"party", "signer", "email"}
+                        else {}
+                    ),
+                }
+            )
     parties = _ensure_agreement_parties_have_ids(tmp)
     due_date = str(raw.get("due_date") or "").strip() or None
     duration = str(raw.get("duration") or "").strip() or None
@@ -3739,6 +3761,9 @@ def _normalize_parsed_draft(raw: Dict[str, Any], intake_text: str = "") -> Agree
         duration = f"until {due_date}"
     jurisdiction = str(raw.get("jurisdiction") or "").strip() or "TBD"
     effective_date = str(raw.get("effective_date") or "").strip() or None
+    incoming_unresolved = raw.get("unresolved_identity_v1")
+    if isinstance(incoming_unresolved, list) and incoming_unresolved:
+        unresolved_identity = [row for row in incoming_unresolved if isinstance(row, dict)]
     return AgreementDraftCreate(
         title=str(raw.get("title") or "").strip(),
         jurisdiction=jurisdiction,
@@ -3748,6 +3773,7 @@ def _normalize_parsed_draft(raw: Dict[str, Any], intake_text: str = "") -> Agree
         duration=duration,
         due_date=due_date,
         effective_date=effective_date,
+        unresolved_identity_v1=unresolved_identity or None,
     )
 
 
@@ -6574,6 +6600,7 @@ def create_agreement_draft(body: AgreementDraftCreate, request: Request) -> Dict
         feed_party_anonymize=body.feed_party_anonymize,
         feed_show_financial_summary=body.feed_show_financial_summary,
         feed_anchor_network=body.feed_anchor_network,
+        unresolved_identity_v1=body.unresolved_identity_v1,
         created_at=now,
         updated_at=now,
         versions=[],
@@ -10387,6 +10414,7 @@ def update_agreement_field(
         "payment_request",
         "payment_required",
         "owner_delivery_track",
+        "unresolved_identity_v1",
     }:
         raise HTTPException(status_code=400, detail="unsupported_field")
 
@@ -10468,6 +10496,13 @@ def update_agreement_field(
             if net not in ALLOWED_AGREEMENT_ANCHOR_NETWORKS:
                 raise HTTPException(status_code=400, detail="invalid_feed_anchor_network")
             next_data[body.field] = net
+    elif body.field == "unresolved_identity_v1":
+        if body.value is None or body.value == "":
+            next_data["unresolved_identity_v1"] = None
+        elif isinstance(body.value, list):
+            next_data["unresolved_identity_v1"] = [row for row in body.value if isinstance(row, dict)] or None
+        else:
+            raise HTTPException(status_code=400, detail="invalid_unresolved_identity")
     else:
         if body.value is None:
             next_data[body.field] = None

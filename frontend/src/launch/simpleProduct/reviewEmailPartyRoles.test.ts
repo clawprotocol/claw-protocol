@@ -22,6 +22,31 @@ describe("reviewEmailPartyRoles", () => {
     expect(isOwnerNormalizedWorkflowRole("service_provider")).toBe(false);
   });
 
+  it("keeps an added individual legal party through review-email prepare", () => {
+    const serverDraft = {
+      parties: [
+        { id: "p1", name: "Harbor Peak Analytics LLC", role: "Consultant" },
+        { id: "p2", name: "Ironvale Manufacturing Inc.", role: "Client" },
+      ],
+    } as AgreementDraft;
+    const localDraft = {
+      parties: [
+        { id: "p1", name: "Harbor Peak Analytics LLC", role: "Consultant", signerName: "Pat Harbor", email: "pat.harbor@harbor.test" },
+        { id: "p2", name: "Ironvale Manufacturing Inc.", role: "Client", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+        { id: "p3", name: "Alex Rivera", role: "Advisor", email: "alex.rivera@advisor.test" },
+      ],
+    } as AgreementDraft;
+    const out = prepareReviewEmailPartyRowsForServer(serverDraft, localDraft);
+    expect(out.map((p) => p.name)).toEqual([
+      "Harbor Peak Analytics LLC",
+      "Ironvale Manufacturing Inc.",
+      "Alex Rivera",
+    ]);
+    expect(out.some((p) => p.role === "owner")).toBe(false);
+    expect(out.map((p) => p.role)).toEqual(["Consultant", "Client", "Advisor"]);
+    expect(out.find((p) => p.name === "Alex Rivera")?.role).toBe("Advisor");
+  });
+
   it("does not stamp a named four-party legal entity as workspace owner", () => {
     const parties: AgreementParty[] = [
       { id: "p1", name: "Lumen Bioinformatics Inc.", role: "Platform Developer", email: "elena.vasquez@lumenbio.com" },

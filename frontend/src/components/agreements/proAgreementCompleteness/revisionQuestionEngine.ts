@@ -13,6 +13,7 @@ import {
   identityClarificationMaterialItem,
   isIdentityClarificationQuestion,
   identityClarificationResolved,
+  type UnresolvedIdentitySubject,
 } from "../legalPartyIdentityClarification";
 import type { BindableParty } from "../legalPartyRepresentativeBind";
 import { completionCriteriaMaterialItem, isCompletionCriteriaQuestion } from "../paidProCompletionCriteria";
@@ -774,6 +775,7 @@ export function buildMaterialMissingItems(args: {
   userGapAnswers?: string | null;
   parsedParties?: readonly BindableParty[] | null;
   additionalTerms?: string | null;
+  unresolvedSubjects?: readonly UnresolvedIdentitySubject[] | null;
 }): MaterialMissingItem[] {
   const intake = [args.intakeRaw || "", args.userGapAnswers || ""].join("\n").trim();
   const body = (args.body || "").trim();
@@ -809,6 +811,8 @@ export function buildMaterialMissingItems(args: {
     userGapAnswers: args.userGapAnswers,
     parsedParties: args.parsedParties,
     additionalTerms: args.additionalTerms,
+    unresolvedSubjects: args.unresolvedSubjects,
+    body,
   });
   if (identityItem) {
     pushItem(items, seen, identityItem, family);
@@ -863,10 +867,9 @@ export function buildMaterialMissingItems(args: {
       isCompletionCriteriaQuestion(t) ||
       isMilestonePayerQuestion(t) ||
       (isIdentityClarificationQuestion(t) &&
-        (identityClarificationResolved(
-          [args.userGapAnswers, args.additionalTerms, args.intakeRaw].filter(Boolean).join("\n"),
-          t,
-        ) ||
+        (identityClarificationResolved(args.userGapAnswers, t, {
+          knownEntities: (args.parsedParties || []).map((party) => party.name),
+        }) ||
           items.some((item) => item.id === "identity_signing_or_party" || item.question === t)))
     ) {
       continue;

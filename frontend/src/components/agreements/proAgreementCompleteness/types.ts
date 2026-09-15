@@ -49,4 +49,5 @@ export type ProCompletenessContext = {
   surface: string;
   parsedParties?: readonly { name: string; role: string; email?: string; signerName?: string }[];
   additionalTerms?: string | null;
+  unresolvedSubjects?: readonly { name: string; source: "customer_mentioned" | "extraction_only"; email?: string; roleHint?: string }[];
 };
