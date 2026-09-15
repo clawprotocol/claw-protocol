@@ -19639,7 +19639,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             ...next,
             premium_full_document_text: resumeResolved.corpus,
             premium_server_full_document_text: resumeResolved.corpus,
-            server_full_document_text: resumeResolved.corpus,
             premium_render_source:
               String((next as { premium_render_source?: string }).premium_render_source || "").trim() ||
               "server_full_document_text",
