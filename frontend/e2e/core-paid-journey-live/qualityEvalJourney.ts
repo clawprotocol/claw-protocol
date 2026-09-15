@@ -266,7 +266,7 @@ export async function articleText(page: Page, partyCue: string): Promise<string>
     const readable = (el: Element | null): string => ((el as HTMLElement | null)?.innerText || "").trim();
     const nodes = Array.from(
       document.querySelectorAll(
-        '[data-testid="simple-pro-final-review-document"], [data-testid="paid-pro-visible-document-shell"]',
+        '[data-testid="simple-pro-final-review-document"], [data-testid="paid-pro-visible-document-shell"], article[aria-label="Agreement document preview"]',
       ),
     );
     let best = "";

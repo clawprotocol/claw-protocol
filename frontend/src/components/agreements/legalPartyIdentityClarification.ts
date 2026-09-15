@@ -315,7 +315,10 @@ function isConfirmedIndividualParty(name: string, intake: string): boolean {
 function keepConfirmedLegalParty(party: BindableParty, intake: string): boolean {
   const name = String(party.name || "").trim();
   if (!name || /^\d+\s+/.test(name)) return false;
-  return !isLikelyHumanSignerName(name) || isConfirmedIndividualParty(name, intake);
+  if (!isLikelyHumanSignerName(name)) return true;
+  if (isConfirmedIndividualParty(name, intake)) return true;
+  const role = String(party.role || "").trim();
+  return Boolean(role && !/^(party|signer|email)$/i.test(role));
 }
 
 export function confirmedPartiesFromCustomerText(
@@ -415,6 +418,14 @@ export function applyIdentityClarificationAnswers<T extends BindableParty>(args:
   const mergedIntake = mergeIdentityResolutionsIntoIntake(args.intake, args.answers);
   const bound = bindRepresentativesToLegalParties(startingParties, mergedIntake);
   let parties = bound.parties as T[];
+  for (const party of startingParties) {
+    if (!isLikelyHumanSignerName(party.name)) continue;
+    if (parties.some((existing) => samePerson(existing.name, party.name))) continue;
+    parties = parties.map((existing) =>
+      samePerson(String(existing.signerName || ""), party.name) ? { ...existing, signerName: "" } : existing,
+    ) as T[];
+    parties = [...parties, party];
+  }
   let unresolved = collectUnresolvedSubjects({
     parties: startingParties,
     intake: args.intake,
@@ -479,23 +490,30 @@ export function applyIdentityClarificationAnswers<T extends BindableParty>(args:
     answers: args.answers,
     knownEntities,
   });
+  const callerProvidedUnresolved = args.unresolvedSubjects !== undefined && args.unresolvedSubjects !== null;
+  const stillOpenNames = (args.unresolvedSubjects || [])
+    .filter((row) => row.source === "customer_mentioned")
+    .map((row) => row.name);
   parties = parties.map((party) => {
     const signer = String(party.signerName || "").trim();
     if (!signer) return party;
-    const inferredBind = unresolved.some(
-      (row) =>
-        row.source === "customer_mentioned" &&
-        samePerson(row.name, signer) &&
-        !explicitPeople.some((name) => samePerson(name, signer)),
-    );
+    const stillOpen = stillOpenNames.some((name) => samePerson(name, signer));
+    const inferredBind =
+      stillOpen &&
+      !explicitPeople.some((name) => samePerson(name, signer)) &&
+      (callerProvidedUnresolved || unresolved.some((row) => samePerson(row.name, signer)));
     return inferredBind ? { ...party, signerName: "" } : party;
   });
-  const askable = unresolved.filter(
-    (row) =>
-      row.source === "customer_mentioned" &&
-      !explicitPeople.some((name) => samePerson(name, row.name)) &&
-      !parties.some((party) => samePerson(party.name, row.name)),
-  );
+  const askable = unresolved.filter((row) => {
+    if (row.source !== "customer_mentioned") return false;
+    if (explicitPeople.some((name) => samePerson(name, row.name))) return false;
+    if (parties.some((party) => samePerson(party.name, row.name))) return false;
+    const persistedSigner = parties.some((party) => samePerson(String(party.signerName || ""), row.name));
+    if (callerProvidedUnresolved && persistedSigner && !stillOpenNames.some((name) => samePerson(name, row.name))) {
+      return false;
+    }
+    return true;
+  });
   return {
     parties,
     unresolvedExtractionRows: unresolved.map((row) => ({

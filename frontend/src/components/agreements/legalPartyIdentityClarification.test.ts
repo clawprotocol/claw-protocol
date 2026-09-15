@@ -242,6 +242,32 @@ describe("legal party identity clarification", () => {
     expect(stripped.clarificationQuestion).toBe(QUESTION);
     expect(stripped.parties[0]?.signerName || "").toBe("");
     expect(stripped.parties.map((p) => p.name)).toEqual([HARBOR, IRONVALE]);
+    const reopened = applyIdentityClarificationAnswers({
+      parties: inferredSignerParties,
+      intake: inferredIntake,
+      unresolvedSubjects: [],
+    });
+    expect(reopened.clarificationQuestion).toBeNull();
+    expect(reopened.parties[0]?.signerName).toBe("Alex Rivera");
+    expect(
+      contentClarificationQuestions({
+        intake: inferredIntake,
+        body: `${inferredPaper}\nConsultant's authorized signer is Alex Rivera.`,
+        parsedParties: inferredSignerParties,
+        unresolvedSubjects: [],
+        additionalTerms: `${IDENTITY_RESOLUTION_MARKER} Harbor Peak Analytics LLC signer: Alex Rivera`,
+      }),
+    ).not.toContain(QUESTION);
+    const added = applyIdentityClarificationAnswers({
+      parties: [
+        ...NORMALIZED_PARTIES,
+        { name: "Alex Rivera", role: "Advisor", email: "alex.rivera@advisor.test" },
+      ],
+      intake: inferredIntake,
+      unresolvedSubjects: [],
+    });
+    expect(added.parties.map((p) => p.name)).toEqual([HARBOR, IRONVALE, "Alex Rivera"]);
+    expect(added.clarificationQuestion).toBeNull();
     expect(
       contentClarificationQuestions({
         intake: CORE_PAID_JOURNEY_FILLED_INTAKE,
