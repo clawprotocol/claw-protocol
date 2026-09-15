@@ -701,6 +701,47 @@ def test_accept_fails_when_display_authority_mismatches_snapshot(monkeypatch, tm
     assert bad.json()["detail"]["code"] == "display_authority_mismatch"
 
 
+def test_pending_snapshot_persist_writes_draft_pipeline_fields_for_reopen(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    corpus = _corpus("REOPEN_PIPELINE")
+    created = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": corpus},
+    )
+    assert created.status_code == 200, created.text
+    got = client.get(f"/api/agreements/{aid}", headers=_ORG_H)
+    assert got.status_code == 200, got.text
+    draft = got.json()["draft"]
+    assert draft["premium_full_document_text"] == corpus.strip()
+    assert draft["server_full_document_text"] == corpus.strip()
+    assert draft["premium_server_full_document_text"] == corpus.strip()
+    assert draft["premium_render_source"] == "server_full_document_text"
+
+
+def test_pending_snapshot_after_accept_does_not_rewrite_pipeline_fields(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    first = _corpus("KEEP")
+    later = _corpus("REWRITE")
+    accepted = _persist_and_accept(client, aid, first)
+    assert accepted["corpus_plain"] == first.strip()
+    second = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": later},
+    )
+    assert second.status_code == 200, second.text
+    got = client.get(f"/api/agreements/{aid}", headers=_ORG_H)
+    assert got.status_code == 200, got.text
+    draft = got.json()["draft"]
+    assert draft["premium_full_document_text"] == first.strip()
+    assert draft["server_full_document_text"] == first.strip()
+
+
 def test_reload_get_returns_exact_persisted_bytes_digest_length(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
     client = TestClient(app)

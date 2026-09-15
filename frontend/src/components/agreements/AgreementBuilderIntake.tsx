@@ -719,6 +719,7 @@ import {
 import {
   longestDraftPipelineCorpus,
   resolvePaidCreateResumeCorpus,
+  resolvePaidCreateResumeDisplayPhase,
 } from "./paidCreateResumeHydration";
 import {
   beginPaidProRevisionOperation,
@@ -10822,6 +10823,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   : result.premiumRenderSource,
             });
           }
+          // Paint GET/pending snapshot bytes before SoT establishment. A later structural
+          // throw must not hide Harbor paper that the server already persisted.
+          let serverSnapshotPainted = false;
+          if (reviewCorpus.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+            setAgreementDocumentText(reviewCorpus);
+            setPremiumPersistedFlowActive(true);
+            setProFullDraftQualityRetry(false);
+            commitParsedDraftToReviewFlow(mergedDraftPersist, { forceReviewDisplay: true });
+            commitAuthoritativePremiumVisibleSurface(reviewCorpus, result.premiumRenderSource, {
+              extendedWaitWasActive: extendedWaitAtApplyStart,
+              hardFailopenWasActive: hardFailopenAtApplyStart,
+              patienceExtendedWasActive: patienceExtendedAtApplyStart,
+              acceptedPlainLen: reviewCorpus.length,
+              reason: "premium_server_get_authority_commit",
+              premiumRenderResolveSource: resolvedPersist.premium_render_source,
+            });
+            if (createProductionTwoPane && simpleProductFlow) {
+              setDisplayPhase("review");
+            }
+            serverSnapshotPainted = true;
+          }
           try {
             establishPaidProSourceOfTruth({
               text: reviewCorpus,
@@ -10925,7 +10947,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 }
               }
             }
-            if (!hasPaidProSourceOfTruth()) {
+            if (!hasPaidProSourceOfTruth() && !serverSnapshotPainted) {
               if (isPaidProSoTEstablishmentFailure(establishMsg)) {
                 clearStaleAcceptedButUnfrozenProCorpus({
                   rejectedCorpusText: snapshotPlain,
@@ -19613,6 +19635,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             })
           : { corpus: "", source: "none" as const, hydrateAttempted: false };
         if (!signerSetupResume && resumeResolved.corpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          next = {
+            ...next,
+            premium_full_document_text: resumeResolved.corpus,
+            premium_server_full_document_text: resumeResolved.corpus,
+            server_full_document_text: resumeResolved.corpus,
+            premium_render_source:
+              String((next as { premium_render_source?: string }).premium_render_source || "").trim() ||
+              "server_full_document_text",
+          };
+        }
+        if (!signerSetupResume && resumeResolved.corpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
           try {
             establishPaidProSourceOfTruth({
               text: resumeResolved.corpus,
@@ -19697,11 +19730,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             restored: true,
           });
         }
-        const nextDisplay = signerSetupResume
-          ? "review"
-          : shouldKeepReviewDisplayAfterProHydrate(adForHydrate)
-            ? "review"
-            : "intake";
+        const nextDisplay = resolvePaidCreateResumeDisplayPhase({
+          signerSetupResume,
+          snapshotOrPipelineCorpus: resumeResolved.corpus,
+          draftKeepsReview: shouldKeepReviewDisplayAfterProHydrate(adForHydrate),
+        });
         if (import.meta.env.DEV || signerSetupResume) {
           const rs = String(adForHydrate.premium_render_source ?? "").trim();
           const corpusLen = materialPremiumPipelineCorpusMaxLen(adForHydrate);

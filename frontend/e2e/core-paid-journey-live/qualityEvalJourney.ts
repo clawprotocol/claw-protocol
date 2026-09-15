@@ -1053,7 +1053,7 @@ function captureRecipientApprovePosts(page: Page): RecipientApprovePostEvent[] {
   return events;
 }
 
-async function waitForOwnerWorkspaceReady(page: Page, agreementId: string): Promise<void> {
+export async function waitForOwnerWorkspaceReady(page: Page, agreementId: string): Promise<void> {
   const settling = page.getByTestId("create-auth-workspace-settling");
   try {
     await expect(settling).toHaveCount(0, { timeout: 60_000 });

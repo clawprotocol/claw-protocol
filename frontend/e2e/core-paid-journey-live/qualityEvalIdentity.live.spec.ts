@@ -17,6 +17,7 @@ import {
   installQualityEvalPageGuards,
   qualityEvalViewportName,
   submitIntake,
+  waitForOwnerWorkspaceReady,
   waitForPaintedArticle,
   waitForServerAgreementId,
   writeQualityEvalArtifact,
@@ -99,12 +100,29 @@ async function freshReopenWithoutIdentityQuestion(
   await seedCorePaidJourneyOwner(freshPage);
   await installQualityEvalPageGuards(freshPage);
   await freshPage.goto(`/app/create?agreementId=${agreementId}`, { waitUntil: "domcontentloaded" });
-  await expect
-    .poll(async () => {
-      const text = await articleText(freshPage, IDENTITY_SCENARIO.partyCue);
-      return paperReady(text, extras) ? text.length : 0;
-    }, { timeout: 90_000 })
-    .toBeGreaterThan(400);
+  try {
+    await waitForOwnerWorkspaceReady(freshPage, agreementId);
+    await expect
+      .poll(async () => {
+        const text = await articleText(freshPage, IDENTITY_SCENARIO.partyCue);
+        return paperReady(text, extras) ? text.length : 0;
+      }, { timeout: 90_000 })
+      .toBeGreaterThan(400);
+  } catch (err) {
+    const body = await freshPage.locator("body").innerText().catch(() => "");
+    writeQualityEvalArtifact("fresh-reopen-body.txt", body, "identity_reopen");
+    try {
+      const failedGet = await fetchOwnerCanonicalSnapshot(freshPage, agreementId);
+      writeQualityEvalArtifact("fresh-reopen-get.json", JSON.stringify(failedGet, null, 2), "identity_reopen");
+    } catch (getErr) {
+      writeQualityEvalArtifact(
+        "fresh-reopen-get.json",
+        JSON.stringify({ error: String(getErr) }, null, 2),
+        "identity_reopen",
+      );
+    }
+    throw err;
+  }
   await expect(freshPage.getByTestId("identity-clarification-question")).toHaveCount(0);
   const get = await fetchOwnerCanonicalSnapshot(freshPage, agreementId);
   if (!opts?.keepOpen) {

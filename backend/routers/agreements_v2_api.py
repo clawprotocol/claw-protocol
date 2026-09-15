@@ -7979,6 +7979,30 @@ def _attest_portable_envelope_or_400(
     return attested
 
 
+def _pending_snapshot_pipeline_fields(
+    accepted: Optional[Dict[str, Any]],
+    snap: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Copy latest pending snapshot paper onto draft pipeline fields for GET/reopen.
+
+    Accepted snapshot bytes stay immutable: never overwrite pipeline after accept.
+    """
+    if isinstance(accepted, dict) and str(accepted.get("status") or "").strip() == "accepted":
+        return {}
+    if not isinstance(snap, dict):
+        return {}
+    corpus = str(snap.get("corpusPlain") or snap.get("corpus_plain") or "").strip()
+    if len(corpus) < 500:
+        return {}
+    return {
+        "document_text": corpus,
+        "server_full_document_text": corpus,
+        "premium_server_full_document_text": corpus,
+        "premium_full_document_text": corpus,
+        "premium_render_source": "server_full_document_text",
+    }
+
+
 def _apply_snapshot_registry_to_draft(
     draft: AgreementDraft,
     *,
@@ -8069,6 +8093,9 @@ def post_canonical_review_snapshot(
             },
         ),
     )
+    pipeline = _pending_snapshot_pipeline_fields(accepted if isinstance(accepted, dict) else None, snap)
+    if pipeline:
+        next_draft = _merge_agreement_draft(next_draft, **pipeline)
     _save_draft_sync(next_draft.model_dump(), request)
     return {
         "ok": True,

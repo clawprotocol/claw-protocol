@@ -4,6 +4,7 @@ import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import {
   longestDraftPipelineCorpus,
   resolvePaidCreateResumeCorpus,
+  resolvePaidCreateResumeDisplayPhase,
   selectPaidCreateResumeCorpus,
   shouldAttemptCanonicalSnapshotOnCreateResume,
 } from "./paidCreateResumeHydration";
@@ -104,5 +105,29 @@ describe("paid create resume hydration", () => {
     expect(selectPaidCreateResumeCorpus({ verifiedSnapshotCorpus: "", draftPipelineCorpus: STALE_MONTHLY }).source).toBe(
       "draft_pipeline",
     );
+  });
+
+  it("keeps review chrome when snapshot paper exists even if draft pipeline fields are empty", () => {
+    expect(
+      resolvePaidCreateResumeDisplayPhase({
+        signerSetupResume: false,
+        snapshotOrPipelineCorpus: LATEST,
+        draftKeepsReview: false,
+      }),
+    ).toBe("review");
+    expect(
+      resolvePaidCreateResumeDisplayPhase({
+        signerSetupResume: false,
+        snapshotOrPipelineCorpus: "",
+        draftKeepsReview: false,
+      }),
+    ).toBe("intake");
+    expect(
+      resolvePaidCreateResumeDisplayPhase({
+        signerSetupResume: true,
+        snapshotOrPipelineCorpus: "",
+        draftKeepsReview: false,
+      }),
+    ).toBe("review");
   });
 });

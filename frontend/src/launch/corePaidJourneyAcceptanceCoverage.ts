@@ -331,7 +331,8 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
     !intake.includes("shouldReparseStructuredDraftFromRecoveredIntake") ||
     !intake.includes("readRecoveredPaymentClarificationAnswers") ||
     !intake.includes("setPaidProLiveRevisionView({") ||
-    !intake.includes("hydrateCommercialReviewFromServerSnapshot({ agreementId: hid })")
+    !intake.includes("hydrateCommercialReviewFromServerSnapshot({ agreementId: hid })") ||
+    !intake.includes("resolvePaidCreateResumeDisplayPhase")
   ) {
     throw new Error("create resume / Apply no longer recover from authorized GET snapshot and draft");
   }

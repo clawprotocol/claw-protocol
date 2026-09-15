@@ -45,6 +45,19 @@ export function shouldAttemptCanonicalSnapshotOnCreateResume(
   return true;
 }
 
+export function resolvePaidCreateResumeDisplayPhase(args: {
+  signerSetupResume: boolean;
+  snapshotOrPipelineCorpus: string;
+  draftKeepsReview: boolean;
+  minLen?: number;
+}): "review" | "intake" {
+  if (args.signerSetupResume) return "review";
+  const corpus = String(args.snapshotOrPipelineCorpus || "").trim();
+  const minLen = args.minLen ?? PAID_PRO_AUTHORITY_MIN_LEN;
+  if (corpus.length >= minLen || args.draftKeepsReview) return "review";
+  return "intake";
+}
+
 export function selectPaidCreateResumeCorpus(args: {
   verifiedSnapshotCorpus: string;
   draftPipelineCorpus: string;
