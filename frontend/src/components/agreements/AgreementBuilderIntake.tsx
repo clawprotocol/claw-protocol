@@ -18453,34 +18453,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (!paymentApplyPrerequisitesReady({ intakeText, structured }) || !structured) {
         throw new Error("payment_clarification_apply_unavailable");
       }
+      let nextStructured = structured;
       const identityApplied = applyIdentityClarificationAnswers({
-        parties: structured.parties || [],
-        intake: [intakeText, structured.additional_terms || ""].filter(Boolean).join("\n"),
+        parties: nextStructured.parties || [],
+        intake: [intakeText, nextStructured.additional_terms || ""].filter(Boolean).join("\n"),
         answers: userGapAnswers,
-        unresolvedSubjects: structured.unresolvedIdentitySubjects,
+        unresolvedSubjects: nextStructured.unresolvedIdentitySubjects,
       });
       const identityLines = String(userGapAnswers || "")
         .split(/\n+/)
         .map((line) =>
           persistableIdentityResolution(line, {
-            knownEntities: (structured?.parties || []).map((party) => party.name),
+            knownEntities: (nextStructured.parties || []).map((party) => party.name),
           }),
         )
         .filter((line): line is string => Boolean(line));
-      structured = {
-        ...structured,
+      nextStructured = {
+        ...nextStructured,
         parties: applyExplicitIntakeRolesToParties(identityApplied.parties, intakeText),
         unresolvedIdentitySubjects: identityApplied.unresolvedSubjects,
         additional_terms: mergeUnresolvedIdentityIntoText(
           identityLines.length
-            ? [structured.additional_terms || "", ...identityLines].filter(Boolean).join("\n").trim()
-            : structured.additional_terms,
+            ? [nextStructured.additional_terms || "", ...identityLines].filter(Boolean).join("\n").trim()
+            : nextStructured.additional_terms,
           identityApplied.unresolvedSubjects,
         ),
-        material_asks: (structured.material_asks || []).filter(
+        material_asks: (nextStructured.material_asks || []).filter(
           (ask) => !identityApplied.clarificationQuestion || ask !== identityApplied.clarificationQuestion,
         ),
       };
+      structured = nextStructured;
       if (identityApplied.clarificationQuestion && !identityLines.length) {
         const person = personNamedInIdentityQuestion(identityApplied.clarificationQuestion);
         if (person && new RegExp(person.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(userGapAnswers || "")) {
@@ -18500,9 +18502,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const persistIdentityAndClose = async (revisionId: string) => {
         await persistConfirmedIdentityIntoLiveDraft({
           agreementId: captured.agreementId,
-          parties: structured.parties || [],
+          parties: nextStructured.parties || [],
           unresolvedSubjects: identityApplied.unresolvedSubjects,
-          additionalTerms: structured.additional_terms,
+          additionalTerms: nextStructured.additional_terms,
         });
         markPaymentClarificationApplied(
           {
@@ -18540,10 +18542,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           ),
           structured.parties || [],
         ).trim();
-        structured = {
-          ...structured,
-          parties: applyOpeningPaperRolesToParties(structured.parties || [], patched),
+        nextStructured = {
+          ...nextStructured,
+          parties: applyOpeningPaperRolesToParties(nextStructured.parties || [], patched),
         };
+        structured = nextStructured;
         if (patched.length >= PAID_PRO_AUTHORITY_MIN_LEN && patched !== authorizedPaper) {
           const committed = await commitPaidProUserApprovedRevision(
             patched,
