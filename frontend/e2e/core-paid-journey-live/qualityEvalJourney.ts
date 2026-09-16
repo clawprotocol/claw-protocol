@@ -900,14 +900,23 @@ export async function assertFreshEditableReopen(
   return { article, reopenId };
 }
 
+function mintEventObject(value: RecipientTokenEvent["body"] | RecipientTokenEvent["request"]): Record<string, unknown> {
+  if (value && typeof value === "object") return value;
+  if (typeof value === "string" && value.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
 function mintPartyId(event: RecipientTokenEvent | undefined): string {
-  const req = event?.request && typeof event.request === "object" ? event.request : {};
-  const body = event?.body && typeof event.body === "object" ? event.body : {};
-  return String(
-    (body as { recipient_party_id?: unknown }).recipient_party_id ||
-      (req as { recipient_party_id?: unknown }).recipient_party_id ||
-      "",
-  ).trim();
+  const req = mintEventObject(event?.request);
+  const body = mintEventObject(event?.body);
+  return String(body.recipient_party_id || req.recipient_party_id || "").trim();
 }
 
 function tokenFromReviewHref(href: string): string {
@@ -963,15 +972,41 @@ function mintedTokenForParticipant(
   const pid = participantId.trim();
   if (!pid) return undefined;
   return [...events].reverse().find((row) => {
-    const body = row.body && typeof row.body === "object" ? row.body : {};
-    const req = row.request || {};
+    const body = mintEventObject(row.body);
+    const req = mintEventObject(row.request);
     return (
       row.ok &&
-      String((body as { mode?: string }).mode || req.mode || "") === mode &&
-      String((body as { token?: string }).token || "").length > 12 &&
+      String(body.mode || req.mode || "") === mode &&
+      String(body.token || "").length > 12 &&
       mintPartyId(row) === pid
     );
   });
+}
+
+async function ownerRemintReviewToken(
+  page: Page,
+  agreementId: string,
+  participantId: string,
+): Promise<RecipientTokenEvent | null> {
+  const api = configuredLiveApiBase();
+  const runtime = loadCorePaidJourneyRuntime();
+  const res = await page.request.post(`${api}/api/agreements/${encodeURIComponent(agreementId)}/recipient-access-token`, {
+    headers: {
+      Authorization: `Bearer ${runtime.access_token}`,
+      "X-Claw-Org-Id": runtime.org_id,
+      "Content-Type": "application/json",
+    },
+    data: { mode: "review", role: "reviewer", recipient_party_id: participantId },
+  });
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok() || String(body.token || "").length <= 12) return null;
+  return {
+    ok: true,
+    status: res.status(),
+    url: res.url(),
+    request: { mode: "review", recipient_party_id: participantId },
+    body,
+  };
 }
 
 type OwnerPartyRow = {
@@ -1331,14 +1366,7 @@ export async function completeLocalReviewSignAndFinal(args: {
   await assertSignerFormHoldsIntakeOrFillOnlyOmitted(args.page, args.signers, {
     fillProvidedIfEmpty: args.fillProvidedIfEmpty,
   });
-  const reviewMintWait = args.page
-    .waitForResponse(
-      (res) => res.url().includes("/recipient-access-token") && res.request().method() === "POST",
-      { timeout: 45_000 },
-    )
-    .catch(() => null);
   expect(await clickOwnerSend(args.page, "simple-pro-send-for-review"), "send-for-review must mount").toBeTruthy();
-  await reviewMintWait;
   await expect.poll(async () => (await fetchOwnerParties(args.page, args.agreementId)).length, { timeout: 30_000 }).toBe(
     args.signers.length,
   );
@@ -1359,9 +1387,20 @@ export async function completeLocalReviewSignAndFinal(args: {
       );
     }
   }
+  const remintedReview = new Set<string>();
   await expect
     .poll(async () => {
-      const handoff = await ownerReviewLinkHandoffRows(args.page, args.agreementId);
+      const handoff = await ownerReviewLinkHandoffRows(args.page, args.agreementId).catch(() => []);
+      for (const signer of reviewSigners) {
+        const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
+        if (!row?.id) continue;
+        const pid = String(row.id);
+        if (reviewTokenForParticipant(minted, handoff, pid).length > 12) continue;
+        if (remintedReview.has(pid)) continue;
+        remintedReview.add(pid);
+        const reminted = await ownerRemintReviewToken(args.page, args.agreementId, pid);
+        if (reminted) minted.push(reminted);
+      }
       return reviewSigners.every((signer) => {
         const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
         return Boolean(row?.id && reviewTokenForParticipant(minted, handoff, String(row.id)).length > 12);
