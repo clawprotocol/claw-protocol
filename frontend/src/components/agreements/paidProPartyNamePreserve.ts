@@ -15,7 +15,7 @@ import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { maskEmailAddresses, unmaskEmailAddresses } from "./paidProEmailMask";
 import { US_STATE_NAMES_ENGLISH } from "./partyFormat";
 
-const IF_TO_NOTICE_HEADER_RE = /^If to\s+(.+?)\s*:?\s*$/i;
+const IF_TO_NOTICE_HEADER_RE = /^If to\s+(.+?)\s*:\s*$/i;
 
 /**
  * Recognized operative-section headings. Shared with canonical party extraction so
@@ -152,7 +152,7 @@ export function collapseDuplicatedIfToHeaderLines(text: string, fullNames: reado
   let changed = false;
   const out = lines.map((line) => {
     const trimmed = line.trim();
-    const match = trimmed.match(/^If to\s+(.+?)\s*:?\s*$/i);
+    const match = trimmed.match(/^If to\s+(.+?)\s*:\s*$/i);
     if (!match?.[1]) return line;
     const entity = collapseDuplicatedLegalEntityPhrase(match[1].trim(), fullNames);
     const normalized = `If to ${entity}:`;
@@ -676,14 +676,14 @@ function textStartsWithLegalNameRemainder(text: string, remainder: string): bool
   const norm = (value: string) =>
     value
       .replace(/\s+/g, " ")
-      .replace(/\.+(?=\s|$)/g, "")
+      .replace(/\.+(?=\s|$|[.,;:'")\]])/g, "")
       .toLowerCase();
   const expected = norm(remainder).replace(/^\s+/, "");
   if (!expected) return true;
   const actual = norm(text).replace(/^\s+/, "");
   if (!actual.startsWith(expected)) return false;
   const after = actual.slice(expected.length);
-  return after === "" || /^[\s,;:'")\]]/.test(after);
+  return after === "" || /^[\s.,;:'")\]]/.test(after);
 }
 
 function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly string[]): string {
@@ -709,6 +709,15 @@ function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly str
     return /^(?:Client|Service\s+Provider|Party\s+\d+)$/i.test(match.trim());
   };
 
+  const shortUsedByOtherParty = (short: string, full: string): boolean => {
+    const key = short.replace(/\s+/g, " ").trim().toLowerCase();
+    return fullNames.some((other) => {
+      if (!other || other === full) return false;
+      if (other.replace(/\s+/g, " ").toLowerCase().startsWith(`${key} `)) return true;
+      return shortFormsFromLegalName(other).some((form) => form.replace(/\s+/g, " ").trim().toLowerCase() === key);
+    });
+  };
+
   let out = text;
   for (const { short, full } of pairs) {
     const re = new RegExp(
@@ -722,6 +731,8 @@ function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly str
       const window = out.slice(Math.max(0, offset - 8), offset + match.length + 16);
       if (/\[\[LDG_(?:EMAIL|URL)_\d+\]\]/i.test(window)) return match;
       const fromMatch = out.slice(offset);
+      if (fullNames.some((name) => textStartsWithLegalNameRemainder(fromMatch, name))) return match;
+      if (shortUsedByOtherParty(short, full)) return match;
       const tail = fromMatch.slice(match.length);
       const remainder = full.slice(match.length);
       // Inc vs Inc. (and other suffix punctuation) is the same legal name, not a
