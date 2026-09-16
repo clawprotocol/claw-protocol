@@ -18584,11 +18584,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           unresolvedSubjects: identityApplied.unresolvedSubjects,
           additionalTerms: nextStructured.additional_terms,
         });
-        let committedPlain = (paintedCorpus || "").trim();
-        if (committedPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) {
-          const latest = await fetchCanonicalReviewSnapshot({ agreementId: captured.agreementId });
-          if (latest.ok) committedPlain = String(latest.snapshot.corpus_plain || "").trim();
-        }
+        const committedPlain = (paintedCorpus || "").trim();
         if (committedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
           setAgreementDocumentText(committedPlain);
           acceptedReviewCorpusRef.current = committedPlain;
