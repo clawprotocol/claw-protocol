@@ -244,7 +244,7 @@ test.describe("identity-resolution customer flow", () => {
       { legalEntity: "Ironvale Manufacturing Inc", signerName: "Sam Ironvale", signerEmail: "sam.ironvale@ironvale.test" },
       { legalEntity: "Alex Rivera", signerName: "Alex Rivera", signerEmail: "alex.rivera@advisor.test" },
     ] as const;
-    await completeSignerDetailsThroughVisibleCustomerUi(firstReopen.page, signers);
+    await completeSignerDetailsThroughVisibleCustomerUi(firstReopen.page, started.agreementId, signers);
     await firstReopen.context.close();
     const reopened = await freshReopenWithoutIdentityQuestion(browser, page, started.agreementId, ["Alex Rivera"], {
       keepOpen: true,

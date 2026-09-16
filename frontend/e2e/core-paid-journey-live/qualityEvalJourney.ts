@@ -1252,9 +1252,54 @@ function ownerOrigin(page: Page): string {
 
 export async function completeSignerDetailsThroughVisibleCustomerUi(
   page: Page,
+  agreementId: string,
   signers: readonly { legalEntity: string; signerName: string; signerEmail?: string }[],
 ): Promise<void> {
+  const signerInputReady = page.locator('[data-claw-recipient-field="r1-signer-name"]').first();
+  if (!(await signerInputReady.isVisible({ timeout: 2_000 }).catch(() => false))) {
+    const openSetup = page
+      .getByTestId("paid-pro-forced-add-signer-details")
+      .or(page.getByTestId("pro-review-add-signer-details"))
+      .or(
+        page.getByRole("button", {
+          name: /Add signer details|Complete signer details|Finalize signer details/i,
+        }),
+      )
+      .first();
+    expect(
+      await openSetup.isVisible({ timeout: 8_000 }).catch(() => false),
+      "visible customer Add/Complete signer details CTA",
+    ).toBe(true);
+    await openSetup.click();
+  }
+  await expect(signerInputReady, "signer-name field must be visible in customer UI").toBeVisible({ timeout: 12_000 });
   await assertSignerFormHoldsIntakeOrFillOnlyOmitted(page, signers, { fillProvidedIfEmpty: true });
+  const saveDetails = page
+    .getByRole("button", {
+      name: /Finalize signer details and continue to review decision|Complete signer details|Save signer details|Continue to review/i,
+    })
+    .first();
+  if (await saveDetails.isVisible().catch(() => false)) {
+    await expect(saveDetails, "customer save of signer details").toBeEnabled({ timeout: 12_000 });
+    await saveDetails.click();
+  }
+  await expect
+    .poll(async () => {
+      const saved = await fetchOwnerIdentityState(page, agreementId);
+      return signers.every((signer) => {
+        const row = saved.parties.find((party) => String(party.name || "").includes(signer.legalEntity));
+        const name = String(row?.signerName || row?.signer_name || "").trim();
+        const email = String(row?.email || "").trim().toLowerCase();
+        return (
+          Boolean(row) &&
+          (!signer.signerName || name.toLowerCase() === signer.signerName.toLowerCase()) &&
+          (!signer.signerEmail || email === signer.signerEmail.toLowerCase())
+        );
+      })
+        ? 1
+        : 0;
+    }, { timeout: 20_000 })
+    .toBe(1);
 }
 
 async function assertSignerFormHoldsIntakeOrFillOnlyOmitted(
