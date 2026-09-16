@@ -165,6 +165,15 @@ export function applyPaidProRenderPolish(
 
   const explicitPartyList = (partyNames?.length ?? 0) >= 2;
   const intakeEmails = extractIntakeEmailsOrdered(intakeRaw);
+  const confirmedEmails = (opts?.authorityParties ?? [])
+    .map((party) => String(party.signerEmail || "").trim())
+    .filter((email) => email.includes("@"));
+  const restoreEmails =
+    confirmedEmails.length > 0
+      ? [...new Set(confirmedEmails.map((email) => email.toLowerCase()))].map(
+          (low) => confirmedEmails.find((email) => email.toLowerCase() === low)!,
+        )
+      : intakeEmails;
 
   if (polishMode === "validate_only") {
     const guard = verifyIntakeEmailsPreserved(intakeRaw, baseText, intakeEmails);
@@ -231,29 +240,29 @@ export function applyPaidProRenderPolish(
   // Restore/verify after structure + finalize — those passes historically corrupted
   // emails (e.g. punctuation floor inserting spaces into ethan.cole@…).
   let repairedCount = 0;
-  let guard = verifyIntakeEmailsPreserved(intakeRaw, working, intakeEmails);
-  if (guard.mutatedEmailCount > 0 && intakeEmails.length > 0) {
-    const restored = restoreExactIntakeEmails(working, intakeEmails);
+  let guard = verifyIntakeEmailsPreserved(intakeRaw, working, restoreEmails);
+  if (guard.mutatedEmailCount > 0 && restoreEmails.length > 0) {
+    const restored = restoreExactIntakeEmails(working, restoreEmails);
     working = restored.text;
     repairedCount += restored.repairedCount;
-    guard = verifyIntakeEmailsPreserved(intakeRaw, working, intakeEmails);
+    guard = verifyIntakeEmailsPreserved(intakeRaw, working, restoreEmails);
     if (guard.mutatedEmailCount > 0) {
-      const restored2 = restoreExactIntakeEmails(working, intakeEmails);
+      const restored2 = restoreExactIntakeEmails(working, restoreEmails);
       working = restored2.text;
       repairedCount += restored2.repairedCount;
-      guard = verifyIntakeEmailsPreserved(intakeRaw, working, intakeEmails);
+      guard = verifyIntakeEmailsPreserved(intakeRaw, working, restoreEmails);
     }
   }
 
   if (
-    intakeEmails.length > 0 &&
+    restoreEmails.length > 0 &&
     guard.finalExactEmailCount === 0 &&
     guard.mutatedEmailCount > 0
   ) {
-    const restored = restoreExactIntakeEmails(working, intakeEmails);
+    const restored = restoreExactIntakeEmails(working, restoreEmails);
     working = restored.text;
     repairedCount += restored.repairedCount;
-    guard = verifyIntakeEmailsPreserved(intakeRaw, working, intakeEmails);
+    guard = verifyIntakeEmailsPreserved(intakeRaw, working, restoreEmails);
     logPaidProEmailMutationGuard({
       surface: `${surface}:email_restore_retry`,
       ...guard,

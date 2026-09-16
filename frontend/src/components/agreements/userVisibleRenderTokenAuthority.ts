@@ -413,15 +413,18 @@ export function enforceUserVisibleRenderTokenAuthority(
     repairs.push(...slotRecovery.repairs);
   }
 
-  const intakeEmails = [
-    ...extractIntakeContacts(ctx?.intakeRaw).map((c) => c.email),
-    ...parties.map((p) => p.signerEmail.trim()).filter(Boolean),
-  ];
-  const uniqueEmails = [...new Set(intakeEmails.map((e) => e.toLowerCase()))].map((low) =>
-    intakeEmails.find((e) => e.toLowerCase() === low)!,
+  const partyEmails = parties
+    .map((p) => p.signerEmail.trim())
+    .filter((email) => email.includes("@"));
+  const intakeEmails = extractIntakeContacts(ctx?.intakeRaw).map((c) => c.email);
+  const restoreSource = partyEmails.length > 0 ? partyEmails : intakeEmails;
+  const uniqueEmails = [...new Set(restoreSource.map((e) => e.toLowerCase()))].map(
+    (low) => restoreSource.find((e) => e.toLowerCase() === low)!,
   );
   if (uniqueEmails.length > 0) {
-    const restored = restoreExactIntakeEmails(out, uniqueEmails);
+    const restored = restoreExactIntakeEmails(out, uniqueEmails, {
+      enforceProvidedEmails: partyEmails.length > 0,
+    });
     if (restored.repairedCount > 0) {
       out = restored.text;
       replacedCount += restored.repairedCount;

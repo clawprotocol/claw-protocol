@@ -78,26 +78,87 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const WELL_FORMED_EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+function splitEmailSpan(span: string): { address: string; trailing: string } {
+  const match = span.match(/^([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})([:;,.]*)(.*)$/);
+  if (!match) return { address: span, trailing: "" };
+  if (match[3]) return { address: span, trailing: "" };
+  return { address: match[1], trailing: match[2] };
+}
+
+function isCorruptedEmailSpan(span: string): boolean {
+  const { address, trailing } = splitEmailSpan(span);
+  if (trailing && address) {
+    return /\s/.test(address) || textContainsCorruptedEntityEmail(address) || !WELL_FORMED_EMAIL_RE.test(address);
+  }
+  if (/\s/.test(span)) return true;
+  if (textContainsCorruptedEntityEmail(span)) return true;
+  return !WELL_FORMED_EMAIL_RE.test(span.trim());
+}
+
+function emailsByLocalPart(emails: readonly string[]): Map<string, string[]> {
+  const byLocal = new Map<string, string[]>();
+  for (const email of emails) {
+    const local = email.split("@")[0]?.toLowerCase();
+    if (!local) continue;
+    const bucket = byLocal.get(local) ?? [];
+    if (!bucket.some((item) => item.toLowerCase() === email.toLowerCase())) bucket.push(email);
+    byLocal.set(local, bucket);
+  }
+  return byLocal;
+}
+
+export type RestoreExactEmailsOptions = {
+  /**
+   * When true, a well-formed address that is not in `emails` may be replaced only if
+   * exactly one provided email shares its local part (confirmed party contact).
+   * Default false: never overwrite a well-formed current address from stale intake.
+   */
+  enforceProvidedEmails?: boolean;
+};
+
 /**
- * Force exact intake emails back into the document after polish (byte-for-byte when possible).
+ * Restore emails from the provided confirmed/intake list after polish.
+ * Well-formed current addresses are not rewritten from a different well-formed source
+ * unless `enforceProvidedEmails` is set and the local-part mapping is unique.
  */
 export function restoreExactIntakeEmails(
   text: string,
   intakeEmails: readonly string[],
+  opts?: RestoreExactEmailsOptions,
 ): { text: string; repairedCount: number } {
-  let out = unmaskEmailAddresses(text, intakeEmails);
+  const provided = intakeEmails.map((email) => String(email || "").trim()).filter(Boolean);
+  let out = unmaskEmailAddresses(text, provided);
   let repairedCount = 0;
+  const providedLower = new Set(provided.map((email) => email.toLowerCase()));
+  const byLocal = emailsByLocalPart(provided);
 
-  for (const email of intakeEmails) {
-    if (!email) continue;
-    if (out.includes(email)) continue;
-    const local = email.split("@")[0];
-    if (!local) continue;
-    const corruptRe = new RegExp(`${escapeRe(local)}@[^\\n\\r,;<>\\]\\]]+`, "gi");
-    const next = out.replace(corruptRe, email);
-    if (next !== out) {
-      out = next;
+  const replaceLocalSpans = (sourceEmail: string, allowWellFormed: boolean): void => {
+    const local = sourceEmail.split("@")[0];
+    if (!local) return;
+    const spanRe = new RegExp(`${escapeRe(local)}@[^\\n\\r,;<>\\]\\]]+`, "gi");
+    const next = out.replace(spanRe, (span) => {
+      const { address, trailing } = splitEmailSpan(span);
+      const comparable = address || span;
+      if (comparable.toLowerCase() === sourceEmail.toLowerCase()) return span;
+      if (providedLower.has(comparable.toLowerCase())) return span;
+      const corrupted = isCorruptedEmailSpan(span);
+      if (!corrupted && !allowWellFormed) return span;
+      const peers = byLocal.get(local.toLowerCase()) ?? [];
+      if (peers.length !== 1) return span;
       repairedCount += 1;
+      return `${peers[0]!}${trailing}`;
+    });
+    out = next;
+  };
+
+  for (const email of provided) {
+    replaceLocalSpans(email, false);
+  }
+  if (opts?.enforceProvidedEmails) {
+    for (const email of provided) {
+      replaceLocalSpans(email, true);
     }
   }
 
