@@ -93,6 +93,22 @@ describe("Test374 Pro agreement professional-grade regression", () => {
     expect(text).not.toMatch(/Coastal Meridian Analytics \(Analytics Integrator\)/);
   });
 
+  it("does not double an already-suffixed Ironvale Inc. on the signed view", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc.";
+    const body = `This Services Agreement is entered into by and between ${harbor} ("Service Provider") and ${ironvale} ("Client").`;
+    const { text } = repairProtectedLegalEntitySuffixes(body, [harbor, ironvale], body);
+    expect(text).toContain(`${ironvale} ("Client")`);
+    expect(text).not.toMatch(/Ironvale Manufacturing Inc\. Inc\./);
+    const doubledParty = repairProtectedLegalEntitySuffixes(
+      body,
+      [harbor, "Ironvale Manufacturing Inc. Inc."],
+      body,
+    ).text;
+    expect(doubledParty).toContain(`${ironvale} ("Client")`);
+    expect(doubledParty).not.toMatch(/Ironvale Manufacturing Inc\. Inc\./);
+  });
+
   it("repairs truncated legal entity suffix in recital", () => {
     const body = `This Agreement is between ${BLUE} ("Client") and Harbor Peak Automation ("Service Provider").`;
     const { text } = repairProtectedLegalEntitySuffixes(body, [BLUE, HARBOR], TEST372_FREE_STACKED_PARTY_INTAKE);

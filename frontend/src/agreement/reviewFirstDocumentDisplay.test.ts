@@ -245,4 +245,24 @@ By: __________________________`;
     expect(visible).toContain(`20% to ${clear}.`);
     expect(visible).not.toMatch(/ClearSpring Distribution \("Distributor"\)/);
   });
+
+  it("owner signed view does not double Ironvale Inc.", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc.";
+    const accepted = [
+      `This Services Agreement (this "Agreement") is entered into by and between ${harbor} ("Service Provider") and ${ironvale} ("Client"). Service Provider and Client may be referred to individually as a "Party" and collectively as the "Parties."`,
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      ...Array.from({ length: 20 }, () => "Operative commercial paragraph for length."),
+    ].join("\n");
+    const html = buildReviewFirstDocumentDisplayHtml({
+      serverHtml: "",
+      corpusText: accepted,
+      partyNames: [harbor, ironvale],
+      surface: "owner_done",
+    });
+    const visible = extractVisiblePlainFromReviewHtml(html);
+    expect(visible).toContain(`${ironvale} ("Client")`);
+    expect(visible).not.toMatch(/Ironvale Manufacturing Inc\. Inc\./);
+  });
 });

@@ -934,10 +934,12 @@ export function applyIdentityResolutionToAuthorizedPaper(
   const roleLabels = parties.map((party) => displayRoleForParty(party, doc)).filter((role) => role !== "Party");
   if (roleLabels.length >= 2) {
     const collective = oxfordRoleList(roleLabels);
-    doc = doc.replace(
-      /[A-Z][A-Za-z]+(?:,\s+[A-Z][A-Za-z]+)*(?:,?\s+and\s+[A-Z][A-Za-z]+) may be referred to individually as a ["“]Party["”] and collectively as the ["“]Parties\.?["”]\.?/,
-      `${collective} may be referred to individually as a "Party" and collectively as the "Parties".`,
-    );
+    if (!new RegExp(`${escapeRe(collective)} may be referred to individually as a ["“]Party["”]`, "i").test(doc)) {
+      doc = doc.replace(
+        /[A-Z][A-Za-z]+(?:,\s+[A-Z][A-Za-z]+)*(?:,?\s+and\s+[A-Z][A-Za-z]+) may be referred to individually as a ["“]Party["”] and collectively as the ["“]Parties\.?["”]\.?/,
+        `${collective} may be referred to individually as a "Party" and collectively as the "Parties."`,
+      );
+    }
   }
   for (const person of individuals) {
     const email = String(person.email || "").trim();

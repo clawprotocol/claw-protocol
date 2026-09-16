@@ -572,6 +572,7 @@ describe("legal party identity clarification", () => {
     ]);
     expect(after).toContain(`and Alex Rivera ("Advisor")`);
     expect(after).toMatch(/Consultant, Client, and Advisor may be referred to individually as a "Party"/);
+    expect(after).toMatch(/collectively as the "Parties\."/);
     expect(after).toMatch(/If to Alex Rivera:[\s\S]*Email: alex\.rivera@advisor\.test/);
     expect(after).not.toMatch(
       /If to Harbor Peak Analytics LLC:\s*\nHarbor Peak Analytics LLC\s*\nEmail: alex\.rivera@advisor\.test/,
@@ -710,6 +711,26 @@ describe("legal party identity clarification", () => {
     ]);
     expect(after).toMatch(/CONSULTANT:\s*\nHarbor Peak Analytics LLC\s*\nBy:[^\n]+\nName: Pat Harbor/);
     expect(after).toMatch(/CLIENT:\s*\nIronvale Manufacturing Inc\.?\s*\nBy:[^\n]+\nName: Sam Ironvale/);
+  });
+
+  it("does not rewrite an already-correct Consultant and Client Parties sentence", () => {
+    const before = `This Services Agreement (this "Agreement") is entered into by and between ${HARBOR} ("Consultant") and ${IRONVALE} ("Client"). Consultant and Client may be referred to individually as a "Party" and collectively as the "Parties."`;
+    const after = applyIdentityResolutionToAuthorizedPaper(before, [
+      { name: HARBOR, role: "Consultant" },
+      { name: IRONVALE, role: "Client" },
+    ]);
+    expect(after).toContain('collectively as the "Parties."');
+    expect(after).not.toMatch(/collectively as the "Parties"\./);
+  });
+
+  it("does not rewrite an already-correct Service Provider and Client Parties sentence", () => {
+    const before = `This Services Agreement (this "Agreement") is entered into by and between ${HARBOR} ("Service Provider") and ${IRONVALE} ("Client"). Service Provider and Client may be referred to individually as a "Party" and collectively as the "Parties."`;
+    const after = applyIdentityResolutionToAuthorizedPaper(before, [
+      { name: HARBOR, role: "Service Provider" },
+      { name: IRONVALE, role: "Client" },
+    ]);
+    expect(after).toContain('collectively as the "Parties."');
+    expect(after).not.toMatch(/collectively as the "Parties"\./);
   });
 
   it("keeps opening Consultant/Client collective roles when stored parties say Client/Service Provider", () => {

@@ -3,6 +3,7 @@
  */
 
 import { resolveFullLegalPartiesFromIntake } from "./paidProPartyNamePreserve";
+import { repairDuplicatedLegalEntitySuffixPhrase } from "./paidProLegalEntityNameHygiene";
 
 const ENTITY_SUFFIX =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company)\.?$/i;
@@ -11,6 +12,16 @@ const WITNESS_RE = /\bIN WITNESS WHEREOF\b/i;
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** `Inc.` → `Inc\.?` so an already-suffixed name is not treated as missing the suffix. */
+function suffixLookahead(suffixToken: string): string {
+  return suffixToken
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => `${escapeRe(word.replace(/\.+$/, ""))}\\.?`)
+    .join("\\s+");
 }
 
 function stripEntitySuffix(full: string): string {
@@ -65,7 +76,9 @@ export function repairProtectedLegalEntitySuffixes(
   const fullNames = preferSuffixedPartyLegalNames(
     resolveFullLegalPartiesFromIntake(partyNames, intakeRaw),
     partyNames,
-  );
+  )
+    .map((name) => repairDuplicatedLegalEntitySuffixPhrase(String(name || "").replace(/\s+/g, " ").trim()))
+    .filter((name, index, all) => name.length >= 4 && all.indexOf(name) === index);
   if (!text?.trim() || fullNames.length < 2) return { text, repairs: 0 };
 
   const witnessIdx = text.search(WITNESS_RE);
@@ -80,19 +93,21 @@ export function repairProtectedLegalEntitySuffixes(
     const short = stripEntitySuffix(trimmedFull);
     if (!short || short.length < 4 || short === trimmedFull) continue;
 
-    const definedNameNeedle = `${short} ("`;
-    const definedNameCurly = `${short} (“`;
-    if (head.includes(definedNameNeedle) && !head.includes(`${trimmedFull} (`)) {
-      head = head.split(definedNameNeedle).join(`${trimmedFull} ("`);
-      repairs += 1;
-    } else if (head.includes(definedNameCurly) && !head.includes(`${trimmedFull} (`)) {
-      head = head.split(definedNameCurly).join(`${trimmedFull} (“`);
-      repairs += 1;
-    }
-
     const suffixToken = trimmedFull.slice(short.length).trim();
-    const suffixAlt = escapeRe(suffixToken).replace(/\./g, "\\.?");
+    const suffixAlt = suffixLookahead(suffixToken);
+    if (!suffixAlt) continue;
     const shortRe = escapeRe(short);
+
+    // Restore `short ("Role")` only when that short form is not already suffixed.
+    const definedNameRe = new RegExp(`\\b${shortRe}(?!\\s+${suffixAlt})(\\s*)([("“])`, "g");
+    if (definedNameRe.test(head)) {
+      definedNameRe.lastIndex = 0;
+      const next = head.replace(definedNameRe, `${trimmedFull}$1$2`);
+      if (next !== head) {
+        head = next;
+        repairs += 1;
+      }
+    }
 
     const collapsedPossessive = new RegExp(`\\b${shortRe}\\s+'s\\b`, "gi");
     if (collapsedPossessive.test(head)) {
@@ -113,6 +128,15 @@ export function repairProtectedLegalEntitySuffixes(
       return trimmedFull;
     });
     if (next !== head) head = next;
+  }
+
+  const collapsed = head.replace(
+    /\b((?:LLC|L\.L\.C\.|Inc|Incorporated|Corp|Corporation|Ltd|Limited|LP|L\.P\.|LLP|PLLC))\.?\s+\1\.?/gi,
+    (_, token: string) => (/^inc$/i.test(token) ? "Inc." : token),
+  );
+  if (collapsed !== head) {
+    head = collapsed;
+    repairs += 1;
   }
 
   const out = head + tail;
