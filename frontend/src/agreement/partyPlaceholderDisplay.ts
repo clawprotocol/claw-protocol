@@ -11,6 +11,7 @@
 
 import { extractBetweenPartyNameList } from "../components/agreements/partyBetweenParse";
 import {
+  isInvalidPartySlotLegalEntity,
   isStandaloneLegalEntitySuffix,
   normalizeAgreementPartyName,
 } from "../components/agreements/partySlotIdentityNormalize";
@@ -44,6 +45,7 @@ export function repairDuplicatedEntityPunctuationInDisplay(text: string): string
 function pushUnique(out: string[], seen: Set<string>, raw: string) {
   const t = isolateLegalEntityFromContaminatedName(stripParenClauses(raw).replace(/\s+/g, " ").trim());
   if (t.length < 2 || t.length > 160) return;
+  if (isInvalidPartySlotLegalEntity(t)) return;
   const low = t.toLowerCase();
   if (/^(you|i|we|they|counterparty|party|parties|the|a|an)\b/i.test(t)) return;
   if (seen.has(low)) return;

@@ -23,13 +23,21 @@ const IF_TO_NOTICE_HEADER_RE = /^If to\s+(.+?)\s*:?\s*$/i;
  * Numbered legal-party lines (`2. Summit AI Consulting LLC`) still match via entity suffix.
  */
 const AGREEMENT_SECTION_HEADING_PARTY_PREFIX_RE =
-  /^(?:INDEPENDENT CONTRACTOR AND ACCESS|SCOPE OF SERVICES|WARRANTIES AND COMPLIANCE|LIMITATION OF LIABILITY|INTELLECTUAL PROPERTY|CONFIDENTIALITY|GOVERNING LAW|NOTICES|TERMINATION|ELECTRONIC SIGNATURES|ENTIRE AGREEMENT|MISCELLANEOUS|FEES AND PAYMENT|TERM\b|CLIENT\.)/i;
+  /^(?:INDEPENDENT CONTRACTOR AND ACCESS|SCOPE OF SERVICES|WARRANTIES AND COMPLIANCE|LIMITATION OF LIABILITY|INTELLECTUAL PROPERTY|CONFIDENTIALITY|GOVERNING LAW|NOTICES|TERMINATION|ELECTRONIC SIGNATURES|ENTIRE AGREEMENT|MISCELLANEOUS|FEES AND PAYMENT|COMMERCIAL SAFEGUARDS|TERM\b|CLIENT\.)/i;
 
 /** True when a candidate is an agreement section heading, not a contractual party. */
 export function isAgreementSectionHeadingPartyName(name: string): boolean {
   const t = (name || "").replace(/^\s*\d+(?:\.\d+)*\.?\s+/, "").replace(/\s+/g, " ").trim();
   if (!t) return false;
-  return AGREEMENT_SECTION_HEADING_PARTY_PREFIX_RE.test(t);
+  if (AGREEMENT_SECTION_HEADING_PARTY_PREFIX_RE.test(t)) return true;
+  // Chrome "New York" + "Commercial safeguards" must not fuse into a third legal party.
+  if (
+    !/\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Ltd\.?|Limited|Company)\b/i.test(t) &&
+    US_STATE_NAMES_ENGLISH.some((state) => new RegExp(`^${state.replace(/\s+/g, "\\s+")}\\s+Commercial$`, "i").test(t))
+  ) {
+    return true;
+  }
+  return false;
 }
 
 const TITLE_CASE_NON_PERSON_MENTION_RE =
@@ -380,6 +388,8 @@ const DISALLOWED_PARTY_PHRASE_RE: readonly RegExp[] = [
   /^total\s+contract\s+value:?/i,
   /^contract\s+value:?/i,
   /^total\s+project\s+fee:?/i,
+  /^commercial\s+safeguards\b/i,
+  new RegExp(`^(?:${US_STATE_ALT})\\s+commercial$`, "i"),
 ];
 
 function normPartyLabel(s: string): string {

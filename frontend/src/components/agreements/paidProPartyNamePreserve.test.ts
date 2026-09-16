@@ -26,6 +26,10 @@ describe("paidProPartyNamePreserve", () => {
     expect(isTitleCaseNonPersonMention("Elena Vasquez")).toBe(false);
     expect(isAgreementSectionHeadingPartyName("2. Summit AI Consulting LLC (Lead Provider)")).toBe(false);
     expect(isAuthoritativeLegalEntityName("Summit AI Consulting LLC")).toBe(true);
+    expect(isAgreementSectionHeadingPartyName("Commercial safeguards")).toBe(true);
+    expect(isAgreementSectionHeadingPartyName("New York Commercial")).toBe(true);
+    expect(isAuthoritativeLegalEntityName("New York Commercial")).toBe(false);
+    expect(isAuthoritativeLegalEntityName("New York Life Insurance Company")).toBe(true);
   });
 
   it("rejects occupational appositives as party legal entities", () => {

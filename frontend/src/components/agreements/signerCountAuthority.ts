@@ -7,9 +7,10 @@
 
 import { findSignatureLineAnchorsFromCorpusText } from "../../vs01/vs01SignatureBlockAnchors";
 import { labeledPartyLegalEntities, quotedRolePartyLegalEntities } from "./labeledPartyBlockParse";
-import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { isAgreementSectionHeadingPartyName, isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import {
   collapsePartySlotCandidates,
+  isInvalidPartySlotLegalEntity,
   resolveAuthoritativeIntakePartyNames,
   resolveAuthoritativePartySlotCount,
   resolveDeclaredExplicitPartyCount,
@@ -248,6 +249,7 @@ function confirmedAddedIndividualPartyNames(
   for (const raw of draftNames) {
     const name = String(raw || "").replace(/\s+/g, " ").trim();
     if (!name || isPlaceholderPartyName(name) || isNonCommercialPartyName(name)) continue;
+    if (isAgreementSectionHeadingPartyName(name) || isInvalidPartySlotLegalEntity(name)) continue;
     if (isAuthoritativeLegalEntityName(name)) continue;
     const words = name.split(/\s+/);
     if (words.length < 2 || words.length > 4 || !words.every((word) => /^[A-Za-z][A-Za-z'.-]*$/.test(word))) {
