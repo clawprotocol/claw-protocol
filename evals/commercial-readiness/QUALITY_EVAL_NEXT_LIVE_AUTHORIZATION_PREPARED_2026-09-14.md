@@ -70,9 +70,9 @@ Failed live Harbor sample: `quality-eval-live/20260914T195201Z-5037`. SaaS was n
 
 Offline correction `20260914T220448Z-23971` made **no provider calls**.
 
-## Proposed successor increment (not created, not activated)
+## Proposed successor increment (UNAPPROVED — not created, not activated, not executed)
 
-The 2026-09-15 four-sample grant on this filename was **executed once** and **stopped after Harbor 503**. Leftover inventory from that grant is **not** a new authorization.
+The 2026-09-15 four-sample grant on this filename was **executed once** and **stopped after Harbor 503**. Authorization status (executed, stopped) is distinct from dollars consumed (reserved **$1.329615**, known usage **$0.4888105**). Leftover inventory from that grant is **not** a new authorization. The corrected four-sample proposal lives in the Project store `docs/fresh-model-proposal.md` and remains **unapproved**.
 
 Prepare the **same four-sample framework** against the **current ledger**. Preserve this ledger. No replacement, no counter reset, no `LIMITS` raise in `quality_eval_budget.py`. Local identity-resolution work on this tree is **not** a live grant and does **not** spend.
 
@@ -144,10 +144,10 @@ Create a **new** authorized copy; do not flip `quality-eval-increment-20260914.i
 }
 ```
 
-Activation also requires updating `backend/quality_eval_live_prepare.py` so
-`authorization.max_additional_reserved_usd` may be **2.5** for this sidecar.
-The current hard-check equals **1.0** and would reject this grant. Do not change
-that check, and do not create the sidecar, until the later written approval.
+`backend/quality_eval_live_prepare.py` `AUTHORIZED_ADDITIONAL_RESERVED_USD`
+already allows **1.0** and **2.5**. The obsolete assertion that preparation
+accepts only **$1.00** is withdrawn. Do not create or activate a sidecar until
+a later written approval. The proposed successor grant is **unapproved**.
 
 `increment_reservation_gate` already reads `additional_allowance` from the
 active policy. Do not raise `LIMITS`.
