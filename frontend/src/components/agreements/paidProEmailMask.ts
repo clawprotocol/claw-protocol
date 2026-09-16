@@ -79,22 +79,23 @@ function escapeRe(s: string): string {
 }
 
 const WELL_FORMED_EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+const ENTITY_SUFFIX_IN_DOMAIN =
+  "(?:LLC|L\\.L\\.C\\.|Inc\\.?|Incorporated|Corp\\.?|Corporation|Ltd\\.?|Limited|LLP|LP)";
 
-function splitEmailSpan(span: string): { address: string; trailing: string } {
-  const match = span.match(/^([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})([:;,.]*)(.*)$/);
-  if (!match) return { address: span, trailing: "" };
-  if (match[3]) return { address: span, trailing: "" };
-  return { address: match[1], trailing: match[2] };
+function wellFormedEmailSpanRe(local: string): RegExp {
+  return new RegExp(`${escapeRe(local)}@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}`, "gi");
 }
 
-function isCorruptedEmailSpan(span: string): boolean {
-  const { address, trailing } = splitEmailSpan(span);
-  if (trailing && address) {
-    return /\s/.test(address) || textContainsCorruptedEntityEmail(address) || !WELL_FORMED_EMAIL_RE.test(address);
-  }
-  if (/\s/.test(span)) return true;
-  if (textContainsCorruptedEntityEmail(span)) return true;
-  return !WELL_FORMED_EMAIL_RE.test(span.trim());
+/** Damaged `local@Title Case Entity Inc.com` — stops at the glued TLD, not following wording. */
+function corruptedEntityEmailSpanRe(local: string): RegExp {
+  return new RegExp(
+    `${escapeRe(local)}@[A-Z][A-Za-z0-9.'-]*(?:\\s+[A-Z][A-Za-z0-9.'-]*)*\\s*${ENTITY_SUFFIX_IN_DOMAIN}\\.?[A-Za-z]{2,}`,
+    "g",
+  );
+}
+
+function isWellFormedEmail(address: string): boolean {
+  return WELL_FORMED_EMAIL_RE.test(address.trim());
 }
 
 function emailsByLocalPart(emails: readonly string[]): Map<string, string[]> {
@@ -137,20 +138,21 @@ export function restoreExactIntakeEmails(
   const replaceLocalSpans = (sourceEmail: string, allowWellFormed: boolean): void => {
     const local = sourceEmail.split("@")[0];
     if (!local) return;
-    const spanRe = new RegExp(`${escapeRe(local)}@[^\\n\\r,;<>\\]\\]]+`, "gi");
-    const next = out.replace(spanRe, (span) => {
-      const { address, trailing } = splitEmailSpan(span);
-      const comparable = address || span;
-      if (comparable.toLowerCase() === sourceEmail.toLowerCase()) return span;
-      if (providedLower.has(comparable.toLowerCase())) return span;
-      const corrupted = isCorruptedEmailSpan(span);
-      if (!corrupted && !allowWellFormed) return span;
-      const peers = byLocal.get(local.toLowerCase()) ?? [];
-      if (peers.length !== 1) return span;
+    const peers = byLocal.get(local.toLowerCase()) ?? [];
+    const uniquePeer = peers.length === 1 ? peers[0]! : null;
+
+    const replaceSpan = (span: string, treatAsCorrupted: boolean): string => {
+      if (span.toLowerCase() === sourceEmail.toLowerCase()) return span;
+      if (providedLower.has(span.toLowerCase())) return span;
+      if (!treatAsCorrupted && isWellFormedEmail(span) && !allowWellFormed) return span;
+      if (!uniquePeer) return span;
+      if (!treatAsCorrupted && !allowWellFormed) return span;
       repairedCount += 1;
-      return `${peers[0]!}${trailing}`;
-    });
-    out = next;
+      return uniquePeer;
+    };
+
+    out = out.replace(wellFormedEmailSpanRe(local), (span) => replaceSpan(span, false));
+    out = out.replace(corruptedEntityEmailSpanRe(local), (span) => replaceSpan(span, true));
   };
 
   for (const email of provided) {

@@ -6,6 +6,7 @@ import {
   textContainsCorruptedEntityEmail,
   unmaskEmailAddresses,
   unmaskProtectedSpans,
+  type RestoreExactEmailsOptions,
 } from "./paidProEmailMask";
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
@@ -210,5 +211,88 @@ describe("approved email changes survive rendering restoration", () => {
     expect(gated.text).not.toContain(proposedEmail);
     const fromPreviewOnly = restoreExactIntakeEmails(preview, [proposedEmail]);
     expect(fromPreviewOnly.text).toBe(preview);
+  });
+});
+
+describe("restoreExactIntakeEmails — replacement boundaries", () => {
+  function twice(text: string, emails: readonly string[], opts?: RestoreExactEmailsOptions) {
+    const first = restoreExactIntakeEmails(text, emails, opts);
+    const second = restoreExactIntakeEmails(first.text, emails, opts);
+    return { first, second };
+  }
+
+  it("preserves a correct confirmed email and the following deadline clause", () => {
+    const text = "Send notices to legal@new-company.com within five days.";
+    const { first, second } = twice(text, ["legal@new-company.com"]);
+    expect(first.text).toBe(text);
+    expect(second.text).toBe(text);
+    expect(first.repairedCount).toBe(0);
+  });
+
+  it("preserves a well-formed revised email and surrounding text when stale intake is supplied", () => {
+    const text = "Send notices to legal@new-company.com within five days.";
+    const { first, second } = twice(text, ["legal@old-company.com"]);
+    expect(first.text).toBe(text);
+    expect(second.text).toBe(text);
+  });
+
+  it("preserves two emails on one line joined by and copy", () => {
+    const text =
+      "Send notices to legal@new-company.com and copy purchasing@pine-creek.example within five days.";
+    const { first, second } = twice(text, [
+      "legal@new-company.com",
+      "purchasing@pine-creek.example",
+    ]);
+    expect(first.text).toBe(text);
+    expect(second.text).toBe(text);
+  });
+
+  it("repairs only an identifiable corrupted address and keeps following wording", () => {
+    const text =
+      "Send notices to ethan.cole@Harborline Data Solutions Inc.com within five days.";
+    const expected =
+      "Send notices to ethan.cole@ironcladsg.com within five days.";
+    const { first, second } = twice(text, ["ethan.cole@ironcladsg.com"]);
+    expect(first.text).toBe(expected);
+    expect(second.text).toBe(expected);
+  });
+
+  it("keeps surrounding deadline text through the render-token restore path", () => {
+    const oak = "Oak Street Holdings LLC";
+    const pine = "Pine Creek Manufacturing Inc.";
+    const body = [
+      `This Agreement is between ${oak} ("Client") and ${pine} ("Supplier").`,
+      "Send notices to legal@new-company.com within five days.",
+    ].join("\n");
+    const intake = [
+      `Delaware supply agreement between ${oak} and ${pine}.`,
+      "legal@old-company.com",
+    ].join("\n");
+    const parties: PaidProSignerMetadataParty[] = [
+      {
+        partyIndex: 0,
+        partyLegalName: oak,
+        signerEmail: "legal@new-company.com",
+        signerName: "Avery Oak",
+        signerTitle: "Manager",
+        partyAddress: "",
+      },
+      {
+        partyIndex: 1,
+        partyLegalName: pine,
+        signerEmail: "purchasing@pine-creek.example",
+        signerName: "Casey Pine",
+        signerTitle: "President",
+        partyAddress: "",
+      },
+    ];
+    const out = enforceUserVisibleRenderTokenAuthority(body, {
+      intakeRaw: intake,
+      parties,
+      partyNames: [oak, pine],
+      surface: "email_restore_deadline_clause",
+      skipNoticeRepair: true,
+    });
+    expect(out.text).toContain("Send notices to legal@new-company.com within five days.");
   });
 });
