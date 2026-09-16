@@ -1112,6 +1112,7 @@ import {
   resolvePaidProReviewLinkCorpusPlain,
   REVIEW_LINK_CORPUS_PARITY_BLOCK_MESSAGE,
 } from "./paidProReviewLinkCorpusParity";
+import { preferBoundReviewRevisionOverDisplayCorpus } from "../../agreement/preferBoundReviewRevisionCorpus";
 import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import {
   clearPaidProPinnedSignerAppliedCorpus,
@@ -32208,6 +32209,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           bodyPlain = finalized.body.trim();
+        }
+        const appliedReviewPlain = (
+          selectVerifiedPaidReviewPaper({
+            agreementId:
+              reviewAgreementId ||
+              productionSendBarAgreementId ||
+              reviewAgreementIdRef.current ||
+              "",
+          })?.plain ||
+          acceptedReviewCorpusRef.current ||
+          authoritativeAgreementSnapshotRef.current ||
+          ""
+        ).trim();
+        const boundReviewPlain = preferBoundReviewRevisionOverDisplayCorpus({
+          boundRevisionPlain: appliedReviewPlain,
+          displayCorpus: bodyPlain,
+        });
+        if (boundReviewPlain && boundReviewPlain !== bodyPlain) {
+          bodyPlain = boundReviewPlain;
+          reviewLinkCorpusSource = "verified_server_canonical_review_snapshot";
         }
         acceptGuidedReviewCorpus(bodyPlain, "review_only");
         const transition = assertGuidedTransitionReady("review_only");

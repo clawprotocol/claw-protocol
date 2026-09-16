@@ -1274,4 +1274,9 @@ describe("homepage starter_review mount (no paid Pro SoT)", () => {
     expect(intake).toContain("CREATE_FLOW_PREPARATION_FAILSAFE_EDIT_LABEL");
     expect(intake).toContain('data-testid="create-flow-prep-failsafe"');
   });
+
+  it("send-for-review prefers the bound Apply snapshot over a guided shrink", () => {
+    expect(intake).toContain("preferBoundReviewRevisionOverDisplayCorpus");
+    expect(intake).toContain("verified_server_canonical_review_snapshot");
+  });
 });

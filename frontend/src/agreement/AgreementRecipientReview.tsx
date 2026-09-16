@@ -189,6 +189,7 @@ import {
   logReviewFirstDisplayCorpusSelected,
   resolveReviewFirstDisplayCorpus,
 } from "../launch/simpleProduct/reviewFirstDisplayCorpus";
+import { resolveRecipientVisibleReviewPlain } from "./preferBoundReviewRevisionCorpus";
 import {
   RECIPIENT_BTN_CONTINUE_EDITING,
   RECIPIENT_BTN_PREVIEW_CHANGES,
@@ -893,6 +894,7 @@ export function AgreementRecipientReview({
   const [ceremonyPhase, setCeremonyPhase] = useState<CeremonyPhase>("idle");
   const [ceremonyError, setCeremonyError] = useState<string | null>(null);
   const [reviewAuthorityMeta, setReviewAuthorityMeta] = useState<RecipientReviewAuthorityMeta | null>(null);
+  const [boundReviewRevisionPlain, setBoundReviewRevisionPlain] = useState("");
   const [ceremonyVersionHash, setCeremonyVersionHash] = useState("");
   const [ceremonySignerName, setCeremonySignerName] = useState("");
   const [typedConfirm, setTypedConfirm] = useState("");
@@ -2191,6 +2193,7 @@ export function AgreementRecipientReview({
         ) {
           setDraft(null);
           setRenderedHtml("");
+          setBoundReviewRevisionPlain("");
           setReviewAuthorityMeta(null);
           setBundle(null);
           setError("This link is invalid or expired. Request a new link from the sender.");
@@ -2201,6 +2204,7 @@ export function AgreementRecipientReview({
       setReviewAuthorityMeta(authorityMeta);
       if (!d) {
         setRenderedHtml("");
+        setBoundReviewRevisionPlain("");
         setReviewAuthorityMeta(null);
         setError(
           "This agreement could not be loaded from this link. Ask the sender for a fresh link and confirm the full URL was copied.",
@@ -2224,12 +2228,18 @@ export function AgreementRecipientReview({
       const snapPlain = String(
         payload.accepted_review_snapshot?.corpus_plain || payload.review_revision?.corpus_plain || "",
       ).trim();
+      setBoundReviewRevisionPlain(snapPlain);
       const reviewFirstCorpus = resolveReviewFirstDisplayCorpus(d, "reviewer");
+      const visibleReviewPlain = resolveRecipientVisibleReviewPlain({
+        boundRevisionPlain: snapPlain,
+        displayCorpus: reviewFirstCorpus?.text,
+        parties: d.parties,
+      });
       const effectiveHtml =
         entry.kind === "sign" && snapPlain
           ? renderReviewFirstCorpusHtml(snapPlain, "sign")
-          : reviewFirstCorpus && reviewFirstCorpus.text.trim().length >= 500
-            ? renderReviewFirstCorpusHtml(reviewFirstCorpus.text, "review")
+          : visibleReviewPlain.length >= 500
+            ? renderReviewFirstCorpusHtml(visibleReviewPlain, "review")
             : html;
       if (entry.kind === "review" && reviewFirstCorpus) {
         logReviewFirstDisplayCorpusSelected({
@@ -2289,6 +2299,7 @@ export function AgreementRecipientReview({
     } catch (e: unknown) {
       setDraft(null);
       setRenderedHtml("");
+      setBoundReviewRevisionPlain("");
       setReviewAuthorityMeta(null);
       setBundle(null);
       setError(e instanceof Error ? e.message : "Could not load agreement.");
@@ -2331,21 +2342,29 @@ export function AgreementRecipientReview({
   );
   const reviewFirstDocumentHtml = useMemo(() => {
     const corpusResult = resolveReviewFirstDisplayCorpus(draft, "reviewer");
-    const corpus = corpusResult?.text.trim();
+    const corpus = resolveRecipientVisibleReviewPlain({
+      boundRevisionPlain: boundReviewRevisionPlain,
+      displayCorpus: corpusResult?.text,
+      parties: draft?.parties,
+    });
     return buildReviewFirstDocumentDisplayHtml({
       serverHtml: renderedHtmlDisplay,
       corpusText: corpus,
       partyNames: authoritativePartyNames,
       draft,
       surface: "reviewer",
-      selectedCorpusSource: corpusResult?.source,
+      selectedCorpusSource: boundReviewRevisionPlain.trim().length >= 500 ? "review_revision" : corpusResult?.source,
       agreementId,
     });
-  }, [agreementId, authoritativePartyNames, draft, renderedHtmlDisplay]);
+  }, [agreementId, authoritativePartyNames, boundReviewRevisionPlain, draft, renderedHtmlDisplay]);
   const reviewFirstUsesPremiumDocument = useMemo(() => {
-    const corpus = resolveReviewFirstDisplayCorpus(draft, "reviewer")?.text.trim() || "";
+    const corpus = resolveRecipientVisibleReviewPlain({
+      boundRevisionPlain: boundReviewRevisionPlain,
+      displayCorpus: resolveReviewFirstDisplayCorpus(draft, "reviewer")?.text,
+      parties: draft?.parties,
+    });
     return corpus.length >= 500;
-  }, [draft]);
+  }, [boundReviewRevisionPlain, draft]);
 
   useLayoutEffect(() => {
     if (entry.kind !== "review" || viewerLike || !reviewFirstUsesPremiumDocument) return;
