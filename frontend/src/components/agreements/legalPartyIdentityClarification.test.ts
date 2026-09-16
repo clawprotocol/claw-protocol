@@ -587,6 +587,12 @@ describe("legal party identity clarification", () => {
     expect(after).not.toMatch(/Advisor shall/);
     expect(paperNamesPersonAsLegalParty(before, "Alex Rivera")).toBe(false);
     expect(paperNamesPersonAsLegalParty(after, "Alex Rivera")).toBe(true);
+    expect(
+      paperNamesPersonAsLegalParty(
+        `entered into by and between ${HARBOR} ("Consultant") and ${IRONVALE} ("Client"). 1. PARTIES AND ROLES If to ${HARBOR}: Attn: Alex Rivera`,
+        "Alex Rivera",
+      ),
+    ).toBe(false);
     const savedRoles = applyOpeningPaperRolesToParties(
       [
         { name: HARBOR, role: "Client" },

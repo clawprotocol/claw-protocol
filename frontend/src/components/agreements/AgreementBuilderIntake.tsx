@@ -18384,7 +18384,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const namedParties = nextParties.filter(
         (party) => String(party.signerName || party.signer_name || "").trim().length >= 2,
       );
-      if (namedParties.length) {
+      let boundPaper = "";
+      if (namedParties.length || nextParties.some((party) => /advisor/i.test(String(party.role || "")))) {
         const acceptedAuthority = await fetchCanonicalReviewSnapshot({ agreementId: args.agreementId });
         const snapshotPlain = acceptedAuthority.ok
           ? String(acceptedAuthority.snapshot.corpus_plain || "").trim()
@@ -18409,6 +18410,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           const patched = applyIdentityResolutionToAuthorizedPaper(editable, nextParties).trim();
           if (patched.length >= PAID_PRO_AUTHORITY_MIN_LEN && patched !== editable) {
             await commitPaidProUserApprovedRevision(patched, "confirmed_signer_details_revision");
+            boundPaper = patched;
+          } else if (patched.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+            boundPaper = patched;
           }
         }
       }
@@ -18466,6 +18470,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return next;
       });
       setSignerSetupUiPartyCount(Math.max(nextParties.length, 2));
+      return { paper: boundPaper };
     },
     [commitPaidProUserApprovedRevision],
   );
@@ -18578,13 +18583,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ""
       ).trim();
       const persistIdentityAndClose = async (revisionId: string, paintedCorpus?: string) => {
-        await persistConfirmedIdentityIntoLiveDraft({
+        const persisted = await persistConfirmedIdentityIntoLiveDraft({
           agreementId: captured.agreementId,
           parties: nextStructured.parties || [],
           unresolvedSubjects: identityApplied.unresolvedSubjects,
           additionalTerms: nextStructured.additional_terms,
         });
-        const committedPlain = (paintedCorpus || "").trim();
+        const namesAllConfirmedParties = (corpus: string) =>
+          (nextStructured.parties || []).every((party) => {
+            const name = String(party.name || "").replace(/\.$/, "").trim();
+            return name.length < 2 || paperNamesPersonAsLegalParty(corpus, name);
+          });
+        const persistedPaper = String(persisted?.paper || "").trim();
+        const painted = (paintedCorpus || "").trim();
+        const committedPlain =
+          persistedPaper.length >= PAID_PRO_AUTHORITY_MIN_LEN && namesAllConfirmedParties(persistedPaper)
+            ? persistedPaper
+            : painted.length >= PAID_PRO_AUTHORITY_MIN_LEN && namesAllConfirmedParties(painted)
+              ? painted
+              : persistedPaper.length >= painted.length
+                ? persistedPaper
+                : painted;
         if (committedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
           setAgreementDocumentText(committedPlain);
           acceptedReviewCorpusRef.current = committedPlain;

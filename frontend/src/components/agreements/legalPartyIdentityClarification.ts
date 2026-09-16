@@ -88,7 +88,10 @@ export function paperNamesPersonAsLegalParty(documentText: string, name: string)
   const trimmed = String(name || "").replace(/\.$/, "").trim();
   if (!trimmed || trimmed.length < 2) return false;
   const n = escapeRe(trimmed);
-  const openingCut = doc.search(/\n\s*(?:\d+\.\s+)?(?:PARTIES AND ROLES|NOTICES|IN WITNESS)\b/i);
+  const sectionCut = doc.search(/(?:\d+\.\s+)?(?:PARTIES AND ROLES|NOTICES|IN WITNESS)\b/i);
+  const noticeStanzaCut = doc.search(/\bIf to\s+/i);
+  const cuts = [sectionCut, noticeStanzaCut].filter((index) => index >= 0);
+  const openingCut = cuts.length ? Math.min(...cuts) : -1;
   const opening = openingCut >= 0 ? doc.slice(0, openingCut) : doc.slice(0, 700);
   const openingParty = new RegExp(`entered into by and between[\\s\\S]*\\b${n}\\b`, "i");
   const roleAppositive = new RegExp(`\\b${n}\\s*\\(\\s*["“][^"”]+["”]\\s*\\)`, "i");
