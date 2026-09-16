@@ -248,9 +248,48 @@ describe("canonicalReviewSnapshotApi", () => {
     const rewritten = ("OPERATIVE\n\n" + "named-signer-bytes ".repeat(40)).trim();
     const digest = await sha256CorpusDigest(accepted);
     const rewrittenDigest = await sha256CorpusDigest(rewritten);
+    let current = {
+      status: "accepted",
+      snapshot: {
+        snapshot_id: "crs_accepted",
+        agreement_id: "ag_locked",
+        corpus_plain: accepted,
+        corpus_sha256: digest,
+        corpus_length: accepted.length,
+        status: "accepted",
+      },
+    };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/canonical-review-snapshot/accept") && method === "POST") {
+        const body = JSON.parse(String(init?.body || "{}")) as {
+          snapshot_id?: string;
+          allow_revision?: boolean;
+          expected_accepted_snapshot_id?: string;
+        };
+        expect(body.allow_revision).toBe(true);
+        expect(body.expected_accepted_snapshot_id).toBe("crs_accepted");
+        expect(body.snapshot_id).toBe("crs_named");
+        current = {
+          status: "accepted",
+          snapshot: {
+            snapshot_id: "crs_named",
+            agreement_id: "ag_locked",
+            corpus_plain: rewritten,
+            corpus_sha256: rewrittenDigest,
+            corpus_length: rewritten.length,
+            status: "accepted",
+          },
+        };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            accepted: current.snapshot,
+          }),
+        } as Response;
+      }
       if (url.includes("/canonical-review-snapshot") && method === "POST") {
         return {
           ok: true,
@@ -269,34 +308,10 @@ describe("canonicalReviewSnapshotApi", () => {
         } as Response;
       }
       if (url.includes("/canonical-review-snapshot") && method === "GET") {
-        const posted = fetchMock.mock.calls.some((c) => String(c[1]?.method || "GET").toUpperCase() === "POST");
         return {
           ok: true,
           status: 200,
-          json: async () =>
-            posted
-              ? {
-                  status: "pending",
-                  snapshot: {
-                    snapshot_id: "crs_named",
-                    agreement_id: "ag_locked",
-                    corpus_plain: rewritten,
-                    corpus_sha256: rewrittenDigest,
-                    corpus_length: rewritten.length,
-                    status: "pending",
-                  },
-                }
-              : {
-                  status: "accepted",
-                  snapshot: {
-                    snapshot_id: "crs_accepted",
-                    agreement_id: "ag_locked",
-                    corpus_plain: accepted,
-                    corpus_sha256: digest,
-                    corpus_length: accepted.length,
-                    status: "accepted",
-                  },
-                },
+          json: async () => current,
         } as Response;
       }
       throw new Error(`unexpected fetch ${method} ${url}`);
@@ -312,11 +327,15 @@ describe("canonicalReviewSnapshotApi", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error(result.code);
     expect(result.snapshot.snapshot_id).toBe("crs_named");
-    expect(result.status).toBe("pending");
+    expect(result.status).toBe("accepted");
     expect(result.snapshot.corpus_sha256).toBe(rewrittenDigest);
-    expect(fetchMock.mock.calls.some((c) => String(c[1]?.method || "GET").toUpperCase() === "POST")).toBe(
-      true,
-    );
+    expect(
+      fetchMock.mock.calls.some(
+        (c) =>
+          String(c[0]).includes("/canonical-review-snapshot/accept") &&
+          String(c[1]?.method || "").toUpperCase() === "POST",
+      ),
+    ).toBe(true);
   });
 
   it("acceptDisplayedCommercialReviewSnapshot fails when display differs from GET", async () => {

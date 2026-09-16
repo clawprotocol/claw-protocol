@@ -578,6 +578,11 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
     }
   }
 
+  const priorAcceptedId =
+    existing.ok && String(existing.status || existing.snapshot.status).toLowerCase() === "accepted"
+      ? String(existing.snapshot.snapshot_id || "").trim()
+      : "";
+
   const persisted = await persistCanonicalReviewSnapshot({
     agreementId: id,
     corpusPlain: corpus,
@@ -586,6 +591,27 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
     customerConfirmedAnswers: args.customerConfirmedAnswers,
   });
   if (!persisted.ok) return { ok: false, code: persisted.code };
+
+  // GET prefers the current accepted record. A customer-approved revision must
+  // accept the new pending with allow_revision so named paper becomes GET
+  // authority. The prior accepted digest stays historical (superseded, not rewritten).
+  if (
+    args.allowSupersedingRevision &&
+    priorAcceptedId &&
+    persisted.snapshot.snapshot_id !== priorAcceptedId
+  ) {
+    const accepted = await acceptCanonicalReviewSnapshot({
+      agreementId: id,
+      snapshotId: persisted.snapshot.snapshot_id,
+      expectedDigest: persisted.snapshot.corpus_sha256,
+      expectedAcceptedSnapshotId: priorAcceptedId,
+      allowRevision: true,
+      displaySnapshotId: persisted.snapshot.snapshot_id,
+      displayDigest: persisted.snapshot.corpus_sha256,
+      displayLength: persisted.snapshot.corpus_length,
+    });
+    if (!accepted.ok) return { ok: false, code: accepted.code };
+  }
 
   // Prefer GET as the sole review hydration authority (not POST response alone).
   const fetched = await fetchCanonicalReviewSnapshot({ agreementId: id });

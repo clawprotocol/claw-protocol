@@ -264,6 +264,8 @@ test.describe("identity-resolution customer flow", () => {
     const persisted = await fetchOwnerCanonicalSnapshot(reopened.page, started.agreementId);
     expect(persisted.corpus).not.toMatch(/If to Harbor Peak Analytics LLC:[\s\S]{0,240}Attn:\s*Alex Rivera/i);
     expect(persisted.corpus).not.toMatch(/CLIENT:[\s\S]{0,220}Name:\s*Harbor Peak Analytics LLC/i);
+    expect(persisted.corpus).toMatch(/CONSULTANT:[\s\S]{0,220}Name:\s*Pat Harbor/i);
+    expect(persisted.corpus).toMatch(/CLIENT:[\s\S]{0,220}Name:\s*Sam Ironvale/i);
     await expect(reopened.page.getByTestId("identity-clarification-question")).toHaveCount(0);
     const finished = await completeLocalReviewSignAndFinal({
       page: reopened.page,
@@ -281,6 +283,8 @@ test.describe("identity-resolution customer flow", () => {
     expect(accepted.digest).toBe(persisted.digest);
     expect(accepted.corpus).not.toMatch(/If to Harbor Peak Analytics LLC:[\s\S]{0,240}Attn:\s*Alex Rivera/i);
     expect(accepted.corpus).not.toMatch(/CLIENT:[\s\S]{0,220}Name:\s*Harbor Peak Analytics LLC/i);
+    expect(accepted.corpus).toMatch(/CONSULTANT:[\s\S]{0,220}Name:\s*Pat Harbor/i);
+    expect(accepted.corpus).toMatch(/CLIENT:[\s\S]{0,220}Name:\s*Sam Ironvale/i);
     expect(accepted.corpus).toMatch(/ADVISOR:[\s\S]{0,160}Alex Rivera/i);
     const finalState = await fetchOwnerIdentityState(page, started.agreementId);
     expect(legalPartyNames(finalState.parties)).toEqual([
