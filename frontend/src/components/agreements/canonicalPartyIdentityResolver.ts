@@ -1053,10 +1053,15 @@ export function repairCanonicalPartyIdentityInCorpus(
       /\n\s*(?:Scope|Fees?|Payment|Compensation|Term|Governing|Confidential(?:ity)?|Execution|Ownership|Work\s+Product|Termination|Notices?)\b/i.test(
         matched,
       );
+    // `$` in openingRe can treat a following sentence after a single newline as
+    // still "the opening" (e.g. "Send notices to … within five days.").
+    const crossedNoticeObligation =
+      /@|\bsend notices\b|\bnotices?\s+to\b|\bwithin\s+\d+\s+days\b/i.test(matched);
     if (
       openingMatch &&
       matched.length <= 380 &&
       !crossedOperativeHeading &&
+      !crossedNoticeObligation &&
       !/\d+\.\s+[A-Za-z]/.test(matched)
     ) {
       head = head.replace(openingRe, () => {

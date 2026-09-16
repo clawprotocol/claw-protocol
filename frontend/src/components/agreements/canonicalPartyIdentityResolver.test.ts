@@ -134,6 +134,23 @@ describe("canonicalPartyIdentityResolver", () => {
     expect(text).not.toMatch(/\bRed Mesa will pay Harbor Peak\b/i);
   });
 
+  it("does not swallow an approved notices sentence into the defined opening", () => {
+    const oak = "Oak Street Holdings LLC";
+    const pine = "Pine Creek Manufacturing Inc.";
+    const draft = [
+      `This Agreement is between ${oak} ("Client") and ${pine} ("Supplier").`,
+      "Send notices to legal@new-company.com within five days.",
+    ].join("\n");
+    const { text, repairs } = repairFullAgreementPartyIdentity({
+      text: draft,
+      intakeRaw: `Delaware supply agreement between ${oak} and ${pine}.\nlegal@old-company.com`,
+      partyNames: [oak, pine],
+    });
+    expect(repairs).not.toContain("party_identity:defined_opening");
+    expect(text).toContain("Send notices to legal@new-company.com within five days.");
+    expect(text).not.toContain("legal@old-company.com");
+  });
+
   it("does not replace paid Pro mutual consulting by-and-between recital with definedOpeningLine", () => {
     const records = resolveCanonicalPartyIdentitiesFromIntake(INTAKE)!;
     const draft = [

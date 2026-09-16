@@ -7,6 +7,7 @@ import {
   preserveFullLegalPartyNamesInOpeningAndSignatures,
 } from "./paidProPartyNamePreserve";
 import { applyPaidProRenderPolish, verifyIntakeEmailsPreserved } from "./paidProRenderPolish";
+import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 
 const IRONCLAD_JOINT_ROLLOUT_INTAKE = `Need an agreement between Ironclad Systems Group LLC, Harborline Data Solutions Inc., Northwind Automation Partners LLC, Silver Mesa Analytics LP, and VertexGrid Technologies LLC for a joint AI software and infrastructure rollout project.
 
@@ -147,6 +148,62 @@ describe("applyPaidProRenderPolish", () => {
       expect(expanded).toContain(email);
     }
     expect(verifyIntakeEmailsPreserved(IRONCLAD_JOINT_ROLLOUT_INTAKE, expanded).mutatedEmailCount).toBe(0);
+  });
+
+  it("keeps the approved notice clause through normal applyPaidProRenderPolish", () => {
+    const oak = "Oak Street Holdings LLC";
+    const pine = "Pine Creek Manufacturing Inc.";
+    const recordedInput = [
+      `This Agreement is between ${oak} ("Client") and ${pine} ("Supplier").`,
+      "Send notices to legal@new-company.com within five days.",
+      "Supplier shall ship conforming goods FOB Wilmington.",
+      "If to Supplier: purchasing@pine-creek.example.",
+    ].join("\n");
+    const intake = [
+      `Delaware supply agreement between ${oak} and ${pine}.`,
+      "Notices: legal@old-company.com",
+      "purchasing@pine-creek.example",
+    ].join("\n");
+    const authorityParties: PaidProSignerMetadataParty[] = [
+      {
+        partyIndex: 0,
+        partyLegalName: oak,
+        signerEmail: "legal@new-company.com",
+        signerName: "Avery Oak",
+        signerTitle: "Manager",
+        partyAddress: "",
+      },
+      {
+        partyIndex: 1,
+        partyLegalName: pine,
+        signerEmail: "purchasing@pine-creek.example",
+        signerName: "Casey Pine",
+        signerTitle: "President",
+        partyAddress: "",
+      },
+    ];
+    const polishOpts = {
+      surface: "notice_clause_polish",
+      skipCache: true as const,
+      authorityParties,
+    };
+    expect("skipNoticeRepair" in polishOpts).toBe(false);
+
+    const first = applyPaidProRenderPolish(recordedInput, intake, [oak, pine], polishOpts);
+    const second = applyPaidProRenderPolish(first.text, intake, [oak, pine], polishOpts);
+
+    const expectedNotice = "Send notices to legal@new-company.com within five days.";
+    const expectedAdjacent = "Supplier shall ship conforming goods FOB Wilmington.";
+    const expectedPineNotice = "If to Supplier: purchasing@pine-creek.example.";
+    expect(first.text).toContain(expectedNotice);
+    expect(first.text).toContain(expectedAdjacent);
+    expect(first.text).toContain(expectedPineNotice);
+    expect(first.text).toContain("legal@new-company.com");
+    expect(first.text).toMatch(/within five days/i);
+    expect(first.text).not.toContain("legal@old-company.com");
+    expect(first.text.match(/Send notices to legal@new-company\.com within five days\./g)?.length).toBe(1);
+    expect(first.text).not.toMatch(/If to Oak Street Holdings LLC[\s\S]{0,80}legal@old-company\.com/i);
+    expect(second.text).toBe(first.text);
   });
 
   it("finalize keeps operative payment placeholders fatal and substitutes contact emails", () => {
