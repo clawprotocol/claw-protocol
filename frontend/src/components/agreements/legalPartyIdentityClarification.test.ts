@@ -525,6 +525,7 @@ describe("legal party identity clarification", () => {
       "",
       `If to ${HARBOR}:`,
       HARBOR,
+      "Attn: Alex Rivera",
       "Email: alex.rivera@advisor.test",
       "",
       `If to ${IRONVALE}:`,
@@ -545,12 +546,13 @@ describe("legal party identity clarification", () => {
       { name: IRONVALE, role: "Client" },
       { name: "Alex Rivera", role: "Advisor", email: "alex.rivera@advisor.test" },
     ]);
-    expect(after).toContain(`and Alex Rivera ("Advisor")`);
     expect(after).toMatch(/Consultant, Client, and Advisor may be referred to individually as a "Party"/);
+    expect(after).toContain("If to Alex Rivera:");
     expect(after).toMatch(/If to Alex Rivera:[\s\S]*Email: alex\.rivera@advisor\.test/);
     expect(after).not.toMatch(
       /If to Harbor Peak Analytics LLC:\s*\nHarbor Peak Analytics LLC\s*\nEmail: alex\.rivera@advisor\.test/,
     );
+    expect(after).not.toMatch(/If to Harbor Peak Analytics LLC:[\s\S]{0,160}Attn:\s*Alex Rivera/);
     expect(after).toMatch(/CONSULTANT:\s*\nHarbor Peak Analytics LLC/);
     expect(after).toMatch(/CLIENT:\s*\nIronvale Manufacturing Inc/);
     expect(after).toMatch(/ADVISOR:\s*\nAlex Rivera/);

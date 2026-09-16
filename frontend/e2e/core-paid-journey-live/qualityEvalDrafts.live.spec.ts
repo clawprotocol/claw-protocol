@@ -41,7 +41,9 @@ const selected = selectQualityEvalCases(process.env.QUALITY_EVAL_CASE);
 for (const scenario of selected) {
   test(`real drafting: ${scenario.id}`, async ({ page, browser }) => {
     test.skip(reopenOnly, "Reopen-only mode does not regenerate samples");
-    test.setTimeout(scenario.id === "three_party" || scenario.id === "four_party" ? 480_000 : 300_000);
+    test.setTimeout(
+      scenario.id === "three_party" || scenario.id === "four_party" || scenario.id === "saas" ? 480_000 : 300_000,
+    );
     const modelResponses: object[] = [];
     const pending: Promise<void>[] = [];
     page.on("pageerror", (err) => {
@@ -267,7 +269,7 @@ for (const scenario of selected) {
 
       let recipientPath = "not_yet_exercised";
       let receiptId = "";
-      if (scenario.id === "three_party" || scenario.id === "four_party") {
+      if (scenario.id === "three_party" || scenario.id === "four_party" || scenario.id === "saas") {
         const sample = releaseScopeSample(scenario.id);
         const signers = sample.parties.map((party) => ({
           legalEntity: party.legalEntity,
