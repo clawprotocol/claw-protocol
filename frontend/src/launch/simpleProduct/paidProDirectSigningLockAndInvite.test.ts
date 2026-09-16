@@ -219,6 +219,121 @@ describe("paidProDirectSigningLockAndInvite", () => {
     expect(lockSpy).toHaveBeenCalled();
   });
 
+  it("prefers owner/reviewer over an equal-score Client/Service Provider sibling", () => {
+    const commercial = draft({
+      parties: [
+        { id: "harbor-uuid", name: "Harbor Peak Analytics LLC", role: "Client", signerName: "Maya Chen" },
+        {
+          id: "ironvale-uuid",
+          name: "Ironvale Manufacturing Inc.",
+          role: "Service Provider",
+          signerName: "Jordan Hale",
+        },
+      ],
+    });
+    const ownerNormalized = draft({
+      parties: [
+        { id: "harbor-uuid", name: "Harbor Peak Analytics LLC", role: "owner", signerName: "Maya Chen" },
+        { id: "ironvale-uuid", name: "Ironvale Manufacturing Inc.", role: "reviewer", signerName: "Jordan Hale" },
+      ],
+    });
+    expect(richerSigningPartyDraft(commercial, ownerNormalized)).toBe(ownerNormalized);
+    expect(richerSigningPartyDraft(ownerNormalized, commercial)).toBe(ownerNormalized);
+  });
+
+  it("locks a two-party Client/Service Provider send after persist stamps owner/reviewer", async () => {
+    const commercial = draft({
+      parties: [
+        { id: "harbor-uuid", name: "Harbor Peak Analytics LLC", role: "Client", signerName: "Maya Chen" },
+        {
+          id: "ironvale-uuid",
+          name: "Ironvale Manufacturing Inc.",
+          role: "Service Provider",
+          signerName: "Jordan Hale",
+        },
+      ],
+    });
+    const ownerNormalized = draft({
+      parties: [
+        { id: "harbor-uuid", name: "Harbor Peak Analytics LLC", role: "owner", signerName: "Maya Chen" },
+        { id: "ironvale-uuid", name: "Ironvale Manufacturing Inc.", role: "reviewer", signerName: "Jordan Hale" },
+      ],
+    });
+    vi.spyOn(ownerDeliveryTrack, "persistOwnerDeliveryTrack").mockResolvedValue(true);
+    vi.spyOn(reviewEmailPartyRoles, "persistReviewEmailPartyRolesOnServer").mockResolvedValue({
+      ok: true,
+      draft: ownerNormalized,
+      rolesPersisted: true,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: commercial,
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: ownerNormalized,
+    });
+    const lockSpy = vi.spyOn(recipientAccessApi, "putSigningLock").mockResolvedValue({ ok: true });
+
+    const result = await lockAuthoritativeVersionAndMintSigningInvites({
+      agreementId: "ag-direct",
+      draft: commercial,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.ownerPartyId).toBe("harbor-uuid");
+    expect(result.requiredParticipantIds).toEqual(["harbor-uuid", "ironvale-uuid"]);
+    expect(result.mintAllRequiredSignTokens).toBe(false);
+    expect(lockSpy).toHaveBeenCalledWith(
+      "ag-direct",
+      expect.objectContaining({ locked_version_id: "v1", locked_by: "owner" }),
+    );
+  });
+
+  it("mints sign tokens for both two-party participants including the owner", async () => {
+    const ownerNormalized = draft();
+    vi.spyOn(ownerDeliveryTrack, "persistOwnerDeliveryTrack").mockResolvedValue(true);
+    vi.spyOn(reviewEmailPartyRoles, "persistReviewEmailPartyRolesOnServer").mockResolvedValue({
+      ok: true,
+      draft: ownerNormalized,
+      rolesPersisted: true,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock").mockResolvedValue({
+      ok: true,
+      draft: ownerNormalized,
+      lockedVersionId: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: ownerNormalized,
+    });
+    vi.spyOn(recipientAccessApi, "putSigningLock").mockResolvedValue({ ok: true });
+    const mintSpy = vi.spyOn(recipientAccessApi, "mintRecipientAccessTokenResult").mockResolvedValue({
+      ok: true,
+      data: { token: "tok", expires_in_seconds: 3600, locked_version_id: "v1" },
+    });
+
+    const result = await lockAndMintSigningInvitesFromPersistedDraft({
+      agreementId: "ag-direct",
+      draft: ownerNormalized,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mintedParticipantIds).toEqual(["harbor-uuid", "ironvale-uuid"]);
+    expect(mintSpy).toHaveBeenCalledTimes(2);
+    expect(mintSpy).toHaveBeenCalledWith(
+      "ag-direct",
+      { mode: "sign", role: "signer", recipient_party_id: "harbor-uuid" },
+      "",
+    );
+    expect(mintSpy).toHaveBeenCalledWith(
+      "ag-direct",
+      { mode: "sign", role: "signer", recipient_party_id: "ironvale-uuid" },
+      "",
+    );
+  });
+
   it("mints sign tokens from persisted GET parties after remount without an owner role", async () => {
     const threeParty = draft({
       parties: [

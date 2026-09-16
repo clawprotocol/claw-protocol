@@ -25,15 +25,24 @@ export function namedLegalSigningPartyCount(draft: AgreementDraft | null | undef
   return parties.filter((party) => String(party.name || "").trim().length >= 2).length;
 }
 
+function signingPartyDraftScore(draft: AgreementDraft): number {
+  const named = namedLegalSigningPartyCount(draft);
+  const required = requiredDirectSigningParticipantIds(draft).length;
+  // Two-party Harbor drafts often arrive as Client / Service Provider. After
+  // review-email persist they carry owner/reviewer. Prefer the owner-normalized
+  // sibling on an equal named-legal count so lock does not fail missing_owner.
+  const ownerBonus =
+    named < 3 && isDurableSigningParticipantId(ownerSigningPartyId(draft)) ? 5 : 0;
+  return required * 10 + named + ownerBonus;
+}
+
 export function richerSigningPartyDraft(
   left: AgreementDraft | null | undefined,
   right: AgreementDraft | null | undefined,
 ): AgreementDraft | null {
   if (!left) return right ?? null;
   if (!right) return left;
-  const score = (draft: AgreementDraft) =>
-    requiredDirectSigningParticipantIds(draft).length * 10 + namedLegalSigningPartyCount(draft);
-  return score(right) > score(left) ? right : left;
+  return signingPartyDraftScore(right) > signingPartyDraftScore(left) ? right : left;
 }
 
 /** Three- and four-party deals have no workspace-owner legal-party role; every named party signs. */
@@ -122,14 +131,25 @@ export async function lockAuthoritativeVersionAndMintSigningInvites(options: {
   const workingDraft = roles.draft;
 
   const server = await fetchAgreementDraftWithSigningLock(id);
-  const authoritative =
+  const serverDraft = server.ok && server.draft ? server.draft : null;
+  let authoritative =
     richerSigningPartyDraft(
       richerSigningPartyDraft(options.draft, workingDraft),
-      server.ok && server.draft ? server.draft : null,
+      serverDraft,
     ) ?? workingDraft;
-  const namedLegal = namedLegalSigningPartyCount(authoritative);
-  const mintAllRequiredSignTokens = namedLegal >= 3;
-  const ownerPartyId = ownerSigningPartyId(authoritative);
+  let namedLegal = namedLegalSigningPartyCount(authoritative);
+  let mintAllRequiredSignTokens = namedLegal >= 3;
+  let ownerPartyId = ownerSigningPartyId(authoritative);
+  if (!mintAllRequiredSignTokens && !isDurableSigningParticipantId(ownerPartyId)) {
+    const roleNormalized =
+      richerSigningPartyDraft(workingDraft, serverDraft) ?? workingDraft;
+    if (isDurableSigningParticipantId(ownerSigningPartyId(roleNormalized))) {
+      authoritative = roleNormalized;
+      namedLegal = namedLegalSigningPartyCount(authoritative);
+      mintAllRequiredSignTokens = namedLegal >= 3;
+      ownerPartyId = ownerSigningPartyId(authoritative);
+    }
+  }
   if (!mintAllRequiredSignTokens && !isDurableSigningParticipantId(ownerPartyId)) {
     return { ok: false, reason: "missing_owner_participant" };
   }
@@ -218,7 +238,6 @@ export async function lockAndMintSigningInvitesFromPersistedDraft(options: {
   const mintedParticipantIds: string[] = [];
   const mintKey = recipientLinkMintKey();
   for (const participantId of locked.requiredParticipantIds) {
-    if (!locked.mintAllRequiredSignTokens && participantId === locked.ownerPartyId) continue;
     const minted = await mintRecipientAccessTokenResult(
       id,
       { mode: "sign", role: "signer", recipient_party_id: participantId },

@@ -517,7 +517,6 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
     (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env
       ?.VITE_RECIPIENT_LINK_MINT_KEY || "";
   for (const participantId of lockedInvite.requiredParticipantIds) {
-    if (!mintAllRequiredSignTokens && participantId === ownerPartyId) continue;
     const minted = await mintRecipientAccessTokenResult(
       id,
       { mode: "sign", role: "signer", recipient_party_id: participantId },
