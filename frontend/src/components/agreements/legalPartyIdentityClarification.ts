@@ -891,10 +891,19 @@ export function applyIdentityResolutionToAuthorizedPaper(
   for (const party of parties) {
     if (!party.signerName || !isLikelyHumanSignerName(party.signerName)) continue;
     if (/^(Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)\b/i.test(party.signerName.trim())) continue;
-    const role = party.role || "Party";
-    const signerLine = new RegExp(`${escapeRe(role)}'s authorized signer is [^.\n]+`, "i");
+    const role = displayRoleForParty(party, doc);
+    if (role === "Party") continue;
+    const signerLine = new RegExp(`${escapeRe(role)}'s authorized signer is ([^.\n]+)`, "i");
+    const current = String(doc.match(signerLine)?.[1] || "").trim();
+    if (
+      current &&
+      isLikelyHumanSignerName(current) &&
+      current.toLowerCase() !== party.signerName.trim().toLowerCase()
+    ) {
+      continue;
+    }
     if (signerLine.test(doc)) {
-      doc = doc.replace(signerLine, () => `${role}'s authorized signer is ${party.signerName}`);
+      doc = doc.replace(signerLine, `${role}'s authorized signer is ${party.signerName}`);
     } else {
       const blankSignerLine = new RegExp(
         `${escapeRe(role)}'s authorized signer is _{2,}[.]?`,

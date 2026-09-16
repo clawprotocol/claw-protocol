@@ -723,6 +723,17 @@ describe("legal party identity clarification", () => {
     expect(after).not.toMatch(/collectively as the "Parties"\./);
   });
 
+  it("does not write Harbor's signer onto Client's authorized-signer line", () => {
+    const before = `This Services Agreement (this "Agreement") is entered into by and between ${HARBOR} ("Consultant") and ${IRONVALE} ("Client"). Consultant's authorized signer is Maya Chen. Client's authorized signer is Jordan Hale.`;
+    const after = applyIdentityResolutionToAuthorizedPaper(before, [
+      { name: HARBOR, role: "Client", signerName: "Maya Chen" },
+      { name: IRONVALE, role: "Service Provider", signerName: "Jordan Hale" },
+    ]);
+    expect(after).toContain("Consultant's authorized signer is Maya Chen");
+    expect(after).toContain("Client's authorized signer is Jordan Hale");
+    expect(after).not.toContain("Client's authorized signer is Maya Chen");
+  });
+
   it("does not rewrite an already-correct Service Provider and Client Parties sentence", () => {
     const before = `This Services Agreement (this "Agreement") is entered into by and between ${HARBOR} ("Service Provider") and ${IRONVALE} ("Client"). Service Provider and Client may be referred to individually as a "Party" and collectively as the "Parties."`;
     const after = applyIdentityResolutionToAuthorizedPaper(before, [
