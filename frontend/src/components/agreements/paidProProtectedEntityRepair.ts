@@ -107,20 +107,12 @@ export function repairProtectedLegalEntitySuffixes(
       repairs += 1;
     }
 
-    const patterns: RegExp[] = [
-      new RegExp(`\\b${shortRe}\\b(?!\\s+${suffixAlt})(\\s*\\([“"'])`, "gi"),
-      new RegExp(`\\b${shortRe}\\b(?!\\s+${suffixAlt})(\\s+will\\b)`, "gi"),
-      new RegExp(`\\b${shortRe}\\b(?!\\s+${suffixAlt})(\\s*,)`, "gi"),
-      new RegExp(`\\b${shortRe}\\b(?!\\s+${suffixAlt})(\\s+and\\s+)`, "gi"),
-    ];
-
-    for (const re of patterns) {
-      const next = head.replace(re, (_match, punct) => {
-        repairs += 1;
-        return `${trimmedFull}${punct}`;
-      });
-      if (next !== head) head = next;
-    }
+    const missingSuffix = new RegExp(`\\b${shortRe}\\b(?!\\s+${suffixAlt})`, "gi");
+    const next = head.replace(missingSuffix, () => {
+      repairs += 1;
+      return trimmedFull;
+    });
+    if (next !== head) head = next;
   }
 
   const out = head + tail;
