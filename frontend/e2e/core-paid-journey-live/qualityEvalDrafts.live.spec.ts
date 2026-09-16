@@ -272,7 +272,7 @@ for (const scenario of selected) {
       if (scenario.id === "three_party" || scenario.id === "four_party" || scenario.id === "saas") {
         const sample = releaseScopeSample(scenario.id);
         const signers = sample.parties.map((party) => ({
-          legalEntity: party.legalEntity,
+          legalEntity: party.legalEntity.replace(/\.$/, ""),
           signerName: party.signerName || "",
           signerEmail: party.email || "",
         }));
