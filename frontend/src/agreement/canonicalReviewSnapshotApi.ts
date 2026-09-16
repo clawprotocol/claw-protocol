@@ -506,6 +506,8 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
   customerConfirmedAnswers?: string | null;
   /** Customer-approved revision: persist a new pending without rewriting the accepted hash. */
   allowSupersedingRevision?: boolean;
+  /** Accept the pending just posted even when no accepted record exists yet. */
+  acceptIfNoPriorAccepted?: boolean;
 }): Promise<
   | {
       ok: true;
@@ -599,7 +601,8 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
   if (
     args.allowSupersedingRevision &&
     persisted.snapshot.snapshot_id &&
-    persisted.snapshot.snapshot_id !== priorAcceptedId
+    persisted.snapshot.snapshot_id !== priorAcceptedId &&
+    (priorAcceptedId || args.acceptIfNoPriorAccepted)
   ) {
     const accepted = await acceptCanonicalReviewSnapshot({
       agreementId: id,

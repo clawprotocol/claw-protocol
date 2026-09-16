@@ -414,6 +414,7 @@ describe("canonicalReviewSnapshotApi", () => {
       corpusPlain: named,
       generationSessionId: "gen_named",
       allowSupersedingRevision: true,
+      acceptIfNoPriorAccepted: true,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error(result.code);
