@@ -1162,6 +1162,7 @@ import {
   applyIdentityClarificationAnswers,
   applyIdentityResolutionToAuthorizedPaper,
   applyOpeningPaperRolesToParties,
+  bindSignerDetailsToConfirmedParties,
   classifyUnresolvedIdentitySubjects,
   customerMentionedUnresolvedFromIntake,
   mergeUnresolvedIdentityIntoText,
@@ -33231,6 +33232,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       finalizeAuthority,
       finalizeRoleContext,
     );
+    const boundParties = bindSignerDetailsToConfirmedParties(draft?.parties || [], finalizeAuthority.parties);
+    await persistConfirmedIdentityIntoLiveDraft({
+      agreementId: durableAgreementId,
+      parties: boundParties,
+      unresolvedSubjects: Array.isArray(draft?.unresolvedIdentitySubjects)
+        ? draft.unresolvedIdentitySubjects
+        : [],
+      additionalTerms: draft?.additional_terms,
+    });
     if (reusedAcceptedSnapshot) {
       writePremiumRecipientHandoffFromAuthorityParties(finalizeAuthority.parties);
       setConsumedPaidProSignerMetadataAuthority(finalizeAuthority);
@@ -33452,6 +33462,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     liveSignerMetadataUiState,
     guidedPreReviewSignerSlots.requiredCount,
     draft?.parties,
+    draft?.unresolvedIdentitySubjects,
+    draft?.additional_terms,
+    persistConfirmedIdentityIntoLiveDraft,
     effectivePremiumSendMode,
     recipientsDeferred,
     pinFinalizedSignerAppliedCorpus,

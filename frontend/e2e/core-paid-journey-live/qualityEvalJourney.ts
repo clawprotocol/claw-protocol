@@ -1273,16 +1273,48 @@ export async function completeSignerDetailsThroughVisibleCustomerUi(
     await openSetup.click();
   }
   await expect(signerInputReady, "signer-name field must be visible in customer UI").toBeVisible({ timeout: 12_000 });
-  await assertSignerFormHoldsIntakeOrFillOnlyOmitted(page, signers, { fillProvidedIfEmpty: true });
-  const saveDetails = page
-    .getByRole("button", {
-      name: /Finalize signer details and continue to review decision|Complete signer details|Save signer details|Continue to review/i,
-    })
-    .first();
-  if (await saveDetails.isVisible().catch(() => false)) {
-    await expect(saveDetails, "customer save of signer details").toBeEnabled({ timeout: 12_000 });
-    await saveDetails.click();
+  const slots = [
+    { name: "r1-name", signer: "r1-signer-name", email: "r1-email" },
+    { name: "r2-name", signer: "r2-signer-name", email: "r2-email" },
+    { name: "party-2-legal-name", signer: "party-2-signer-name", email: "r3-email" },
+    { name: "party-3-legal-name", signer: "party-3-signer-name", email: "r4-email" },
+  ] as const;
+  for (const slot of slots) {
+    const nameInput = page.locator(`[data-claw-recipient-field="${slot.name}"]`).first();
+    if (!(await nameInput.isVisible({ timeout: 1_500 }).catch(() => false))) continue;
+    const legal = (await nameInput.inputValue()).trim();
+    const signer = signers.find(
+      (row) =>
+        legal.toLowerCase().includes(row.legalEntity.toLowerCase()) ||
+        row.legalEntity.toLowerCase().includes(legal.toLowerCase()),
+    );
+    if (!signer) continue;
+    const signerInput = page.locator(`[data-claw-recipient-field="${slot.signer}"]`).first();
+    const emailInput = page.locator(`[data-claw-recipient-field="${slot.email}"]`).first();
+    if (await signerInput.isVisible().catch(() => false)) {
+      const current = (await signerInput.inputValue()).trim();
+      if (!current && signer.signerName) await signerInput.fill(signer.signerName);
+    }
+    if (await emailInput.isVisible().catch(() => false)) {
+      const current = (await emailInput.inputValue()).trim();
+      if (!current && signer.signerEmail) await emailInput.fill(signer.signerEmail);
+    }
   }
+  const saveDetails = page
+    .locator('[data-testid="paid-pro-sticky-cta-bar"] button')
+    .filter({ hasText: /Continue|Save signer details|Finalize signer details|Complete signer details/i })
+    .first()
+    .or(
+      page.getByRole("button", {
+        name: /Finalize signer details and continue to review decision|^Continue$|Save signer details|Complete signer details|Continue to review/i,
+      }),
+    )
+    .first();
+  expect(await saveDetails.isVisible({ timeout: 8_000 }).catch(() => false), "visible customer signer-details save").toBe(
+    true,
+  );
+  await expect(saveDetails, "customer save of signer details").toBeEnabled({ timeout: 12_000 });
+  await saveDetails.click();
   await expect
     .poll(async () => {
       const saved = await fetchOwnerIdentityState(page, agreementId);

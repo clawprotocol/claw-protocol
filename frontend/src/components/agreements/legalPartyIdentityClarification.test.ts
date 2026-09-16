@@ -7,6 +7,7 @@ import {
   applyIdentityClarificationAnswers,
   applyIdentityResolutionToAuthorizedPaper,
   applyOpeningPaperRolesToParties,
+  bindSignerDetailsToConfirmedParties,
   canonicalizeIdentityAnswer,
   identityClarificationMaterialItem,
   identityClarificationResolved,
@@ -589,6 +590,26 @@ describe("legal party identity clarification", () => {
       after,
     );
     expect(savedRoles.map((party) => party.role)).toEqual(["Consultant", "Client", "Advisor"]);
+  });
+
+  it("binds signer details to the confirmed party by legal name, not CLIENT-first slot order", () => {
+    const bound = bindSignerDetailsToConfirmedParties(
+      [
+        { name: HARBOR, role: "Consultant" },
+        { name: IRONVALE, role: "Client" },
+        { name: "Alex Rivera", role: "Advisor", email: "alex.rivera@advisor.test" },
+      ],
+      [
+        { partyLegalName: IRONVALE, signerName: "Sam Ironvale", signerEmail: "sam.ironvale@ironvale.test" },
+        { partyLegalName: HARBOR, signerName: "Pat Harbor", signerEmail: "pat.harbor@harbor.test" },
+        { partyLegalName: "Alex Rivera", signerName: "Alex Rivera", signerEmail: "alex.rivera@advisor.test" },
+      ],
+    );
+    expect(bound).toEqual([
+      { name: HARBOR, role: "Consultant", signerName: "Pat Harbor", email: "pat.harbor@harbor.test" },
+      { name: IRONVALE, role: "Client", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+      { name: "Alex Rivera", role: "Advisor", signerName: "Alex Rivera", email: "alex.rivera@advisor.test" },
+    ]);
   });
 
   it("keeps opening Consultant/Client collective roles when stored parties say Client/Service Provider", () => {

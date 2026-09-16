@@ -668,6 +668,30 @@ export function applyOpeningPaperRolesToParties<T extends BindableParty>(
   });
 }
 
+/** Bind UI/authority signer details to the confirmed party by legal name, never by slot index. */
+export function bindSignerDetailsToConfirmedParties<T extends BindableParty>(
+  parties: readonly T[],
+  slots: readonly {
+    partyLegalName?: string;
+    name?: string;
+    signerName?: string;
+    signerEmail?: string;
+    email?: string;
+  }[],
+): T[] {
+  return parties.map((party) => {
+    const slot = slots.find((row) =>
+      partyLegalNamesMatch(String(row.partyLegalName || row.name || ""), String(party.name || "")),
+    );
+    if (!slot) return { ...party };
+    return {
+      ...party,
+      ...(slot.signerName ? { signerName: slot.signerName } : {}),
+      ...(slot.signerEmail || slot.email ? { email: slot.signerEmail || slot.email } : {}),
+    };
+  });
+}
+
 function displayRoleForParty(party: BindableParty, paper?: string): string {
   if (paper && !isLikelyHumanSignerName(party.name)) {
     const quoted = openingQuotedRole(paper, party.name);

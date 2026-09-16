@@ -22,6 +22,7 @@ import {
   hasSignerPartyLegalEntityDisplayPollution,
   sanitizeSignerPartyLegalEntityDisplay,
 } from "./signerPartyLegalEntityDisplaySanitizer";
+import { isLikelyHumanSignerName } from "./intakeSignerMetadataAuthority";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import {
   hasPartyMetadataLabelContamination,
@@ -1149,6 +1150,12 @@ export function resolveSignerSetupPartyIdentities(args: {
 }): SignerSetupPartyIdentity[] {
   const intakeText = String(args.intakeText ?? "").trim();
   const rowNames = args.parties.map((p) => String(p?.name ?? "").trim()).filter(Boolean);
+  const confirmedDraftNames = rowNames.filter(
+    (name) =>
+      !isListMarkerPartyIdentityName(name) &&
+      !isAgreementSectionHeadingPartyName(name) &&
+      (isAuthoritativeLegalEntityName(name) || isLikelyHumanSignerName(name)),
+  );
   let canonicalNames = headingSafeCanonicalPartyNames({
     intakeText: args.intakeText,
     agreementBodyText: args.agreementBodyText,
@@ -1166,6 +1173,28 @@ export function resolveSignerSetupPartyIdentities(args: {
     if (bodyOnlyCanonical.length >= 3 && bodyOnlyCanonical.length > canonicalNames.length) {
       canonicalNames = bodyOnlyCanonical;
     }
+  }
+  // Confirmed 2–4 draft parties keep their saved order. Execution CLIENT-first
+  // blocks must not swap Harbor/Ironvale slots or rebind signer details.
+  const canonicalAddsUnknownParty = canonicalNames.some(
+    (name) =>
+      !confirmedDraftNames.some((draft) => partyLegalNamesMatch(draft, name)) &&
+      (isAuthoritativeLegalEntityName(name) || isLikelyHumanSignerName(name)),
+  );
+  if (
+    confirmedDraftNames.length >= 2 &&
+    confirmedDraftNames.length <= 4 &&
+    confirmedDraftNames.length === rowNames.length &&
+    !canonicalAddsUnknownParty
+  ) {
+    return confirmedDraftNames.map((name) => {
+      const legalEntityName = name.replace(/\.$/, "");
+      return {
+        legalEntityName,
+        displayName: compactDisplayNameFromLegalEntity(legalEntityName) || legalEntityName,
+        source: "draft_party" as const,
+      };
+    });
   }
   if (intakePartyManifestIsAuthoritative(intakeText)) {
     const manifestRows = extractIntakePartyManifestRows(intakeText).filter(

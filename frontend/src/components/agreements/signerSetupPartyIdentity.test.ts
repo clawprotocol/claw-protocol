@@ -1652,4 +1652,27 @@ describe("signer party legal entity display sanitizer (Paid Pro signer details)"
       }),
     ).toBeNull();
   });
+
+  it("keeps confirmed Harbor/Ironvale/Alex draft order when execution blocks list CLIENT first", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc";
+    const alex = "Alex Rivera";
+    const body = [
+      `This Services Agreement is entered into by and between ${harbor} ("Consultant") and ${ironvale} ("Client") and ${alex} ("Advisor").`,
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      `CLIENT:\n${ironvale}\nBy: __________________________\nName: __________________________`,
+      `CONSULTANT:\n${harbor}\nBy: __________________________\nName: __________________________`,
+      `ADVISOR:\n${alex}\nBy: __________________________\nName: ${alex}`,
+    ].join("\n");
+    const identities = resolveSignerSetupPartyIdentities({
+      parties: [
+        { name: harbor },
+        { name: ironvale },
+        { name: alex },
+      ],
+      intakeText: `Draft a consulting agreement between ${harbor} (Consultant) and ${ironvale} (Client). Alex Rivera, alex.rivera@advisor.test, is involved.`,
+      agreementBodyText: body,
+    });
+    expect(identities.map((row) => row.legalEntityName)).toEqual([harbor, ironvale, alex]);
+  });
 });
