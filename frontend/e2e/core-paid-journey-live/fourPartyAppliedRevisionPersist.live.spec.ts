@@ -471,8 +471,16 @@ const SILVER_MESA_SIGNER_FIELDS = SILVER_MESA_FOUR_PARTY.map((party, idx) => ({
 }));
 
 function silverMesaNoticeAddress(text: string): string {
-  const match = text.match(/If to Silver Mesa Analytics LP:\s*(\S+)/i);
-  return match ? match[1].replace(/[.,;]+$/, "") : "";
+  const stanza =
+    text
+      .split(/(?=If to )/i)
+      .find((part) => /If to Silver Mesa Analytics LP:/i.test(part))
+      ?.slice(0, 1200) || "";
+  if (!stanza) return "";
+  const labeled = stanza.match(/Email:\s*([^\s]+@[^\s]+)/i);
+  if (labeled?.[1]) return labeled[1].replace(/[.,;:>]+$/g, "");
+  const any = stanza.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  return any?.[0] ? any[0].replace(/[.,;:>]+$/g, "") : "";
 }
 
 function assertSilverMesaFourPartyPaper(text: string, label: string): void {
