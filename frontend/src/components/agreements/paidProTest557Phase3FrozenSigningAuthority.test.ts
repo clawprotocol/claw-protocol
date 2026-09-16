@@ -202,9 +202,9 @@ describe("paidProTest557 Phase 3 frozen signing authority", () => {
       authorityParties: parties,
       replaceExisting: true,
       draftParties: [
-        { id: "65cc52e7-8f7d-4ee9-ba95-45a2d5eddf68", name: harbor },
-        { id: "5f009b46-ac4f-436f-a188-e520725f54c1", name: `${ironvale}.` },
-        { id: "97ef5b01-384d-45e5-8320-42d87cc1f38c", name: "Alex Rivera" },
+        { id: "65cc52e7-8f7d-4ee9-ba95-45a2d5eddf68", name: harbor, role: "Consultant" },
+        { id: "5f009b46-ac4f-436f-a188-e520725f54c1", name: `${ironvale}.`, role: "Client" },
+        { id: "97ef5b01-384d-45e5-8320-42d87cc1f38c", name: "Alex Rivera", role: "Advisor" },
       ],
     });
     const frozen = readFrozenSigningAuthoritySnapshot();
@@ -222,6 +222,11 @@ describe("paidProTest557 Phase 3 frozen signing authority", () => {
       "Pat Harbor",
       "Sam Ironvale",
       "Alex Rivera",
+    ]);
+    expect(frozen?.parties.map((party) => party.agreementRole)).toEqual([
+      "Consultant",
+      "Client",
+      "Advisor",
     ]);
   });
 

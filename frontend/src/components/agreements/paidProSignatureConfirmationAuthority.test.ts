@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { resolvePaidProSignatureConfirmationAuthority } from "./paidProSignatureConfirmationAuthority";
+import {
+  resolvePaidProSignatureConfirmationAuthority,
+  signatureConfirmationSlotsFromPersistedParties,
+} from "./paidProSignatureConfirmationAuthority";
 
 const READY = {
   slots: [
@@ -88,6 +91,44 @@ describe("resolvePaidProSignatureConfirmationAuthority", () => {
         currentSessionId: "sess-2",
       }),
     ).toEqual({ ok: false, reason: "stale_session" });
+  });
+
+  it("rebuilds three Harbor slots from persisted signer_name after remount", () => {
+    const slots = signatureConfirmationSlotsFromPersistedParties(
+      [
+        {
+          id: "harbor",
+          name: "Harbor Peak Analytics LLC",
+          signer_name: "Pat Harbor",
+          email: "pat.harbor@harbor.test",
+        },
+        {
+          id: "ironvale",
+          name: "Ironvale Manufacturing Inc.",
+          signer_name: "Sam Ironvale",
+          email: "sam.ironvale@ironvale.test",
+        },
+        {
+          id: "alex",
+          name: "Alex Rivera",
+          signer_name: "Alex Rivera",
+          email: "alex.rivera@advisor.test",
+        },
+      ],
+      [
+        { name: "", email: "", participantId: "harbor" },
+        { name: "", email: "", participantId: "ironvale" },
+      ],
+    );
+    expect(slots).toHaveLength(3);
+    expect(slots.map((slot) => slot.name)).toEqual(["Pat Harbor", "Sam Ironvale", "Alex Rivera"]);
+    expect(
+      resolvePaidProSignatureConfirmationAuthority({
+        ...READY,
+        slots,
+        expectedParticipantIds: ["harbor", "ironvale", "alex"],
+      }),
+    ).toEqual({ ok: true });
   });
 
   it("rejects missing agreement authority", () => {

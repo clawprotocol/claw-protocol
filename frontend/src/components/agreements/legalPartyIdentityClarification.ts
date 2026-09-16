@@ -721,6 +721,18 @@ function removePersonContactFromUnrelatedNoticeStanzas(
     .join("");
 }
 
+/** Company-name Attn is not confirmed notice authority — keep the stanza, drop the Attn line. */
+function stripSelfNamedNoticeAttn(doc: string, parties: readonly BindableParty[]): string {
+  return parties.reduce((next, party) => {
+    const name = String(party.name || "").trim();
+    if (!name || isLikelyHumanSignerName(name)) return next;
+    return next.replace(
+      new RegExp(`(^If to\\s+${escapeRe(name)}\\s*:[\\s\\S]*?)(^Attn:\\s*${escapeRe(name)}\\.?\\s*\\n?)`, "im"),
+      "$1",
+    );
+  }, doc);
+}
+
 function ensureNoticeStanzaForParty(doc: string, name: string, email?: string): string {
   const headerRe = new RegExp(`^If to\\s+${escapeRe(name)}\\s*:`, "im");
   if (headerRe.test(doc)) {
@@ -903,6 +915,7 @@ export function applyIdentityResolutionToAuthorizedPaper(
       doc = ensureNoticeStanzaForParty(doc, person.name, email);
     }
   }
+  doc = stripSelfNamedNoticeAttn(doc, parties);
   doc = remapInvertedConsultantClientHeadings(doc);
   for (const person of individuals) {
     doc = ensureIndividualExecutionBlock(doc, person);

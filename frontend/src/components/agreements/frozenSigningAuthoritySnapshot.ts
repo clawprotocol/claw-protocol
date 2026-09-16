@@ -259,6 +259,7 @@ export function extractRequiredSigningActions(
 export type FrozenDraftPartyIdHint = {
   id?: string | null;
   name?: string | null;
+  role?: string | null;
 };
 
 export type BuildFrozenSigningAuthoritySnapshotArgs = {
@@ -282,11 +283,14 @@ export function buildFrozenSigningAuthoritySnapshotV1(
   const handoff = readStarterToPaidPartyHandoff(args.intakeText ?? undefined);
   const handoffPartyIds = handoff?.parties.map((p) => p.agreementPartyId) ?? [];
   const draftPartyIdsByName = new Map<string, string>();
+  const draftPartyRoleByName = new Map<string, string>();
   for (const party of args.draftParties ?? []) {
     const name = String(party.name ?? "").trim();
     const id = String(party.id ?? "").trim();
-    if (name.length < 2 || isGeneratedFrozenPartyId(id)) continue;
-    draftPartyIdsByName.set(name, id);
+    const role = String(party.role ?? "").trim();
+    if (name.length < 2) continue;
+    if (id && !isGeneratedFrozenPartyId(id)) draftPartyIdsByName.set(name, id);
+    if (role && !/^party$/i.test(role)) draftPartyRoleByName.set(name, role);
   }
   const executionRecords = readSignerExecutionAuthority(args.intakeText)?.records ?? [];
 
@@ -297,6 +301,10 @@ export function buildFrozenSigningAuthoritySnapshotV1(
       const handoffParty =
         handoff?.parties.find((hp) => hp.canonicalOrder === p.index) ??
         handoff?.parties.find((hp) => partyLegalNamesMatch(hp.legalEntityName, legalEntityName));
+      const draftRole =
+        draftPartyRoleByName.get(legalEntityName) ||
+        [...draftPartyRoleByName.entries()].find(([name]) => partyLegalNamesMatch(name, legalEntityName))?.[1] ||
+        "";
       return {
         agreementPartyId: resolveAgreementPartyIdForManifestIndex({
           index: p.index,
@@ -306,7 +314,7 @@ export function buildFrozenSigningAuthoritySnapshotV1(
           draftPartyIdsByName,
         }),
         legalEntityName,
-        agreementRole: handoffParty?.agreementRole ?? (p.roleLabel?.trim() || undefined),
+        agreementRole: draftRole || p.roleLabel?.trim() || handoffParty?.agreementRole,
         canonicalOrder: p.index,
       };
     });

@@ -909,10 +909,14 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("adding_signature_fields");
     expect(intake).toContain("signing_packet_ready");
     const sendIdx = intake.indexOf("const handleProSendForSignature = React.useCallback");
-    const sendBlock = intake.slice(sendIdx, sendIdx + 7500);
+    const sendBlock = intake.slice(sendIdx, sendIdx + 9500);
     expect(sendBlock).toContain('continueGuidedFinalReviewToSigning({ intent: "signature" })');
     expect(sendBlock).toContain("canProceedGuidedFinalReviewToSigning");
     expect(sendBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
+    expect(sendBlock).toContain("signatureConfirmationSlotsFromPersistedParties");
+    expect(intake).toContain("enterGuidedSignatureTrackRoute:in_flight_wait");
+    expect(intake).toContain("owner_delivery_track");
+    expect(intake).toContain("guidedSignatureTrackPromiseRef");
     const guidedProceedIdx = sendBlock.indexOf(
       "if (canProceedGuidedFinalReviewToSigning && paidProSignatureDetailsReady)",
     );
@@ -1129,6 +1133,8 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(enterBlock).toMatch(
       /\(acceptedPaidProAuthorityActive[\s\S]*?\)\s*&&\s*!paidProSignatureDetailsReady/,
     );
+    expect(enterBlock).toContain("finalReviewSendIntentRef.current = intent");
+    expect(enterBlock).toContain('handlePremiumSendModePick("signature")');
     const reviewOnlyIdx = enterBlock.indexOf('if (intent === "review_only")');
     const signerGateIdx = enterBlock.search(
       /\(acceptedPaidProAuthorityActive[\s\S]*?\)\s*&&\s*!paidProSignatureDetailsReady/,

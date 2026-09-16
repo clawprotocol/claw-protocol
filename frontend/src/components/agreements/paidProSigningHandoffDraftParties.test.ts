@@ -42,6 +42,39 @@ describe("signing handoff from persisted draft parties", () => {
     clearPaidProSourceOfTruth();
   });
 
+  it("reads snake_case signer_name from a remounted Harbor draft", () => {
+    const manifest = buildSigningHandoffManifestFromDraftParties([
+      {
+        name: "Harbor Peak Analytics LLC",
+        role: "Consultant",
+        email: "pat.harbor@harbor.test",
+        signer_name: "Pat Harbor",
+      },
+      {
+        name: "Ironvale Manufacturing Inc.",
+        role: "Client",
+        email: "sam.ironvale@ironvale.test",
+        signer_name: "Sam Ironvale",
+      },
+      {
+        name: "Alex Rivera",
+        role: "Advisor",
+        email: "alex.rivera@advisor.test",
+        signer_name: "Alex Rivera",
+      },
+    ]);
+    expect(manifest.parties.map((party) => party.signerName)).toEqual([
+      "Pat Harbor",
+      "Sam Ironvale",
+      "Alex Rivera",
+    ]);
+    expect(manifest.parties.map((party) => party.roleLabel)).toEqual([
+      "Consultant",
+      "Client",
+      "Advisor",
+    ]);
+  });
+
   it("rebuilds a four-party manifest from saved parties when session snapshot is gone", () => {
     const manifest = buildSigningHandoffManifestFromDraftParties(FOUR_PARTY);
     expect(manifest.parties).toHaveLength(4);

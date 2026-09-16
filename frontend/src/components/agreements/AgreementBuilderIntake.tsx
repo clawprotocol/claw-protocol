@@ -1277,7 +1277,10 @@ import {
   PAID_PRO_SIGNER_EMAIL_FIELD_WRAPPER_CLASS,
   PAID_PRO_SIGNER_EMAIL_INPUT_CLASS,
 } from "./paidProPaidSessionLanding";
-import { resolvePaidProSignatureConfirmationAuthority } from "./paidProSignatureConfirmationAuthority";
+import {
+  resolvePaidProSignatureConfirmationAuthority,
+  signatureConfirmationSlotsFromPersistedParties,
+} from "./paidProSignatureConfirmationAuthority";
 import {
   effectivePremiumRefineApplyLogRevisionIntent,
   pickAuthoritativeProCorpusForRefine,
@@ -4603,6 +4606,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     async () => false,
   );
   const guidedSignatureTrackInFlightRef = useRef(false);
+  const guidedSignatureTrackPromiseRef = useRef<Promise<void> | null>(null);
   const enterGuidedSignatureTrackRouteRef = useRef<(() => Promise<void>) | null>(null);
   const guidedSignaturePersistFailureRef = useRef<{ httpStatus?: number | null; rawMessage?: string } | null>(
     null,
@@ -32566,11 +32570,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const enterGuidedSignatureTrackRoute = React.useCallback(async () => {
     traceSigningAdvance("enterGuidedSignatureTrackRoute:enter");
+    if (guidedSignatureTrackPromiseRef.current) {
+      traceSigningAdvance("enterGuidedSignatureTrackRoute:in_flight_wait");
+      await guidedSignatureTrackPromiseRef.current;
+      return;
+    }
     if (guidedSignatureTrackInFlightRef.current) {
       traceSigningAdvance("enterGuidedSignatureTrackRoute:in_flight_skip");
       return;
     }
     guidedSignatureTrackInFlightRef.current = true;
+    let releaseInFlight: (() => void) | undefined;
+    guidedSignatureTrackPromiseRef.current = new Promise<void>((resolve) => {
+      releaseInFlight = resolve;
+    });
     setGuidedFinalReviewTransitionInFlight(true);
     markSigningPreparationRequested();
     setSignaturePreparationRequested(true);
@@ -32617,11 +32630,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
       // Sticky Prepare can appear before the slots-complete effect copies the live manifest into the ref.
       if (
-        (!canonicalSignerManifestRef.current ||
-          (canonicalSignerManifestRef.current.entries?.length ?? 0) === 0) &&
-        (canonicalSignerManifest.entries?.length ?? 0) > 0
+        !canonicalSignerManifestRef.current ||
+        (canonicalSignerManifestRef.current.entries?.length ?? 0) === 0
       ) {
-        canonicalSignerManifestRef.current = canonicalSignerManifest;
+        if ((canonicalSignerManifest.entries?.length ?? 0) > 0) {
+          canonicalSignerManifestRef.current = canonicalSignerManifest;
+        } else {
+          const recovered = resolvePaidProSigningHandoffSignerManifest({
+            intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+            draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
+            draftParties: draft?.parties ?? [],
+          });
+          if ((recovered.entries?.length ?? 0) > 0) {
+            canonicalSignerManifestRef.current = recovered;
+          }
+        }
       }
 
       const transition = assertGuidedTransitionReady("signing_confirm");
@@ -33024,6 +33047,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setGuidedFinalizeModalStage(null);
       }
       guidedSignatureTrackInFlightRef.current = false;
+      guidedSignatureTrackPromiseRef.current = null;
+      releaseInFlight?.();
       setGuidedFinalReviewTransitionInFlight(false);
     }
   }, [
@@ -33343,7 +33368,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setLoading(false);
       onHomeGuidedTransitionPhase?.("review_ready");
       bumpPremiumSurfaceGateTick();
-      if (paidProSignaturePrepIntentLatched || finalReviewSendIntentRef.current === "signature") {
+      const signatureTrackRequested =
+        paidProSignaturePrepIntentLatched ||
+        finalReviewSendIntentRef.current === "signature" ||
+        String(
+          (draft as { owner_delivery_track?: string | null } | null)?.owner_delivery_track ||
+            (draftSnapshotRef.current as { owner_delivery_track?: string | null } | null)
+              ?.owner_delivery_track ||
+            "",
+        ).toLowerCase() === "signature";
+      if (signatureTrackRequested) {
         markSigningPreparationRequested();
         setSignaturePreparationRequested(true);
         setPaidProInlineSignerSetupLatched(false);
@@ -33475,7 +33509,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setGuidedSigningConfirmationBlockMessage(null);
     setLoading(false);
     bumpPremiumSurfaceGateTick();
-    if (paidProSignaturePrepIntentLatched || finalReviewSendIntentRef.current === "signature") {
+    const signatureTrackRequested =
+      paidProSignaturePrepIntentLatched ||
+      finalReviewSendIntentRef.current === "signature" ||
+      String(
+        (draft as { owner_delivery_track?: string | null } | null)?.owner_delivery_track ||
+          (draftSnapshotRef.current as { owner_delivery_track?: string | null } | null)
+            ?.owner_delivery_track ||
+          "",
+      ).toLowerCase() === "signature";
+    if (signatureTrackRequested) {
       markSigningPreparationRequested();
       setSignaturePreparationRequested(true);
       setPaidProInlineSignerSetupLatched(false);
@@ -33933,6 +33976,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
       if (acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady) {
+        finalReviewSendIntentRef.current = intent;
+        if (intent === "signature") handlePremiumSendModePick("signature");
         setHardError(null);
         // Entering inline signer setup → arm the mount latch and clear any prior prepare release.
         setSignaturePreparationRequested(false);
@@ -33952,6 +33997,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         (paidProReviewDecisionLifecycleReady || paidProPostCheckoutFirstReviewActive) &&
         !paidProSignatureDetailsReady
       ) {
+        finalReviewSendIntentRef.current = intent;
+        if (intent === "signature") handlePremiumSendModePick("signature");
         setHardError(null);
         setSignaturePreparationRequested(false);
         setPaidProInlineSignerSetupLatched(true);
@@ -34054,11 +34101,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const confirmationAnchor = paidProSignatureConfirmationAnchorRef.current;
     const confirmationParties = (draftSnapshotRef.current?.parties ?? draft?.parties ?? []) as Array<{
       id?: string;
+      name?: string;
+      signerName?: string;
+      signer_name?: string;
+      email?: string;
     }>;
-    const currentParticipantIds = confirmationParties
-      .map((party) => String(party.id || "").trim())
-      .filter(Boolean);
-    const confirmationSlots = [
+    const confirmationSlots = signatureConfirmationSlotsFromPersistedParties(confirmationParties, [
       {
         name: resolveSignerNameForInlineSetupReadiness({
           partyIndex: 0,
@@ -34077,7 +34125,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         email: recipient2Email,
         participantId: String(confirmationParties[1]?.id || "").trim(),
       },
-    ];
+      ...confirmationParties.slice(2).map((party, idx) => ({
+        name: resolveSignerNameForInlineSetupReadiness({
+          partyIndex: idx + 2,
+          partySignerNames,
+          recipientLegalEntityName: String(party.name || ""),
+        }),
+        email: extraPartyReviewEmails[idx] || String(party.email || ""),
+        participantId: String(party.id || "").trim(),
+      })),
+    ]);
+    const currentParticipantIds = confirmationSlots
+      .map((slot) => String(slot.participantId || "").trim())
+      .filter(Boolean);
     const confirmationAgreementId = (
       reviewAgreementIdRef.current ||
       reviewAgreementId ||
@@ -34086,10 +34146,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ).trim();
     const signatureConfirmation = resolvePaidProSignatureConfirmationAuthority({
       slots: confirmationSlots,
-      expectedParticipantIds: (confirmationAnchor?.participantIds ?? currentParticipantIds).slice(
-        0,
-        confirmationSlots.length,
-      ),
+      expectedParticipantIds:
+        currentParticipantIds.length >= confirmationSlots.length
+          ? currentParticipantIds.slice(0, confirmationSlots.length)
+          : (confirmationAnchor?.participantIds ?? currentParticipantIds),
       currentAgreementId: confirmationAgreementId,
       expectedAgreementId: confirmationAnchor?.agreementId || confirmationAgreementId,
       currentOrganizationId: getOrgId(),
@@ -34216,6 +34276,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     recipient2Email,
     recipient1Name,
     recipient2Name,
+    extraPartyReviewEmails,
     partySignerNames,
     draft,
   ]);

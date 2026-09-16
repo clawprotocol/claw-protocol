@@ -550,6 +550,7 @@ describe("legal party identity clarification", () => {
       "",
       `If to ${IRONVALE}:`,
       IRONVALE,
+      `Attn: ${IRONVALE}`,
       "",
       "IN WITNESS WHEREOF, the Parties execute this Agreement.",
       "",
@@ -575,6 +576,7 @@ describe("legal party identity clarification", () => {
       /If to Harbor Peak Analytics LLC:\s*\nHarbor Peak Analytics LLC\s*\nEmail: alex\.rivera@advisor\.test/,
     );
     expect(after).not.toMatch(/If to Harbor Peak Analytics LLC:[\s\S]{0,240}Attn:\s*Alex Rivera/);
+    expect(after).not.toMatch(/If to Ironvale Manufacturing Inc\.:[\s\S]{0,160}Attn:\s*Ironvale Manufacturing Inc/);
     expect(after).not.toMatch(/CLIENT:[\s\S]{0,220}Name:\s*Harbor Peak Analytics LLC/);
     expect(after).toMatch(/CONSULTANT:\s*\nHarbor Peak Analytics LLC/);
     expect(after).toMatch(/CLIENT:\s*\nIronvale Manufacturing Inc/);

@@ -57,6 +57,7 @@ type DraftPartyContact = {
   role?: string;
   email?: string;
   signerName?: string;
+  signer_name?: string;
   signerTitle?: string;
 };
 
@@ -87,7 +88,7 @@ export function buildSigningHandoffManifestFromDraftParties(
         role: draftPartyRole(index),
         partyName,
         email: String(party.email ?? "").trim(),
-        signerName: String(party.signerName ?? "").trim() || null,
+        signerName: String(party.signerName || party.signer_name || "").trim() || null,
         signerTitle: String(party.signerTitle ?? "").trim() || null,
         roleLabel: String(party.role ?? "").trim(),
         signerKind: isIndividual ? ("individual" as const) : ("entity_representative" as const),
@@ -109,7 +110,7 @@ function mergePersistedDraftContactOntoManifest(
       const match = matchDraftPartyByLegalName(draftParties, party.partyName);
       if (!match) return party;
       const email = String(match.email ?? "").trim() || party.email;
-      const signerName = String(match.signerName ?? "").trim() || party.signerName;
+      const signerName = String(match.signerName || match.signer_name || "").trim() || party.signerName;
       const signerTitle = String(match.signerTitle ?? "").trim() || party.signerTitle;
       return { ...party, email, signerName, signerTitle };
     }),

@@ -42,8 +42,50 @@ export type PaidProSignatureConfirmationResult =
   | { ok: true }
   | { ok: false; reason: PaidProSignatureConfirmationReason };
 
+export type PersistedSignatureConfirmationParty = {
+  id?: string | null;
+  name?: string | null;
+  signerName?: string | null;
+  signer_name?: string | null;
+  email?: string | null;
+};
+
 function trim(value: unknown): string {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+/** Remounted owner workspace: confirm from persisted parties, not empty React slots. */
+export function signatureConfirmationSlotsFromPersistedParties(
+  parties: readonly PersistedSignatureConfirmationParty[],
+  uiSlots: readonly PaidProSignatureConfirmationSlot[] = [],
+): PaidProSignatureConfirmationSlot[] {
+  const persisted = parties
+    .map((party) => ({
+      legalName: trim(party.name),
+      name: trim(party.signerName || party.signer_name),
+      email: trim(party.email),
+      participantId: trim(party.id),
+    }))
+    .filter((party) => party.legalName.length >= 2);
+  if (!persisted.length) {
+    return uiSlots
+      .map((slot) => ({
+        name: trim(slot.name),
+        email: trim(slot.email),
+        participantId: trim(slot.participantId),
+      }))
+      .filter((slot) => slot.name || slot.email || slot.participantId);
+  }
+  return persisted.map((party, index) => {
+    const ui =
+      uiSlots.find((slot) => trim(slot.participantId) && trim(slot.participantId) === party.participantId) ||
+      uiSlots[index];
+    return {
+      name: trim(ui?.name) || party.name,
+      email: trim(ui?.email) || party.email,
+      participantId: party.participantId || trim(ui?.participantId),
+    };
+  });
 }
 
 export function resolvePaidProSignatureConfirmationAuthority(
