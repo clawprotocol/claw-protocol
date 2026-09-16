@@ -206,6 +206,86 @@ describe("applyPaidProRenderPolish", () => {
     expect(second.text).toBe(first.text);
   });
 
+  it("keeps each following operative clause through normal applyPaidProRenderPolish", () => {
+    const oak = "Oak Street Holdings LLC";
+    const pine = "Pine Creek Manufacturing Inc.";
+    const opening = `This Agreement is between ${oak} ("Client") and ${pine} ("Supplier").`;
+    const intake = `Delaware supply agreement between ${oak} and ${pine}.`;
+    const clauses = [
+      "Client shall pay $5,000 upon delivery.",
+      "Supplier shall ship conforming goods FOB Wilmington.",
+      "All deliverables remain owned by Client.",
+      "Either party may terminate on thirty days written notice.",
+    ] as const;
+    const authorityParties: PaidProSignerMetadataParty[] = [
+      {
+        partyIndex: 0,
+        partyLegalName: oak,
+        signerEmail: "legal@new-company.com",
+        signerName: "Avery Hale",
+        signerTitle: "Manager",
+        partyAddress: "",
+      },
+      {
+        partyIndex: 1,
+        partyLegalName: pine,
+        signerEmail: "purchasing@pine-creek.example",
+        signerName: "Casey Quinn",
+        signerTitle: "President",
+        partyAddress: "",
+      },
+    ];
+    const polishOpts = { surface: "recital_opening_boundary", skipCache: true as const, authorityParties };
+    expect("skipNoticeRepair" in polishOpts).toBe(false);
+
+    for (const clause of clauses) {
+      const recordedInput = [opening, clause].join("\n");
+      const first = applyPaidProRenderPolish(recordedInput, intake, [oak, pine], polishOpts);
+      const second = applyPaidProRenderPolish(first.text, intake, [oak, pine], polishOpts);
+      expect(first.text).toContain(clause);
+      expect(first.text.split(clause).length - 1).toBe(1);
+      expect(second.text).toBe(first.text);
+    }
+
+    const longer = [
+      opening,
+      clauses[0],
+      "",
+      "1. Scope",
+      "Manufacturing will occur in Delaware under U.S. law.",
+      "",
+      "2. Fees",
+      "Invoices are due net thirty days.",
+    ].join("\n");
+    const longerOut = applyPaidProRenderPolish(longer, intake, [oak, pine], polishOpts);
+    expect(longerOut.text).toContain(clauses[0]);
+    expect(longerOut.text.split(clauses[0]).length - 1).toBe(1);
+    expect(longerOut.text).toMatch(/1\.\s*Scope/i);
+    expect(longerOut.text).toMatch(/Manufacturing will occur in Delaware/i);
+    expect(longerOut.text).toMatch(/Invoices are due net thirty days/i);
+    const longerAgain = applyPaidProRenderPolish(longerOut.text, intake, [oak, pine], polishOpts);
+    expect(longerAgain.text).toBe(longerOut.text);
+
+    const threeOpening =
+      'This Agreement is among Stonebridge Wellness LLC ("Licensor"), NovaPath Learning Inc. ("Platform"), and ClearSpring Distribution LLC ("Distributor").';
+    const threeNames = [
+      "Stonebridge Wellness LLC",
+      "NovaPath Learning Inc.",
+      "ClearSpring Distribution LLC",
+    ];
+    const three = applyPaidProRenderPolish(
+      `${threeOpening}\n${clauses[2]}`,
+      "Oklahoma license among Stonebridge Wellness LLC, NovaPath Learning Inc., and ClearSpring Distribution LLC.",
+      threeNames,
+      { surface: "recital_opening_boundary_three", skipCache: true },
+    );
+    expect(three.text).toContain("Stonebridge Wellness LLC");
+    expect(three.text).toContain("ClearSpring Distribution LLC");
+    expect(three.text).toContain(clauses[2]);
+    expect(three.text.split(clauses[2]).length - 1).toBe(1);
+    expect(three.text).not.toMatch(/This Agreement is between Oak Street/i);
+  });
+
   it("finalize keeps operative payment placeholders fatal and substitutes contact emails", () => {
     const body = padOperative(
       [

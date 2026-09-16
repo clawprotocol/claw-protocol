@@ -970,6 +970,81 @@ export function replaceTruncatedPartyRefsWithRoleLabels(
   return { text: body + tail, repairs };
 }
 
+/**
+ * Recital-start through `between` / `by and between`. Does not include the party list.
+ * Subsequent operative sentences are located by {@link locateDefinedOpeningRecitalBoundary}.
+ */
+const DEFINED_OPENING_START_RE =
+  /(?:this\s+(?:[\w/&'.-]+\s+){0,6}?agreement\s*(?:\([^)]*\))?\s*is\s+)?(?:entered\s+into\s+)?(?:by\s+and\s+)?between\b/i;
+
+/** True when this period is inside Inc./L.L.C./U.S./street-style abbreviations, not a sentence end by itself. */
+function definedOpeningPeriodIsAbbreviation(text: string, periodIndex: number): boolean {
+  const next = text[periodIndex + 1] ?? "";
+  if (/[A-Za-z]/.test(next)) return true;
+  const before = text.slice(0, periodIndex);
+  if (
+    /(?:^|[^A-Za-z])(?:Inc|Incorporated|Ltd|Corp|Co|LLC|LLP|LP|PLLC|PC|Jr|Sr|Mr|Ms|Mrs|Dr|St|Ste|Ave|Blvd|Rd|Mt|Ft|No|vs|etc|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)$/i.test(
+      before,
+    )
+  ) {
+    return true;
+  }
+  if (/(?:^|[^A-Za-z])[A-Z]$/.test(before)) return true;
+  return false;
+}
+
+function definedOpeningContinuesAfterPeriod(text: string, periodIndex: number): boolean {
+  const rest = text.slice(periodIndex + 1);
+  const trimmed = rest.replace(/^[ \t]+/, "").replace(/^\s+/, "");
+  if (!trimmed) return false;
+  if (/^(?:\(|["“]|,)/.test(trimmed)) return true;
+  if (/^(?:a|an|with|and|or|nor)\b/i.test(trimmed) && /^[a-z(]/.test(trimmed)) return true;
+  if (definedOpeningPeriodIsAbbreviation(text, periodIndex)) {
+    if (/^(?:\(|["“]|,)/.test(trimmed)) return true;
+    if (/^a\s+/i.test(trimmed)) return true;
+    if (/^with\s+/i.test(trimmed)) return true;
+    if (/^and\b/.test(trimmed)) return true;
+  }
+  return false;
+}
+
+/**
+ * Inclusive [start, end) span of the two-party defined opening only.
+ * Returns null when the recital cannot be bounded without swallowing later text.
+ */
+export function locateDefinedOpeningRecitalBoundary(head: string): { start: number; end: number } | null {
+  const source = (head || "").replace(/\r\n/g, "\n");
+  const startMatch = DEFINED_OPENING_START_RE.exec(source);
+  if (!startMatch || startMatch.index == null) return null;
+  const start = startMatch.index;
+  const afterBetween = start + startMatch[0].length;
+  let depth = 0;
+  let seenJoiner = false;
+  for (let i = afterBetween; i < source.length; i += 1) {
+    const ch = source[i]!;
+    if (ch === "(") {
+      depth += 1;
+      continue;
+    }
+    if (ch === ")") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth !== 0) continue;
+    if (
+      (i === afterBetween || /\s/.test(source[i - 1]!)) &&
+      /^and\b/i.test(source.slice(i, i + 4))
+    ) {
+      seenJoiner = true;
+    }
+    if (ch !== ".") continue;
+    if (definedOpeningContinuesAfterPeriod(source, i)) continue;
+    if (!seenJoiner) continue;
+    return { start, end: i + 1 };
+  }
+  return null;
+}
+
 /** Paid Pro mutual consulting recitals must never be replaced with generic definedOpeningLine(). */
 function shouldPreservePaidProMutualConsultingOpening(
   head: string,
@@ -1039,35 +1114,28 @@ export function repairCanonicalPartyIdentityInCorpus(
   let head = out.slice(0, headLen);
   const rest = out.slice(headLen);
   const openingLine = definedOpeningLine(client, provider);
-  // Allow "This Services Agreement is between…" (words between This and Agreement).
-  // Stop before numbered sections OR unnumbered commercial headings so Scope/Fees are
-  // never swallowed when blank lines were collapsed.
-  const openingRe =
-    /(?:this\s+(?:[\w/&'.-]+\s+){0,6}?agreement\s*(?:\([^)]*\))?\s*is\s+)?(?:entered\s+into\s+)?(?:by\s+and\s+)?between\b[\s\S]*?\.\s*(?=\n\n|\n\s*\d+\.\s+|\n\s*(?:Scope|Fees?|Payment|Compensation|Term|Governing|Confidential(?:ity)?|Execution|Ownership|Work\s+Product|Termination|Notices?|Intellectual)\b|\(collectively|\[SIGNATURE|$)/i;
   const preservePaidProOpening = shouldPreservePaidProMutualConsultingOpening(head, records);
   const twoPartyCommercialOpening = records.length === 2;
-  if (!preservePaidProOpening && twoPartyCommercialOpening && openingRe.test(head)) {
-    const openingMatch = head.match(openingRe);
-    const matched = openingMatch?.[0] ?? "";
+  const openingSpan = locateDefinedOpeningRecitalBoundary(head);
+  if (!preservePaidProOpening && twoPartyCommercialOpening && openingSpan) {
+    const matched = head.slice(openingSpan.start, openingSpan.end);
     const crossedOperativeHeading =
       /\n\s*(?:Scope|Fees?|Payment|Compensation|Term|Governing|Confidential(?:ity)?|Execution|Ownership|Work\s+Product|Termination|Notices?)\b/i.test(
         matched,
       );
-    // `$` in openingRe can treat a following sentence after a single newline as
-    // still "the opening" (e.g. "Send notices to … within five days.").
-    const crossedNoticeObligation =
-      /@|\bsend notices\b|\bnotices?\s+to\b|\bwithin\s+\d+\s+days\b/i.test(matched);
     if (
-      openingMatch &&
+      matched.length > 0 &&
       matched.length <= 380 &&
       !crossedOperativeHeading &&
-      !crossedNoticeObligation &&
-      !/\d+\.\s+[A-Za-z]/.test(matched)
+      !/\d+\.\s+[A-Za-z]/.test(matched) &&
+      !(
+        /\n/.test(matched) &&
+        matched.includes(client.fullLegalName) &&
+        matched.includes(provider.fullLegalName)
+      )
     ) {
-      head = head.replace(openingRe, () => {
-        repairs.push("party_identity:defined_opening");
-        return openingLine;
-      });
+      head = `${head.slice(0, openingSpan.start)}${openingLine}${head.slice(openingSpan.end)}`;
+      repairs.push("party_identity:defined_opening");
     }
   } else if (
     !preservePaidProOpening &&
