@@ -1,6 +1,10 @@
 import { postSigningLinksSent } from "../agreement/agreementWorkspaceApi";
 import { readAcceptedReviewSnapshotRef } from "../agreement/canonicalReviewSnapshotApi";
-import { readFrozenSigningAuthoritySnapshot, loadFrozenSigningAuthority } from "../components/agreements/frozenSigningAuthoritySnapshot";
+import {
+  loadFrozenSigningAuthority,
+  readFrozenSigningAuthoritySnapshot,
+  readFrozenSigningAuthoritySnapshotForAgreement,
+} from "../components/agreements/frozenSigningAuthoritySnapshot";
 import {
   fetchRecipientAccessPolicy,
   mintRecipientAccessTokenResult,
@@ -177,7 +181,9 @@ export async function dispatchSigningInvitesFromHandoff(
   }
 
   try {
-    const frozenLocal = readFrozenSigningAuthoritySnapshot();
+    const frozenLocal =
+      readFrozenSigningAuthoritySnapshotForAgreement(handoff.agreementId) ||
+      readFrozenSigningAuthoritySnapshot();
     const frozen =
       frozenLocal ??
       (await loadFrozenSigningAuthority({

@@ -1800,7 +1800,10 @@ import {
   resolvePaidProReviewSessionAuthorityPersistPlain,
 } from "./paidProReviewSessionAuthority";
 import { persistFrozenSigningAuthorityToBackendDetailed } from "../../agreement/frozenSigningAuthorityApi";
-import { readFrozenSigningAuthoritySnapshot } from "./frozenSigningAuthoritySnapshot";
+import {
+  readFrozenSigningAuthoritySnapshot,
+  readFrozenSigningAuthoritySnapshotForAgreement,
+} from "./frozenSigningAuthoritySnapshot";
 import {
   formatPaidCreateFlowDraftPersistFailureMessage,
   isDraftLimitReachedPersistError,
@@ -33538,6 +33541,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const signerMetadata = authorityPartiesToRecipientMetadata(finalizeAuthority.parties, [
       ...extraPartyReviewEmails,
     ]);
+    createAuthoritativeSigningSnapshot({
+      corpus: corpusForSnapshot,
+      signerMetadata,
+      partyManifest: finalizeManifest,
+      signatureBlockModel,
+      intakeText: intakeForHydration,
+      authorityParties: finalizeAuthority.parties,
+      replaceExisting: true,
+      preserveFrozenServerFullHydratedCorpus:
+        reusedUnchangedAccepted || rawCorpusResolution.source === "paid_pro_source_of_truth",
+      agreementId: durableAgreementId,
+      persistFrozenToBackend: false,
+      draftParties: draft?.parties ?? null,
+    });
+    const frozenLocal =
+      readFrozenSigningAuthoritySnapshotForAgreement(durableAgreementId) ||
+      readFrozenSigningAuthoritySnapshot(signerFinalizeReviewSessionId);
+    if (!frozenLocal || frozenLocal.agreementId !== durableAgreementId) {
+      rollbackFinalizeFailure(
+        "Frozen signing authority was not built for this agreement. Stay in signer setup and try again.",
+      );
+      return false;
+    }
     // After pay, a visible ≥200 rebuild on the card is enough to open existing
     // SimpleProFinalReviewScreen. Do not wait for 1001-char SoT or a new agreement GET.
     if (paidSessionSkipReviewHydrateWait) {
@@ -33570,6 +33596,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setSignaturePreparationRequested(true);
         setPaidProInlineSignerSetupLatched(false);
         handlePremiumSendModePick("signature");
+        const freezePersist = await persistFrozenSigningAuthorityToBackendDetailed(
+          durableAgreementId,
+          frozenLocal,
+        );
+        if (!freezePersist.ok && !demoSessionMayContinueWithoutServerSnapshot(freezePersist.code)) {
+          rollbackFinalizeFailure(
+            `Could not persist frozen signing authority (${freezePersist.code}). Stay in signer setup and try again.`,
+          );
+          return false;
+        }
         if (
           reusedUnchangedAccepted &&
           (paidProSignaturePrepIntentLatched || finalReviewSendIntentRef.current === "signature")
@@ -33607,21 +33643,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       scrollPaidProReviewDecisionIntoView();
       return true;
     }
-    createAuthoritativeSigningSnapshot({
-      corpus: corpusForSnapshot,
-      signerMetadata,
-      partyManifest: finalizeManifest,
-      signatureBlockModel,
-      intakeText: intakeForHydration,
-      authorityParties: finalizeAuthority.parties,
-      replaceExisting: true,
-      preserveFrozenServerFullHydratedCorpus:
-        reusedUnchangedAccepted || rawCorpusResolution.source === "paid_pro_source_of_truth",
-      agreementId: durableAgreementId,
-      // Await durable persist below — never advance into broken final review on 403/404.
-      persistFrozenToBackend: false,
-      draftParties: draft?.parties ?? null,
-    });
     let signingReadyPlain = resolvePaidProSignerFinalizeSigningReadyPlain({
       hydratedCorpus: corpusForSnapshot,
       postFinalizePlain: resolvePaidProPostFinalizeReviewPlain(),
@@ -33658,13 +33679,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return false;
         }
       }
-    }
-    const frozenLocal = readFrozenSigningAuthoritySnapshot();
-    if (!frozenLocal || frozenLocal.agreementId !== durableAgreementId) {
-      rollbackFinalizeFailure(
-        "Frozen signing authority was not built for this agreement. Stay in signer setup and try again.",
-      );
-      return false;
     }
     if (
       prepared.ok ||

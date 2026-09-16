@@ -33,6 +33,10 @@ describe("paidPro signer finalize durable agreement id (universal)", () => {
     expect(block.indexOf("ensureReviewAgreementWorkspaceId")).toBeLessThan(
       block.indexOf("createAuthoritativeSigningSnapshot"),
     );
+    expect(block.indexOf("createAuthoritativeSigningSnapshot")).toBeLessThan(
+      block.indexOf("if (paidSessionSkipReviewHydrateWait)"),
+    );
+    expect(block).toContain("readFrozenSigningAuthoritySnapshotForAgreement");
     expect(block).toContain("expectedFrozenHash");
     expect(block).toContain("gateSignerFinalizeOnVerifiedFrozenAuthority");
     expect(block.indexOf("gateSignerFinalizeOnVerifiedFrozenAuthority")).toBeLessThan(

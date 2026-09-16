@@ -11,6 +11,7 @@ import {
   extractRequiredSigningActions,
   loadFrozenSigningAuthority,
   readFrozenSigningAuthoritySnapshot,
+  readFrozenSigningAuthoritySnapshotForAgreement,
   resolveFrozenPartyByAgreementPartyId,
   resolveFrozenSignerByRecordId,
   resolveSigningStatusCounts,
@@ -65,6 +66,7 @@ function clearAllBrowserSigningAuthority() {
         const k = sessionStorage.key(i);
         if (
           k?.startsWith("claw_frozen_signing_authority_v1:") ||
+          k?.startsWith("claw_frozen_signing_authority_agreement_v1:") ||
           k?.startsWith("claw_signer_execution_authority_v1:") ||
           k?.startsWith("claw_starter_paid_party_handoff_v1:")
         ) {
@@ -96,7 +98,7 @@ function resetPhase3Isolation() {
   clearLegalPartyAuthoritySessionForTests();
 }
 
-function freezeTwoPartySnapshot(intake = TEST550_CEDAR_NORTHWIND_INTAKE) {
+function freezeTwoPartySnapshot(intake = TEST550_CEDAR_NORTHWIND_INTAKE, agreementId?: string) {
   const authority = establishLegalPartyAuthorityFromIntake(intake);
   writeStarterToPaidPartyHandoff(intake, authority);
   attachSignerToParty({
@@ -147,6 +149,9 @@ function freezeTwoPartySnapshot(intake = TEST550_CEDAR_NORTHWIND_INTAKE) {
     intakeText: intake,
     authorityParties: parties,
     replaceExisting: true,
+    ...(agreementId
+      ? { agreementId, persistFrozenToBackend: false }
+      : {}),
   });
   return { authority, snap, frozen: readFrozenSigningAuthoritySnapshot() };
 }
@@ -514,6 +519,21 @@ describe("paidProTest557 Phase 3 frozen signing authority", () => {
     expect(readFrozenSigningAuthoritySnapshot()?.agreementSessionId).not.toBe(
       firstFrozen?.agreementSessionId,
     );
+  });
+
+  it("keeps freeze readable by agreement id after a remount session bump", () => {
+    const agreementId = "agr-durable-freeze-session-race";
+    const { frozen } = freezeTwoPartySnapshot(TEST550_CEDAR_NORTHWIND_INTAKE, agreementId);
+    expect(frozen?.agreementId).toBe(agreementId);
+    expect(readFrozenSigningAuthoritySnapshotForAgreement(agreementId)?.frozenCorpusHash).toBe(
+      frozen?.frozenCorpusHash,
+    );
+    bumpAgreementGenerationId();
+    expect(readFrozenSigningAuthoritySnapshot()).toBeNull();
+    const afterBump = readFrozenSigningAuthoritySnapshotForAgreement(agreementId);
+    expect(afterBump?.agreementId).toBe(agreementId);
+    expect(afterBump?.frozenCorpusHash).toBe(frozen?.frozenCorpusHash);
+    expect(afterBump?.signers).toHaveLength(2);
   });
 
   it("Case 19 — frozen snapshot readable without owner session handoff", () => {
