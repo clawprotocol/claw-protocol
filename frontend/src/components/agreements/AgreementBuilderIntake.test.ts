@@ -918,6 +918,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("owner_delivery_track");
     expect(intake).toContain("isPersistedSignatureDeliveryTrack");
     expect(intake).toContain("confirmed_signer_details_revision");
+    expect(intake).toContain("paperHasConfirmedParties");
     expect(intake).toContain("if (!finalized) return;");
     expect(intake).toContain("fetchCanonicalReviewSnapshot({ agreementId: recoveredSigningAgreementId })");
     expect(intake).toContain("guidedSignatureTrackPromiseRef");

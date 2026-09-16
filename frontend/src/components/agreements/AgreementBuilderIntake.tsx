@@ -18412,12 +18412,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           String(acceptedAuthority.status || acceptedAuthority.snapshot.status).toLowerCase() === "accepted";
         if (!alreadyAccepted) {
           const editable = (
-            getPaidProSourceOfTruthText().trim() ||
-            agreementDocumentTextRef.current ||
+            acceptedReviewCorpusRef.current ||
             lastKnownGoodAuthoritativeDraftRef.current ||
+            agreementDocumentTextRef.current ||
+            getPaidProSourceOfTruthText() ||
             ""
           ).trim();
-          if (editable.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          const paperHasConfirmedParties = nextParties.every((party) => {
+            const name = String(party.name || "").replace(/\.$/, "").trim();
+            return name.length >= 2 && editable.toLowerCase().includes(name.toLowerCase());
+          });
+          if (editable.length >= PAID_PRO_AUTHORITY_MIN_LEN && paperHasConfirmedParties) {
             const patched = applyIdentityResolutionToAuthorizedPaper(editable, nextParties).trim();
             if (patched.length >= PAID_PRO_AUTHORITY_MIN_LEN && patched !== editable) {
               await commitPaidProUserApprovedRevision(patched, "confirmed_signer_details_revision");
@@ -33390,6 +33395,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         : [],
       additionalTerms: draft?.additional_terms,
     });
+    if (!reusedAcceptedSnapshot) {
+      const editableBeforeAccept = (rawCorpus || authoritativePaidProReviewPlain || "").trim();
+      const paperHasConfirmedParties = boundParties.every((party) => {
+        const name = String(party.name || "").replace(/\.$/, "").trim();
+        return name.length >= 2 && editableBeforeAccept.toLowerCase().includes(name.toLowerCase());
+      });
+      if (editableBeforeAccept.length >= PAID_PRO_AUTHORITY_MIN_LEN && paperHasConfirmedParties) {
+        const namedPaper = applyIdentityResolutionToAuthorizedPaper(editableBeforeAccept, boundParties).trim();
+        if (namedPaper.length >= PAID_PRO_AUTHORITY_MIN_LEN && namedPaper !== editableBeforeAccept) {
+          await commitPaidProUserApprovedRevision(namedPaper, "confirmed_signer_details_revision");
+        }
+      }
+    }
     if (reusedAcceptedSnapshot) {
       writePremiumRecipientHandoffFromAuthorityParties(finalizeAuthority.parties);
       setConsumedPaidProSignerMetadataAuthority(finalizeAuthority);
@@ -33634,6 +33652,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draft?.unresolvedIdentitySubjects,
     draft?.additional_terms,
     persistConfirmedIdentityIntoLiveDraft,
+    commitPaidProUserApprovedRevision,
     effectivePremiumSendMode,
     recipientsDeferred,
     pinFinalizedSignerAppliedCorpus,
