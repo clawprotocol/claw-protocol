@@ -909,7 +909,10 @@ import {
 } from "./proDeliveryTrackState";
 import {
   hasPersistedOwnerDeliveryTrack,
+  isPersistedSignatureDeliveryTrack,
   persistOwnerDeliveryTrack,
+  readOwnerDeliveryTrack,
+  rememberOwnerDeliveryTrack,
 } from "./paidProOwnerDeliveryTrack";
 import {
   resolveProDeliveryTrackCanonicalCorpus,
@@ -5775,8 +5778,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const email = String(rec.email ?? "").trim();
       const signerName = String(rec.signerName ?? rec.signer_name ?? "").trim();
       const signerTitle = String(rec.signerTitle ?? rec.signer_title ?? "").trim();
+      const partyId = String(rec.id ?? "").trim();
       if (name) {
         parties.push({
+          ...(partyId ? { id: partyId } : {}),
           name,
           role,
           ...(email ? { email } : {}),
@@ -5795,11 +5800,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const apiPurposeRaw = String(o.purpose ?? "").trim();
     const apiGov = apiGovRaw && !isLikelyCategoryOrTradeLabel(apiGovRaw) ? apiGovRaw : "";
     const apiPurpose = apiPurposeRaw && !isLikelyCategoryOrTradeLabel(apiPurposeRaw) ? apiPurposeRaw : "";
+    const deliveryTrack = String(o.owner_delivery_track ?? "").trim().toLowerCase();
+    if (deliveryTrack === "review" || deliveryTrack === "signature") {
+      const draftId = String(o.id ?? "").trim();
+      if (draftId) rememberOwnerDeliveryTrack(draftId, deliveryTrack);
+    }
     const out: ParsedDraftShape = {
       title: String(o.title ?? "").trim(),
       jurisdiction:
         apiGov || (govFallback && !isLikelyCategoryOrTradeLabel(govFallback) ? govFallback : "") || "TBD",
       parties: boundParties,
+      ...(deliveryTrack === "review" || deliveryTrack === "signature"
+        ? { owner_delivery_track: deliveryTrack }
+        : {}),
       purpose: apiPurpose || (scopeFallback && !isLikelyCategoryOrTradeLabel(scopeFallback) ? scopeFallback : ""),
       payment_terms: String(o.payment_terms ?? "").trim(),
       duration: durationRaw || null,
@@ -18390,8 +18403,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return next;
       });
       setSignerSetupUiPartyCount(Math.max(nextParties.length, 2));
+      const namedParties = nextParties.filter(
+        (party) => String(party.signerName || party.signer_name || "").trim().length >= 2,
+      );
+      if (namedParties.length) {
+        const acceptedAuthority = await fetchCanonicalReviewSnapshot({ agreementId: args.agreementId });
+        const alreadyAccepted =
+          acceptedAuthority.ok &&
+          String(acceptedAuthority.status || acceptedAuthority.snapshot.status).toLowerCase() === "accepted";
+        if (!alreadyAccepted) {
+          const editable = (
+            getPaidProSourceOfTruthText().trim() ||
+            agreementDocumentTextRef.current ||
+            lastKnownGoodAuthoritativeDraftRef.current ||
+            ""
+          ).trim();
+          if (editable.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+            const patched = applyIdentityResolutionToAuthorizedPaper(editable, nextParties).trim();
+            if (patched.length >= PAID_PRO_AUTHORITY_MIN_LEN && patched !== editable) {
+              await commitPaidProUserApprovedRevision(patched, "confirmed_signer_details_revision");
+            }
+          }
+        }
+      }
     },
-    [],
+    [commitPaidProUserApprovedRevision],
   );
 
   useEffect(() => {
@@ -28417,7 +28453,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const assertGuidedTransitionReady = React.useCallback(
     (action: FinalReviewSendIntent | "review_upload" | "review_accept" | "signing_confirm") => {
-      const accepted = acceptedReviewCorpusRef.current || simpleProFinalReviewCorpus.plainText || guidedAuthoritativeBodyPlain;
+      const accepted =
+        acceptedReviewCorpusRef.current ||
+        paidProFirstReviewDisplayContext.acceptedCanonicalPlain ||
+        lastKnownGoodAuthoritativeDraftRef.current ||
+        simpleProFinalReviewCorpus.plainText ||
+        guidedAuthoritativeBodyPlain;
       const authoritative = authoritativeAgreementSnapshotRef.current || guidedAuthoritativeBodyPlain || accepted;
       const assertion = assertGuidedPostFinalReviewTransition({
         action,
@@ -28440,7 +28481,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       return assertion;
     },
-    [guidedAuthoritativeBodyPlain, simpleProFinalReviewCorpus.plainText],
+    [
+      guidedAuthoritativeBodyPlain,
+      simpleProFinalReviewCorpus.plainText,
+      paidProFirstReviewDisplayContext.acceptedCanonicalPlain,
+    ],
   );
 
   const guidedAppliedSummaryChecklist = useMemo(() => {
@@ -32647,6 +32692,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
       }
 
+      if (!(acceptedReviewCorpusRef.current || "").trim()) {
+        const recoveredAccepted = (
+          paidProFirstReviewDisplayContext.acceptedCanonicalPlain ||
+          lastKnownGoodAuthoritativeDraftRef.current ||
+          simpleProFinalReviewCorpus.plainText ||
+          guidedAuthoritativeBodyPlain ||
+          ""
+        ).trim();
+        if (recoveredAccepted.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          acceptedReviewCorpusRef.current = recoveredAccepted;
+        }
+      }
+      const recoveredSigningAgreementId = (
+        reviewAgreementIdRef.current ||
+        reviewAgreementId ||
+        readCreateReviewAgreementResumeId() ||
+        productionSendBarAgreementIdRef.current ||
+        (draft as { id?: string | null } | null)?.id ||
+        ""
+      ).trim();
+      if (!(acceptedReviewCorpusRef.current || "").trim() && recoveredSigningAgreementId) {
+        const acceptedAuthority = await fetchCanonicalReviewSnapshot({ agreementId: recoveredSigningAgreementId });
+        const acceptedPlain =
+          acceptedAuthority.ok &&
+          String(acceptedAuthority.status || acceptedAuthority.snapshot.status).toLowerCase() === "accepted"
+            ? (acceptedAuthority.snapshot.corpus_plain || "").trim()
+            : "";
+        if (acceptedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          acceptedReviewCorpusRef.current = acceptedPlain;
+        }
+      }
+
       const transition = assertGuidedTransitionReady("signing_confirm");
       if (!transition.ok && !relaxPaidSessionSignatureGates) {
         traceSigningAdvance(`enterGuidedSignatureTrackRoute:blocked:${transition.reason ?? "transition_not_ready"}`);
@@ -33371,12 +33448,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const signatureTrackRequested =
         paidProSignaturePrepIntentLatched ||
         finalReviewSendIntentRef.current === "signature" ||
-        String(
+        isPersistedSignatureDeliveryTrack(
+          persistAgreementId || durableAgreementId,
           (draft as { owner_delivery_track?: string | null } | null)?.owner_delivery_track ||
             (draftSnapshotRef.current as { owner_delivery_track?: string | null } | null)
               ?.owner_delivery_track ||
             "",
-        ).toLowerCase() === "signature";
+        );
       if (signatureTrackRequested) {
         markSigningPreparationRequested();
         setSignaturePreparationRequested(true);
@@ -33512,12 +33590,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const signatureTrackRequested =
       paidProSignaturePrepIntentLatched ||
       finalReviewSendIntentRef.current === "signature" ||
-      String(
+      isPersistedSignatureDeliveryTrack(
+        persistAgreementId || durableAgreementId,
         (draft as { owner_delivery_track?: string | null } | null)?.owner_delivery_track ||
           (draftSnapshotRef.current as { owner_delivery_track?: string | null } | null)
             ?.owner_delivery_track ||
           "",
-      ).toLowerCase() === "signature";
+      );
     if (signatureTrackRequested) {
       markSigningPreparationRequested();
       setSignaturePreparationRequested(true);
@@ -34174,7 +34253,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (!hasAuthoritativeSigningSnapshot() && !paidProSignerMetadataFinalizedLatch) {
         traceSigningAdvance("handleProSendForSignature:finalize_incomplete");
         const finalized = await finalizePaidProSignerMetadataAndOpenReviewDecision();
-        if (finalized) return;
+        if (!finalized) return;
       }
       await enterGuidedSignatureTrackRoute();
     };

@@ -19,6 +19,7 @@ import {
   isOccupationalOrJobTitlePartyName,
 } from "./paidProPartyNamePreserve";
 import { isInvalidPartySlotLegalEntity } from "./partySlotIdentityNormalize";
+import { fillBlankPreservedAddedPartySignerNames } from "./paidProDeclaredConsultantClientPaper";
 import type { MaterialMissingItem } from "./proAgreementCompleteness/types";
 
 export const IDENTITY_SIGNING_OR_PARTY_QUESTION_RE =
@@ -873,6 +874,14 @@ export function applyIdentityResolutionToAuthorizedPaper(
     const signerLine = new RegExp(`${escapeRe(role)}'s authorized signer is [^.\n]+`, "i");
     if (signerLine.test(doc)) {
       doc = doc.replace(signerLine, () => `${role}'s authorized signer is ${party.signerName}`);
+    } else {
+      const blankSignerLine = new RegExp(
+        `${escapeRe(role)}'s authorized signer is _{2,}[.]?`,
+        "i",
+      );
+      if (blankSignerLine.test(doc)) {
+        doc = doc.replace(blankSignerLine, `${role}'s authorized signer is ${party.signerName}`);
+      }
     }
   }
   const individuals = parties.filter((party) => isLikelyHumanSignerName(party.name));
@@ -922,5 +931,12 @@ export function applyIdentityResolutionToAuthorizedPaper(
     doc = clearStaleSignerNameFromOtherExecutionBlocks(doc, person);
   }
   doc = clearForeignLegalNamesFromExecutionNameFields(doc, parties);
+  doc = fillBlankPreservedAddedPartySignerNames(
+    doc,
+    parties.map((party) => ({
+      name: String(party.name || ""),
+      signerName: String(party.signerName || ""),
+    })),
+  );
   return doc;
 }

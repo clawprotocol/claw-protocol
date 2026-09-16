@@ -35,8 +35,9 @@ export type { AgreementFamily } from "./agreementFamilyRouter";
 export type ParsedDraftShape = {
   title: string;
   jurisdiction: string;
-  parties: { id?: string; name: string; role: string; email?: string; signerName?: string; signerTitle?: string }[];
+  parties: { id?: string; name: string; role: string; email?: string; signerName?: string; signerTitle?: string; signer_name?: string }[];
   purpose: string;
+  owner_delivery_track?: "review" | "signature" | null;
   payment_terms: string;
   duration: string | null;
   due_date: string | null;

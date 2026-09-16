@@ -17,6 +17,7 @@ describe("partiesPayloadPreservingIds", () => {
     );
     expect(payload.map((row) => row.id)).toEqual(["harbor-id", "ironvale-id", "alex-id"]);
     expect(payload[0]?.signerName).toBe("Pat Harbor");
+    expect(payload[0]?.signer_name).toBe("Pat Harbor");
   });
 
   it("keeps an incoming id over a later name match", () => {

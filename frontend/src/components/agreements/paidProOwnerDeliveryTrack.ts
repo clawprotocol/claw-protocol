@@ -34,6 +34,15 @@ export function hasPersistedOwnerDeliveryTrack(agreementId?: string | null): boo
   return readOwnerDeliveryTrack(agreementId) != null;
 }
 
+/** Send-for-signature after remount must honor the persisted track, not only in-memory draft. */
+export function isPersistedSignatureDeliveryTrack(
+  agreementId?: string | null,
+  draftTrack?: string | null,
+): boolean {
+  if (normalizeOwnerDeliveryTrack(draftTrack) === "signature") return true;
+  return readOwnerDeliveryTrack(agreementId) === "signature";
+}
+
 export function clearOwnerDeliveryTracksForTests(): void {
   memoryTracks.clear();
 }

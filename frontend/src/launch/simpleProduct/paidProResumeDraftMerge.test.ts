@@ -55,6 +55,38 @@ describe("mergePaidProAuthoritativeDraftFieldsFromApi", () => {
     expect(p1.id).toBe("p2");
   });
 
+  it("restores owner_delivery_track and snake_case signer_name from GET", () => {
+    const apiDraft = {
+      id: "agr-resume",
+      parties: [
+        {
+          id: "p1",
+          name: "Harbor Peak Analytics LLC",
+          role: "Consultant",
+          signer_name: "Pat Harbor",
+          email: "pat.harbor@harbor.test",
+        },
+      ],
+      owner_delivery_track: "signature",
+    } as AgreementDraft & { owner_delivery_track?: string };
+    const coerced: ParsedDraftShape = {
+      title: "T",
+      jurisdiction: "DE",
+      parties: [{ name: "Harbor Peak Analytics LLC", role: "Consultant" }],
+      purpose: "Scope",
+      payment_terms: "",
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      payment: { amount: null, cadence: null, valid: false },
+    };
+    const merged = mergePaidProAuthoritativeDraftFieldsFromApi(coerced, apiDraft) as ParsedDraftShape & {
+      owner_delivery_track?: string;
+    };
+    expect(merged.owner_delivery_track).toBe("signature");
+    expect((merged.parties[0] as { signerName?: string }).signerName).toBe("Pat Harbor");
+  });
+
   it("copies persisted signer names onto coerced parties and keeps them after intake defaults", () => {
     const apiDraft = {
       parties: [

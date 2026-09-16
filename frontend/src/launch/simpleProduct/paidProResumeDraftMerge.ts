@@ -1,5 +1,9 @@
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import type { ParsedDraftShape } from "../../components/agreements/intakeSmartDefaults";
+import {
+  normalizeOwnerDeliveryTrack,
+  rememberOwnerDeliveryTrack,
+} from "../../components/agreements/paidProOwnerDeliveryTrack";
 
 /**
  * Production resume from GET /api/agreements/:id uses {@link coerceDraftFromApiPayload}, which only maps a
@@ -33,17 +37,31 @@ export function mergePaidProAuthoritativeDraftFieldsFromApi(
   if (dt) extras.document_text = dt;
   const rt = str("rendered_document_text");
   if (rt) extras.rendered_document_text = rt;
+  const deliveryTrack = normalizeOwnerDeliveryTrack(o.owner_delivery_track);
+  if (deliveryTrack) extras.owner_delivery_track = deliveryTrack;
+  const agreementId = str("id");
+  if (agreementId && deliveryTrack) rememberOwnerDeliveryTrack(agreementId, deliveryTrack);
 
   const apiParties = Array.isArray(apiDraft.parties) ? (apiDraft.parties as AgreementParty[]) : [];
   const base = Array.isArray(coerced.parties) ? [...coerced.parties] : [];
   const outParties = base.map((p, i) => {
-    const ap = apiParties[i];
+    const ap =
+      apiParties.find((row) => {
+        const id = String(row.id || "").trim();
+        const name = String(row.name || "").trim();
+        return (
+          (id && id === String((p as AgreementParty).id || "").trim()) ||
+          (name && name.toLowerCase() === String(p.name || "").trim().toLowerCase())
+        );
+      }) || apiParties[i];
     if (!ap) return p;
     const row = { ...p } as AgreementParty;
     if (ap.id) row.id = ap.id;
     const em = String(ap.email ?? "").trim();
     if (em) row.email = em;
-    const signerName = String(ap.signerName ?? "").trim();
+    const signerName = String(
+      ap.signerName ?? (ap as { signer_name?: string }).signer_name ?? "",
+    ).trim();
     if (signerName) row.signerName = signerName;
     const signerTitle = String(ap.signerTitle ?? "").trim();
     if (signerTitle) row.signerTitle = signerTitle;
@@ -85,7 +103,12 @@ export function retainAuthorizedApiPartiesAfterIntakeDefaults(
     const name = String(ap.name || "").trim().toLowerCase();
     const prev = (id && byId.get(id)) || (name && byName.get(name)) || ({} as AgreementParty);
     const email = String(ap.email || prev.email || "").trim();
-    const signerName = String(ap.signerName || prev.signerName || "").trim();
+    const signerName = String(
+      ap.signerName ||
+        (ap as { signer_name?: string }).signer_name ||
+        prev.signerName ||
+        "",
+    ).trim();
     const signerTitle = String(ap.signerTitle || prev.signerTitle || "").trim();
     return {
       ...prev,
