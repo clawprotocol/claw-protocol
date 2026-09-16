@@ -6,6 +6,7 @@ import { buildMaterialMissingItems } from "./proAgreementCompleteness/revisionQu
 import {
   applyIdentityClarificationAnswers,
   applyIdentityResolutionToAuthorizedPaper,
+  applyOpeningPaperRolesToParties,
   canonicalizeIdentityAnswer,
   identityClarificationMaterialItem,
   identityClarificationResolved,
@@ -579,6 +580,15 @@ describe("legal party identity clarification", () => {
     expect(after).toMatch(/ADVISOR:\s*\nAlex Rivera/);
     expect(after).not.toMatch(/SERVICE PROVIDER:\s*\nIronvale Manufacturing Inc/);
     expect(after).not.toMatch(/Advisor shall/);
+    const savedRoles = applyOpeningPaperRolesToParties(
+      [
+        { name: HARBOR, role: "Client" },
+        { name: IRONVALE, role: "Service Provider" },
+        { name: "Alex Rivera", role: "Advisor" },
+      ],
+      after,
+    );
+    expect(savedRoles.map((party) => party.role)).toEqual(["Consultant", "Client", "Advisor"]);
   });
 
   it("keeps opening Consultant/Client collective roles when stored parties say Client/Service Provider", () => {

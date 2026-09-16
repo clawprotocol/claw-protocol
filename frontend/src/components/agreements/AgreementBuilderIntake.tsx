@@ -1161,6 +1161,7 @@ import {
   appendIdentityQuestionToMaterialAsks,
   applyIdentityClarificationAnswers,
   applyIdentityResolutionToAuthorizedPaper,
+  applyOpeningPaperRolesToParties,
   classifyUnresolvedIdentitySubjects,
   customerMentionedUnresolvedFromIntake,
   mergeUnresolvedIdentityIntoText,
@@ -18539,6 +18540,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           ),
           structured.parties || [],
         ).trim();
+        structured = {
+          ...structured,
+          parties: applyOpeningPaperRolesToParties(structured.parties || [], patched),
+        };
         if (patched.length >= PAID_PRO_AUTHORITY_MIN_LEN && patched !== authorizedPaper) {
           const committed = await commitPaidProUserApprovedRevision(
             patched,

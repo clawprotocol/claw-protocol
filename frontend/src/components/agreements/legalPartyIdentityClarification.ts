@@ -652,6 +652,22 @@ function openingQuotedRole(doc: string, name: string): string | null {
   return role && !/^party$/i.test(role) ? role : null;
 }
 
+export function applyOpeningPaperRolesToParties<T extends BindableParty>(
+  parties: readonly T[],
+  paper: string,
+): T[] {
+  if (!paper.trim()) return [...parties];
+  return parties.map((party) => {
+    const quoted =
+      openingQuotedRole(paper, party.name) ||
+      openingQuotedRole(paper, String(party.name || "").replace(/\.$/, ""));
+    if (quoted && !/^party$/i.test(quoted)) {
+      return { ...party, role: quoted };
+    }
+    return party;
+  });
+}
+
 function displayRoleForParty(party: BindableParty, paper?: string): string {
   if (paper && !isLikelyHumanSignerName(party.name)) {
     const quoted = openingQuotedRole(paper, party.name);
