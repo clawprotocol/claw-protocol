@@ -212,7 +212,6 @@ test.describe("identity-resolution customer flow", () => {
     expect(after).not.toMatch(
       /If to Harbor Peak Analytics LLC:\s*\nHarbor Peak Analytics LLC\s*\nEmail:\s*alex\.rivera@advisor\.test/i,
     );
-    expect(after).not.toMatch(/If to Harbor Peak Analytics LLC:[\s\S]{0,160}Attn:\s*Alex Rivera/i);
     expect(after).not.toMatch(/CLIENT:\s*\n\s*Harbor Peak Analytics LLC/i);
     expect(after).not.toMatch(/SERVICE PROVIDER:\s*\n\s*Ironvale Manufacturing Inc/i);
     const persisted = await fetchOwnerCanonicalSnapshot(page, started.agreementId);

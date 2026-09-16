@@ -646,16 +646,15 @@ function displayRoleForParty(party: BindableParty, paper?: string): string {
   return isLikelyHumanSignerName(party.name) ? "Advisor" : "Party";
 }
 
-function removeContactFromUnrelatedNoticeStanzas(doc: string, ownerName: string, email?: string): string {
+function removeEmailFromUnrelatedNoticeStanzas(doc: string, ownerName: string, email: string): string {
+  if (!email) return doc;
   const ownerRe = new RegExp(`^If to\\s+${escapeRe(ownerName)}\\b`, "i");
-  const emailLine = email ? new RegExp(`^Email:\\s*${escapeRe(email)}\\s*\\n?`, "im") : null;
-  const attnLine = new RegExp(`^Attn:\\s*${escapeRe(ownerName)}(?:\\s*,\\s*[^\\n]+)?\\s*\\n?`, "im");
+  const emailLine = new RegExp(`^Email:\\s*${escapeRe(email)}\\s*\\n?`, "im");
   return doc
     .split(/(?=^If to )/m)
     .map((stanza) => {
       if (!/^If to /i.test(stanza) || ownerRe.test(stanza.trimStart())) return stanza;
-      let out = stanza.replace(attnLine, "");
-      return emailLine ? out.replace(emailLine, "") : out;
+      return stanza.replace(emailLine, "");
     })
     .join("");
 }
@@ -796,7 +795,7 @@ export function applyIdentityResolutionToAuthorizedPaper(
   for (const person of individuals) {
     const email = String(person.email || "").trim();
     if (email) {
-      doc = removeContactFromUnrelatedNoticeStanzas(doc, person.name, email);
+      doc = removeEmailFromUnrelatedNoticeStanzas(doc, person.name, email);
       doc = ensureNoticeStanzaForParty(doc, person.name, email);
     }
   }
