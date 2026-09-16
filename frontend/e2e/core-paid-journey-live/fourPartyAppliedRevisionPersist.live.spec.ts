@@ -467,7 +467,14 @@ const SILVER_MESA_SIGNER_FIELDS = SILVER_MESA_FOUR_PARTY.map((party, idx) => ({
   party,
   nameField: idx === 0 ? "r1-name" : idx === 1 ? "r2-name" : `party-${idx}-legal-name`,
   signerField: idx === 0 ? "r1-signer-name" : idx === 1 ? "r2-signer-name" : `party-${idx}-signer-name`,
-  emailField: idx === 0 ? "r1-email" : idx === 1 ? "r2-email" : idx === 2 ? "r3-email" : "r4-email",
+  emailFields:
+    idx === 0
+      ? ["r1-email"]
+      : idx === 1
+        ? ["r2-email"]
+        : idx === 2
+          ? ["r3-email", "party-2-email"]
+          : ["r4-email", "party-3-email"],
 }));
 
 function silverMesaNoticeAddress(text: string): string {
@@ -545,38 +552,108 @@ function captureApplyPosts(page: Page): { ok: boolean; status: number; url: stri
   return events;
 }
 
+async function visibleRecipientInput(page: Page, field: string) {
+  return page.locator(`[data-claw-recipient-field="${field}"]`).first();
+}
+
+async function readVisibleField(page: Page, fields: readonly string[]): Promise<{ field: string; value: string } | null> {
+  for (const field of fields) {
+    const input = await visibleRecipientInput(page, field);
+    if (!(await input.isVisible({ timeout: 1_500 }).catch(() => false))) continue;
+    return { field, value: (await input.inputValue()).trim() };
+  }
+  return null;
+}
+
+async function fillEmptyRecipientField(page: Page, fields: readonly string[], value: string): Promise<boolean> {
+  const visible = await readVisibleField(page, fields);
+  if (!visible) return false;
+  if (visible.value === value) return true;
+  if (visible.value) {
+    throw new Error(
+      `Refusing to overwrite ${visible.field} prefill ${JSON.stringify(visible.value)} with ${JSON.stringify(value)}`,
+    );
+  }
+  const input = await visibleRecipientInput(page, visible.field);
+  await input.fill(value);
+  const written = (await input.inputValue()).trim();
+  if (written !== value) {
+    throw new Error(`Failed to fill ${visible.field}: got ${JSON.stringify(written)}`);
+  }
+  return true;
+}
+
+async function assertSilverMesaRecipientEmails(page: Page, label: string): Promise<void> {
+  for (const row of SILVER_MESA_SIGNER_FIELDS) {
+    const visible = await readVisibleField(page, row.emailFields);
+    expect(visible, `${label}: ${row.party.legalEntity} reviewer email field must be visible`).toBeTruthy();
+    expect(
+      visible?.value,
+      `${label}: ${row.party.legalEntity} must keep ${row.party.email}`,
+    ).toBe(row.party.email);
+  }
+}
+
 async function completeSilverMesaSignerSetup(page: Page): Promise<boolean> {
   const sendReady = page.getByTestId("simple-pro-send-for-review").or(page.getByTestId("simple-pro-send-for-signature"));
-  if (!(await sendReady.first().isVisible({ timeout: 4_000 }).catch(() => false))) {
-    const openSetup = page.getByRole("button", { name: /Complete signer details|Finalize signer details/i }).first();
-    if (await openSetup.isVisible().catch(() => false)) {
-      await openSetup.click();
-    }
+  const openSetup = page.getByRole("button", { name: /Complete signer details|Finalize signer details/i }).first();
+  if (await openSetup.isVisible().catch(() => false)) {
+    await openSetup.click();
   }
+  const firstEmail = await readVisibleField(page, SILVER_MESA_SIGNER_FIELDS[0]!.emailFields);
+  if (!firstEmail) {
+    return sendReady.first().isVisible({ timeout: 4_000 }).catch(() => false);
+  }
+  const initial = [];
+  for (const row of SILVER_MESA_SIGNER_FIELDS) {
+    initial.push({
+      company: row.party.legalEntity,
+      email: (await readVisibleField(page, row.emailFields))?.value ?? "",
+    });
+  }
+  expect(
+    initial,
+    "initial company/email assignments before confirmation fills",
+  ).toBeTruthy();
   for (const row of SILVER_MESA_SIGNER_FIELDS) {
     await fillVisibleField(page, row.nameField, row.party.legalEntity);
     await fillVisibleField(page, row.signerField, row.party.signerName);
-    await fillVisibleField(page, row.emailField, row.party.email);
+    await fillEmptyRecipientField(page, row.emailFields, row.party.email);
   }
+  await assertSilverMesaRecipientEmails(page, "after completing visible recipient setup");
   const advance = page
     .getByRole("button", {
-      name: /Finalize signer details and continue to review decision|Complete signer details|Save signer details|Continue to review/i,
+      name: /Create review links|Try again|Finalize signer details and continue to review decision|Complete signer details|Save signer details|Continue to review/i,
     })
     .first();
   if (await advance.isVisible().catch(() => false) && !(await advance.isDisabled().catch(() => true))) {
     await advance.click();
   }
-  return sendReady.first().isVisible({ timeout: 8_000 }).catch(() => false);
+  return true;
 }
 
 async function clickSilverMesaSendForReview(page: Page): Promise<boolean> {
-  const button = page.getByTestId("simple-pro-send-for-review");
-  if (!(await button.isVisible({ timeout: 8_000 }).catch(() => false))) {
-    if (!(await completeSilverMesaSignerSetup(page))) return false;
+  if (!(await completeSilverMesaSignerSetup(page))) return false;
+  const createLinks = page.getByRole("button", { name: /Create review links|Try again/i }).first();
+  if (await createLinks.isVisible().catch(() => false) && !(await createLinks.isDisabled().catch(() => true))) {
+    await createLinks.click();
   }
+  const button = page.getByTestId("simple-pro-send-for-review");
   if (!(await button.isVisible({ timeout: 8_000 }).catch(() => false))) return false;
-  if (await button.isDisabled().catch(() => false)) return false;
+  if (await button.isDisabled().catch(() => false)) {
+    await assertSilverMesaRecipientEmails(page, "send disabled; setup still incomplete");
+    return false;
+  }
   await button.click();
+  const retry = page.getByRole("button", { name: /^Try again$/i }).first();
+  if (await retry.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await completeSilverMesaSignerSetup(page);
+    if (await retry.isVisible().catch(() => false) && !(await retry.isDisabled().catch(() => true))) {
+      await retry.click();
+    } else if (await button.isVisible().catch(() => false) && !(await button.isDisabled().catch(() => true))) {
+      await button.click();
+    }
+  }
   return true;
 }
 
@@ -623,12 +700,22 @@ test("four-party Silver Mesa notice email persists through recipient proposal, a
     .poll(async () => (await fetchOwnerParties(page, agreementId)).length, { timeout: 30_000 })
     .toBe(4);
   const parties = await fetchOwnerParties(page, agreementId);
+  for (const expected of SILVER_MESA_FOUR_PARTY) {
+    const row = parties.find((candidate) => String(candidate.name || "").includes(expected.legalEntity));
+    expect(row?.id, `${expected.legalEntity} participant id`).toBeTruthy();
+    expect(String(row?.email || "").toLowerCase(), `${expected.legalEntity} review email`).toBe(
+      expected.email.toLowerCase(),
+    );
+    const partyMinted = await expect
+      .poll(() => mintedTokenForParticipant(minted, "review", String(row?.id || "")), { timeout: 45_000 })
+      .toBeTruthy()
+      .then(() => mintedTokenForParticipant(minted, "review", String(row?.id || "")));
+    const partyToken = String((partyMinted?.body as Record<string, unknown> | undefined)?.token || "");
+    expect(partyToken.length, `${expected.legalEntity} identity-bound review token`).toBeGreaterThan(12);
+  }
   const silverRow = parties.find((candidate) => String(candidate.name || "").includes(SILVER_MESA));
   expect(silverRow?.id, "Silver Mesa participant id").toBeTruthy();
-  const reviewMinted = await expect
-    .poll(() => mintedTokenForParticipant(minted, "review", String(silverRow?.id || "")), { timeout: 45_000 })
-    .toBeTruthy()
-    .then(() => mintedTokenForParticipant(minted, "review", String(silverRow?.id || "")));
+  const reviewMinted = mintedTokenForParticipant(minted, "review", String(silverRow?.id || ""));
   const token = String((reviewMinted?.body as Record<string, unknown> | undefined)?.token || "");
   expect(token.length, "Silver Mesa review token").toBeGreaterThan(12);
 
