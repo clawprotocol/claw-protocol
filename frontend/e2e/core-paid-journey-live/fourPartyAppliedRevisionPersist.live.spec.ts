@@ -595,64 +595,72 @@ async function assertSilverMesaRecipientEmails(page: Page, label: string): Promi
 }
 
 async function completeSilverMesaSignerSetup(page: Page): Promise<boolean> {
-  const sendReady = page.getByTestId("simple-pro-send-for-review").or(page.getByTestId("simple-pro-send-for-signature"));
   const openSetup = page.getByRole("button", { name: /Complete signer details|Finalize signer details/i }).first();
   if (await openSetup.isVisible().catch(() => false)) {
     await openSetup.click();
   }
+  const setupRoot = page.locator("[data-claw-recipient-setup]").first();
+  if (await setupRoot.isVisible().catch(() => false)) {
+    await setupRoot.scrollIntoViewIfNeeded();
+  }
   const firstEmail = await readVisibleField(page, SILVER_MESA_SIGNER_FIELDS[0]!.emailFields);
-  if (!firstEmail) {
-    return sendReady.first().isVisible({ timeout: 4_000 }).catch(() => false);
-  }
-  const initial = [];
+  if (!firstEmail) return false;
   for (const row of SILVER_MESA_SIGNER_FIELDS) {
-    initial.push({
-      company: row.party.legalEntity,
-      email: (await readVisibleField(page, row.emailFields))?.value ?? "",
-    });
-  }
-  expect(
-    initial,
-    "initial company/email assignments before confirmation fills",
-  ).toBeTruthy();
-  for (const row of SILVER_MESA_SIGNER_FIELDS) {
-    await fillVisibleField(page, row.nameField, row.party.legalEntity);
+    const nameInput = page.locator(`[data-claw-recipient-field="${row.nameField}"]`).first();
+    if (await nameInput.isVisible().catch(() => false)) {
+      await nameInput.scrollIntoViewIfNeeded();
+      const currentName = (await nameInput.inputValue()).trim();
+      if (!currentName) {
+        await nameInput.fill(row.party.legalEntity);
+        if ((await nameInput.inputValue()).trim() !== row.party.legalEntity) return false;
+      } else if (currentName !== row.party.legalEntity) {
+        throw new Error(
+          `Refusing to overwrite ${row.nameField} prefill ${JSON.stringify(currentName)} with ${JSON.stringify(row.party.legalEntity)}`,
+        );
+      }
+    }
     await fillVisibleField(page, row.signerField, row.party.signerName);
+    const emailInput = page.locator(
+      row.emailFields.map((field) => `[data-claw-recipient-field="${field}"]`).join(", "),
+    ).first();
+    if (await emailInput.isVisible().catch(() => false)) {
+      await emailInput.scrollIntoViewIfNeeded();
+    }
     await fillEmptyRecipientField(page, row.emailFields, row.party.email);
   }
   await assertSilverMesaRecipientEmails(page, "after completing visible recipient setup");
-  const advance = page
-    .getByRole("button", {
-      name: /Create review links|Try again|Finalize signer details and continue to review decision|Complete signer details|Save signer details|Continue to review/i,
-    })
-    .first();
-  if (await advance.isVisible().catch(() => false) && !(await advance.isDisabled().catch(() => true))) {
-    await advance.click();
-  }
   return true;
 }
 
 async function clickSilverMesaSendForReview(page: Page): Promise<boolean> {
   if (!(await completeSilverMesaSignerSetup(page))) return false;
-  const createLinks = page.getByRole("button", { name: /Create review links|Try again/i }).first();
-  if (await createLinks.isVisible().catch(() => false) && !(await createLinks.isDisabled().catch(() => true))) {
+  const createLinks = page.getByRole("button", { name: /Create review links/i }).first();
+  const sendButton = page.getByTestId("simple-pro-send-for-review");
+  await expect
+    .poll(
+      async () => {
+        const createReady =
+          (await createLinks.isVisible().catch(() => false)) && !(await createLinks.isDisabled().catch(() => true));
+        const sendReady =
+          (await sendButton.isVisible().catch(() => false)) && !(await sendButton.isDisabled().catch(() => true));
+        return createReady || sendReady;
+      },
+      { timeout: 15_000 },
+    )
+    .toBeTruthy();
+  if ((await createLinks.isVisible().catch(() => false)) && !(await createLinks.isDisabled().catch(() => true))) {
     await createLinks.click();
+  } else {
+    await sendButton.click();
   }
-  const button = page.getByTestId("simple-pro-send-for-review");
-  if (!(await button.isVisible({ timeout: 8_000 }).catch(() => false))) return false;
-  if (await button.isDisabled().catch(() => false)) {
-    await assertSilverMesaRecipientEmails(page, "send disabled; setup still incomplete");
-    return false;
-  }
-  await button.click();
-  const retry = page.getByRole("button", { name: /^Try again$/i }).first();
-  if (await retry.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await completeSilverMesaSignerSetup(page);
+  const failed = page.getByText(/Links were not created|Review links were not created/i).first();
+  if (await failed.isVisible({ timeout: 4_000 }).catch(() => false)) {
+    const retry = page.getByRole("button", { name: /^Try again$/i }).first();
+    if (!(await completeSilverMesaSignerSetup(page))) return false;
     if (await retry.isVisible().catch(() => false) && !(await retry.isDisabled().catch(() => true))) {
       await retry.click();
-    } else if (await button.isVisible().catch(() => false) && !(await button.isDisabled().catch(() => true))) {
-      await button.click();
     }
+    if (await failed.isVisible().catch(() => false)) return false;
   }
   return true;
 }
