@@ -68,7 +68,7 @@ export function repairInlineLetteredEnumerationsInText(text: string): string {
 }
 
 const INLINE_SUBSECTION_MARKER_GLUE_RE = /^(.+?[.!?])\s+(\d+\.\d+(?:\.\d+)*\s+.+)$/s;
-const INLINE_MAIN_SECTION_MARKER_GLUE_RE = /^(.+?[.!?])\s+(\d+\.\s+(?!\d+\.\d).+)$/s;
+const INLINE_MAIN_SECTION_MARKER_GLUE_RE = /^(.+?[.!?])\s+(\d{1,2}\.\s+(?!\d+\.\d).+)$/s;
 
 /** Split inline subsection/main-section markers glued after a completed sentence mid-line. */
 export function splitInlineNumberedSectionMarkerFromLine(line: string): string {
@@ -245,9 +245,9 @@ export function repairGluedSectionHeadingsInText(text: string): string {
   const protectedTitles = protectIndexedClauseTitleNumbers((text || "").replace(/\r\n/g, "\n"));
   let t = protectedTitles.text;
 
-  t = t.replace(/([.!?])\s+(\d+\.\s+[A-Z])/g, "$1\n\n$2");
+  t = t.replace(/([.!?])\s+(\d{1,2}\.\s+[A-Z])/g, "$1\n\n$2");
   t = t.replace(/([.!?])\s+(\d+\.\d+\s+)/g, "$1\n\n$2");
-  t = t.replace(/([^\n])\s+(\d+\.\s+(?!\d+\.\d)[A-Z])/g, "$1\n\n$2");
+  t = t.replace(/([^\n])\s+(\d{1,2}\.\s+(?!\d+\.\d)[A-Z])/g, "$1\n\n$2");
   t = t.replace(/([a-z])(\d{1,2}\.\s+(?!\d+\.\d)[A-Z])/g, "$1\n\n$2");
   // Any title letter glued to any subsection marker: `Terms9.1`, `Liability14.2 Cap`, `Terms9.1Notices`.
   t = t.replace(
@@ -265,7 +265,7 @@ export function repairGluedSectionHeadingsInText(text: string): string {
 
   const expandedLines: string[] = [];
   for (const line of t.split("\n")) {
-    const inlineExpanded = line.replace(/([^\n])\s+(\d+\.\s+(?!\d+\.\d))/g, "$1\n$2");
+    const inlineExpanded = line.replace(/([^\n])\s+(\d{1,2}\.\s+(?!\d+\.\d))/g, "$1\n$2");
     for (const part of inlineExpanded.split("\n")) {
       const split = splitGluedSectionHeadingFromLine(part);
       expandedLines.push(...split.split("\n"));
@@ -273,7 +273,7 @@ export function repairGluedSectionHeadingsInText(text: string): string {
   }
   t = expandedLines.join("\n");
 
-  t = t.replace(/([.!?])\s+(\d+\.\s+[A-Z])/g, "$1\n\n$2");
+  t = t.replace(/([.!?])\s+(\d{1,2}\.\s+[A-Z])/g, "$1\n\n$2");
   t = t.replace(/(\d+\.\s+(?!\d+\.\d)[^\n]{3,110}?)\s+(\d+\.\d+\s+)/g, "$1\n\n$2");
   t = t.replace(/(\d+\.\d+\s+[^.\n]{4,120}?\.?)\s+(\d+\.\d+\s+)/g, "$1\n\n$2");
   t = t.replace(/(\d+\.\d+\s+[^.\n]{4,120}?\.?)\s+(\d+\.\s+(?!\d+\.\d))/g, "$1\n\n$2");
