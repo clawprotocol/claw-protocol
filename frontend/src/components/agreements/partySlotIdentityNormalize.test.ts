@@ -8,6 +8,7 @@ import {
   normalizeAgreementPartyName,
   repairDraftPartiesFromIntakeAuthority,
   resolveAuthoritativeIntakePartyNames,
+  resolveAuthoritativePartySlotCount,
   resolveDeclaredExplicitPartyCount,
   resolveHirerVersusHiredCompanySlots,
   splitCommaSeparatedPartyNames,
@@ -20,6 +21,20 @@ const TEST330_BETWEEN =
   'between Red Mesa Logistics, LLC ("party_a") and Harbor Peak Automation, LLC ("party_b")';
 
 describe("partySlotIdentityNormalize", () => {
+  it("counts a confirmed individual Advisor as the third signer-setup slot", () => {
+    expect(
+      resolveAuthoritativePartySlotCount({
+        intakeText:
+          "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Alex Rivera, alex.rivera@advisor.test, is involved.",
+        draftPartyNames: [
+          "Harbor Peak Analytics LLC",
+          "Ironvale Manufacturing Inc",
+          "Alex Rivera",
+        ],
+      }),
+    ).toBe(3);
+  });
+
   it("rejects standalone LLC as a legal entity", () => {
     expect(isStandaloneLegalEntitySuffix("LLC")).toBe(true);
     expect(isInvalidPartySlotLegalEntity("LLC")).toBe(true);

@@ -24,7 +24,7 @@ import {
   isStateLegalFormOnlyName,
 } from "./paidProPartyNamePreserve";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
-import { looksLikeAuthorizedSignersBulletLine } from "./intakeSignerMetadataAuthority";
+import { isLikelyHumanSignerName, looksLikeAuthorizedSignersBulletLine } from "./intakeSignerMetadataAuthority";
 
 const STANDALONE_SUFFIX_RE =
   /^(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?$/i;
@@ -541,6 +541,12 @@ export function resolveAuthoritativePartySlotCount(args: {
   userExpandedPartyCount?: number;
 }): number {
   const userExpanded = Math.max(0, args.userExpandedPartyCount ?? 0);
+  const confirmedDraftParties = collapsePartySlotCandidates(args.draftPartyNames ?? []).filter(
+    (name) => isAuthoritativeLegalEntityName(name) || isLikelyHumanSignerName(name),
+  );
+  if (confirmedDraftParties.length >= 3 && confirmedDraftParties.length <= PAID_PRO_AUTHORITY_MAX_PARTIES) {
+    return confirmedDraftParties.length;
+  }
 
   const intake = String(args.intakeText ?? "").trim();
   const declaredCount = resolveDeclaredExplicitPartyCount(intake);

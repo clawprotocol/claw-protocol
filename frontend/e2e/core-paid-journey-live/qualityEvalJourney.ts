@@ -1273,6 +1273,12 @@ export async function completeSignerDetailsThroughVisibleCustomerUi(
     await openSetup.click();
   }
   await expect(signerInputReady, "signer-name field must be visible in customer UI").toBeVisible({ timeout: 12_000 });
+  if (signers.length >= 3) {
+    await expect(
+      page.locator('[data-claw-recipient-field="party-2-signer-name"]').first(),
+      "third confirmed party must have a visible signer-name field",
+    ).toBeVisible({ timeout: 12_000 });
+  }
   const slots = [
     { name: "r1-name", signer: "r1-signer-name", email: "r1-email" },
     { name: "r2-name", signer: "r2-signer-name", email: "r2-email" },
@@ -1315,23 +1321,30 @@ export async function completeSignerDetailsThroughVisibleCustomerUi(
   );
   await expect(saveDetails, "customer save of signer details").toBeEnabled({ timeout: 12_000 });
   await saveDetails.click();
-  await expect
-    .poll(async () => {
-      const saved = await fetchOwnerIdentityState(page, agreementId);
-      return signers.every((signer) => {
-        const row = saved.parties.find((party) => String(party.name || "").includes(signer.legalEntity));
-        const name = String(row?.signerName || row?.signer_name || "").trim();
-        const email = String(row?.email || "").trim().toLowerCase();
-        return (
-          Boolean(row) &&
-          (!signer.signerName || name.toLowerCase() === signer.signerName.toLowerCase()) &&
-          (!signer.signerEmail || email === signer.signerEmail.toLowerCase())
-        );
-      })
-        ? 1
-        : 0;
-    }, { timeout: 20_000 })
-    .toBe(1);
+  try {
+    await expect
+      .poll(async () => {
+        const saved = await fetchOwnerIdentityState(page, agreementId);
+        return signers.every((signer) => {
+          const row = saved.parties.find((party) => String(party.name || "").includes(signer.legalEntity));
+          const name = String(row?.signerName || row?.signer_name || "").trim();
+          const email = String(row?.email || "").trim().toLowerCase();
+          return (
+            Boolean(row) &&
+            (!signer.signerName || name.toLowerCase() === signer.signerName.toLowerCase()) &&
+            (!signer.signerEmail || email === signer.signerEmail.toLowerCase())
+          );
+        })
+          ? 1
+          : 0;
+      }, { timeout: 20_000 })
+      .toBe(1);
+  } catch (error) {
+    const saved = await fetchOwnerIdentityState(page, agreementId).catch(() => ({ parties: [] }));
+    throw new Error(
+      `signer_details_did_not_persist agreement=${agreementId} parties=${JSON.stringify(saved.parties)} source=${String(error)}`,
+    );
+  }
 }
 
 async function assertSignerFormHoldsIntakeOrFillOnlyOmitted(
