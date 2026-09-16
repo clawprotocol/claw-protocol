@@ -921,6 +921,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("paperHasConfirmedParties");
     expect(intake).toContain("if (!finalized) return;");
     expect(intake).toContain("fetchCanonicalReviewSnapshot({ agreementId: recoveredSigningAgreementId })");
+    expect(intake).toContain("enterGuidedSignatureTrackRoute:recover_accepted_server");
     expect(intake).toContain("guidedSignatureTrackPromiseRef");
     const guidedProceedIdx = sendBlock.indexOf(
       "if (canProceedGuidedFinalReviewToSigning && paidProSignatureDetailsReady)",

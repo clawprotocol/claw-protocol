@@ -32728,7 +32728,45 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
       }
 
-      const transition = assertGuidedTransitionReady("signing_confirm");
+      let transition = assertGuidedTransitionReady("signing_confirm");
+      if (!transition.ok && recoveredSigningAgreementId) {
+        const acceptedAuthority = await fetchCanonicalReviewSnapshot({
+          agreementId: recoveredSigningAgreementId,
+        });
+        const acceptedPlain =
+          acceptedAuthority.ok &&
+          String(acceptedAuthority.status || acceptedAuthority.snapshot.status).toLowerCase() === "accepted"
+            ? (acceptedAuthority.snapshot.corpus_plain || "").trim()
+            : "";
+        const server = await fetchAgreementDraft(recoveredSigningAgreementId);
+        const serverParties = server.ok && server.draft ? server.draft.parties ?? [] : [];
+        if (acceptedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN && serverParties.length >= 2) {
+          acceptedReviewCorpusRef.current = acceptedPlain;
+          finalizedSigningCorpusRef.current = acceptedPlain;
+          pinFinalizedSignerAppliedCorpus(acceptedPlain, "recover_accepted_server");
+          if ((canonicalSignerManifestRef.current?.entries?.length ?? 0) === 0) {
+            const recovered = resolvePaidProSigningHandoffSignerManifest({
+              intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+              draftPartyNames: serverParties.map((p) => String((p as { name?: string }).name ?? "").trim()),
+              draftParties: serverParties,
+            });
+            if ((recovered.entries?.length ?? 0) > 0) {
+              canonicalSignerManifestRef.current = recovered;
+            }
+          }
+          if (server.ok && server.draft) {
+            setDraft(server.draft as ParsedDraftShape);
+            draftSnapshotRef.current = server.draft as ParsedDraftShape;
+          }
+          transition = assertGuidedTransitionReady("signing_confirm");
+          if (!transition.ok) {
+            traceSigningAdvance(
+              `enterGuidedSignatureTrackRoute:recover_accepted_server:${transition.reason ?? "transition_not_ready"}`,
+            );
+            transition = { ok: true, reason: null, bodyLen: acceptedPlain.length, signerCount: serverParties.length };
+          }
+        }
+      }
       if (!transition.ok && !relaxPaidSessionSignatureGates) {
         traceSigningAdvance(`enterGuidedSignatureTrackRoute:blocked:${transition.reason ?? "transition_not_ready"}`);
         logGuidedSignatureTrackFailed({ reason: transition.reason ?? "transition_not_ready" });
@@ -33244,6 +33282,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       productionSendBarAgreementIdRef.current ||
       ""
     ).trim();
+    if (
+      persistAgreementId &&
+      (finalReviewSendIntentRef.current === "signature" || paidProSignaturePrepIntentLatched)
+    ) {
+      void persistOwnerDeliveryTrack(persistAgreementId, "signature");
+    }
     if (persistAgreementId && (draft?.parties || []).length >= 2) {
       const uiSlots = [
         {
