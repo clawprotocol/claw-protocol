@@ -18458,7 +18458,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return next;
       });
       setSignerSetupUiPartyCount(Math.max(nextParties.length, 2));
-    },)
+    },
     [commitPaidProUserApprovedRevision],
   );
 
