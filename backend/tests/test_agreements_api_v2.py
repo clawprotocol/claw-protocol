@@ -3074,3 +3074,65 @@ def test_recipient_preview_export_pdf_requires_recipient_token_or_org(monkeypatc
         json={"export_kind": "original", "html": "  \n\t  "},
     )
     assert empty.status_code == 422
+
+
+def test_parties_patch_reuses_existing_ids_for_same_legal_names(tmp_path, monkeypatch):
+    """Send-for-signature rewrites Client/SP rows; tokens must stay bound to GET ids."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
+    created = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Harbor lock bind",
+            "jurisdiction": "DE",
+            "parties": [
+                {"name": "Harbor Peak Analytics LLC", "role": "owner", "signer_name": "Maya Chen"},
+                {"name": "Ironvale Manufacturing Inc.", "role": "reviewer", "signer_name": "Jordan Hale"},
+            ],
+            "purpose": "AI workflow",
+            "payment_terms": "$48,000",
+            "duration": "twelve months",
+            "due_date": None,
+            "effective_date": "2026-10-01",
+        },
+    )
+    assert created.status_code == 200
+    aid = created.json()["id"]
+    first = client.get(f"/api/agreements/{aid}", headers=_ORG_H)
+    assert first.status_code == 200
+    first_parties = first.json()["draft"]["parties"]
+    first_ids = [row["id"] for row in first_parties]
+    assert len(first_ids) == 2
+    assert all(first_ids)
+
+    rewritten = client.post(
+        f"/api/agreements/{aid}/update-field",
+        headers=_ORG_H,
+        json={
+            "field": "parties",
+            "value": [
+                {
+                    "name": "Harbor Peak Analytics LLC",
+                    "role": "Client",
+                    "email": "maya.chen@harborpeak.test",
+                    "signer_name": "Maya Chen",
+                },
+                {
+                    "name": "Ironvale Manufacturing Inc.",
+                    "role": "Service Provider",
+                    "email": "jordan.hale@ironvale.test",
+                    "signer_name": "Jordan Hale",
+                    "id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                },
+            ],
+        },
+    )
+    assert rewritten.status_code == 200
+    after = rewritten.json()["draft"]["parties"]
+    assert [row["id"] for row in after] == first_ids
+    assert after[0]["role"] == "Client"
+    assert after[1]["role"] == "Service Provider"

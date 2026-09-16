@@ -6525,6 +6525,28 @@ def get_agreement_usage_summary(request: Request) -> Dict[str, Any]:
     return usage_summary_for_subject(identity.subject_ref)
 
 
+def _normalize_party_legal_name(name: str) -> str:
+    return " ".join(str(name or "").split()).strip().lower().rstrip(".,;:")
+
+
+def _existing_party_id_for_legal_name(
+    name: str,
+    prior_parties: List[AgreementParty],
+    used: set,
+) -> str:
+    """Reuse the durable id already bound to this legal name. Do not mint a new UUID."""
+    key = _normalize_party_legal_name(name)
+    if not key:
+        return ""
+    for prior in prior_parties or []:
+        pid = str(getattr(prior, "id", "") or "").strip()
+        if not pid or pid in used:
+            continue
+        if _normalize_party_legal_name(str(getattr(prior, "name", "") or "")) == key:
+            return pid
+    return ""
+
+
 def _ensure_agreement_parties_have_ids(parties: List[AgreementParty]) -> List[AgreementParty]:
     sanitized = _sanitize_agreement_parties_in_order(list(parties or []))
     out: List[AgreementParty] = []
@@ -10449,16 +10471,25 @@ def update_agreement_field(
     now = _utc_now_iso()
     audit_log = list(next_data.get("audit_log") or [])
     if body.field == "parties":
-        prior_ids = {(p.id or "").strip() for p in (draft.parties or []) if (p.id or "").strip()}
+        prior_parties = list(draft.parties or [])
+        prior_ids = {(p.id or "").strip() for p in prior_parties if (p.id or "").strip()}
         parties_raw: List[AgreementParty] = []
         if isinstance(body.value, list):
-            prior_by_id = {(p.id or "").strip(): p for p in (draft.parties or []) if (p.id or "").strip()}
+            prior_by_id = {(p.id or "").strip(): p for p in prior_parties if (p.id or "").strip()}
+            used_ids: set = set()
             for p in body.value:
                 if not isinstance(p, dict):
                     continue
                 name = str(p.get("name") or "").strip()
                 role = str(p.get("role") or "party").strip() or "party"
-                pid = str(p.get("id") or "").strip() or str(uuid.uuid4())
+                pid = str(p.get("id") or "").strip()
+                if pid not in prior_ids:
+                    reused = _existing_party_id_for_legal_name(name, prior_parties, used_ids)
+                    if reused:
+                        pid = reused
+                if not pid:
+                    pid = str(uuid.uuid4())
+                used_ids.add(pid)
                 prior = prior_by_id.get(pid)
                 email_raw = str(p.get("email") or "").strip()
                 email = email_raw or (str(prior.email or "").strip() if prior else "") or None

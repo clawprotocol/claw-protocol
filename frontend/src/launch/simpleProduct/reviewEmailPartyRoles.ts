@@ -3,6 +3,7 @@ import {
   fetchAgreementDraft,
   patchAgreementField,
 } from "../../agreement/agreementWorkspaceApi";
+import { partiesPayloadPreservingIds } from "../../components/agreements/preserveConfirmedPartyIds";
 import type { RecipientSetupEmailInput } from "./agreementToVs01SigningBridge";
 import {
   mergeLiveDraftWithRecipientSetupForReviewLinks,
@@ -129,7 +130,10 @@ export async function persistReviewEmailPartyRolesOnServer(
 
   const { ok: fetchOk, draft: serverDraft } = await fetchAgreementDraft(id);
   const serverBase = fetchOk && serverDraft ? serverDraft : draft;
-  const parties = prepareReviewEmailPartyRowsForServer(serverBase, draft, recipientSetup);
+  const parties = partiesPayloadPreservingIds(
+    prepareReviewEmailPartyRowsForServer(serverBase, draft, recipientSetup),
+    serverBase.parties ?? [],
+  );
   if (namedLegalPartyCount(parties) < namedLegalPartyCount(serverBase.parties ?? [])) {
     return { ok: false, draft: serverBase, rolesPersisted: false };
   }
