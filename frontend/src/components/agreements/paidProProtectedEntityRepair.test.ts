@@ -111,3 +111,77 @@ describe("repairProtectedLegalEntitySuffixes — customer-content integrity", ()
     expect(first.text).not.toMatch(/Ironvale Manufacturing Inc\. Inc\./);
   });
 });
+
+describe("repairProtectedLegalEntitySuffixes — current document emails vs original intake", () => {
+  it("keeps an email that appears only in the current document", () => {
+    const cedar = "Cedar Ridge Advisors LLC";
+    const maple = "Maple Partners Inc.";
+    const intake = [
+      `Draft a Delaware consulting agreement between ${cedar} and ${maple}.`,
+      "Notices will be provided later.",
+    ].join("\n");
+    const document = [
+      `This Agreement is between ${cedar} ("Consultant") and ${maple} ("Client").`,
+      `If to ${cedar}: notices@cedar-ridge.example`,
+      `If to ${maple}: counsel@maplepartners.example`,
+    ].join("\n");
+    const { first, second } = twice(document, [cedar, maple], intake);
+    expect(first.text).toBe(document);
+    expect(second.text).toBe(document);
+  });
+
+  it("preserves a revised email that differs from intake", () => {
+    const oak = "Oak Street Holdings LLC";
+    const pine = "Pine Creek Manufacturing Inc.";
+    const intake = [
+      `Parties: ${oak} (Client) and ${pine} (Supplier).`,
+      "Notices: legal@old-company.com",
+    ].join("\n");
+    const document = [
+      `This Agreement is between ${oak} ("Client") and ${pine} ("Supplier").`,
+      `Notices to ${oak}: legal@new-company.com`,
+      `Notices to ${pine}: purchasing@pine-creek.example`,
+    ].join("\n");
+    const { first, second } = twice(document, [oak, pine], intake);
+    expect(first.text).toBe(document);
+    expect(second.text).toBe(document);
+  });
+
+  it("preserves distinct party addresses including plus-addressing and subdomains", () => {
+    const stone = "Stonebridge Wellness LLC";
+    const nova = "NovaPath Learning Inc.";
+    const clear = "ClearSpring Distribution LLC";
+    const intake = [
+      `Three-party Oklahoma license among ${stone}, ${nova}, and ${clear}.`,
+      "Use placeholder notices until the parties confirm addresses.",
+    ].join("\n");
+    const document = [
+      `This Agreement is among ${stone} ("Licensor"), ${nova} ("Platform"), and ${clear} ("Distributor").`,
+      `If to ${stone}: sandra+notices@mail.stonebridge.example`,
+      `If to ${nova}: legal@ops.novapath.example`,
+      `If to ${clear}: billing+ok@clearspring.example`,
+    ].join("\n");
+    const { first, second } = twice(document, [stone, nova, clear], intake);
+    expect(first.text).toBe(document);
+    expect(second.text).toBe(document);
+  });
+
+  it("does not reinsert an intake email that the current document removed", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc.";
+    const intake = [
+      `Delaware consulting between ${harbor} and ${ironvale}.`,
+      "Notices: legal@old-company.com",
+      "Also: jordan.hale@ironvale.example",
+    ].join("\n");
+    const document = [
+      `This Agreement is between ${harbor} ("Consultant") and ${ironvale} ("Client").`,
+      `If to ${harbor}: maya.chen@harborpeak.example`,
+      `If to ${ironvale}:`,
+      ironvale,
+    ].join("\n");
+    const { first, second } = twice(document, [harbor, ironvale], intake);
+    expect(first.text).toBe(document);
+    expect(second.text).toBe(document);
+  });
+});
