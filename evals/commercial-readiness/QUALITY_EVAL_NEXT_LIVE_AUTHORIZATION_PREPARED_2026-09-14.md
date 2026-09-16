@@ -8,7 +8,7 @@ The two-sample inventory (2+2+2, repair 0, clarification 0) is not enough for th
 
 Owner authorized this card’s four-sample grant on 2026-09-15: $2.50 additional reserved, 4+4+4 primary/parse/bootstrap_parse, 4 conditional clarification, 4 conditional repair, attempt ceiling 35. That supersedes the pending-approval wording for this grant only. It is not launch authorization and does not activate `quality-eval-increment-20260914.inactive.json`.
 
-**Executed 2026-09-15** as `quality-eval-live/20260915T125731Z-69053` on `bb66046c` with matching rematches `20260915T125219Z-68447` and `20260915T125322Z-68664`. Harbor consulting failed at premium 503; SaaS / three-party / four-party were not generated. Report: `QUALITY_EVAL_LIVE_20260915T125731Z.md`. A later local correction of the demonstrated parse/persist/scope defects is not a new live grant. Do not treat leftover inventory as a new authorization.
+**Executed 2026-09-15** as `quality-eval-live/20260915T125731Z-69053` on `bb66046c` with matching rematches `20260915T125219Z-68447` and `20260915T125322Z-68664`. Harbor consulting failed at premium 503; SaaS / three-party / four-party were not generated. Report: `QUALITY_EVAL_LIVE_20260915T125731Z.md`. A later local correction of the demonstrated parse/persist/scope defects is not a new live grant. Do not treat leftover inventory as a new authorization. **2026-09-16 local customer-journey qualification is not closed.** Current product `751893db`; historical `945d66f8` / `0482c73d` preserved. Do not run `--live`.
 
 Campaign facts: `RELEASE_SCOPE_QUALIFICATION_CAMPAIGN_2026-09-14.md` and
 `frontend/src/launch/releaseScopeQualificationCampaign.ts`.
