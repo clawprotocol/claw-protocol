@@ -338,6 +338,90 @@ describe("canonicalReviewSnapshotApi", () => {
     ).toBe(true);
   });
 
+  it("prepareCommercialReviewSnapshotAuthority accepts the customer-approved pending when none is accepted yet", async () => {
+    const first = ("OPERATIVE\n\n" + "first-apply-bytes ".repeat(40)).trim();
+    const named = ("OPERATIVE\n\n" + "named-advisor-bytes ".repeat(40)).trim();
+    const firstDigest = await sha256CorpusDigest(first);
+    const namedDigest = await sha256CorpusDigest(named);
+    let current = {
+      status: "pending",
+      snapshot: {
+        snapshot_id: "crs_first",
+        agreement_id: "ag_identity",
+        corpus_plain: first,
+        corpus_sha256: firstDigest,
+        corpus_length: first.length,
+        status: "pending",
+      },
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/canonical-review-snapshot/accept") && method === "POST") {
+        const body = JSON.parse(String(init?.body || "{}")) as {
+          snapshot_id?: string;
+          allow_revision?: boolean;
+        };
+        expect(body.allow_revision).toBe(false);
+        expect(body.snapshot_id).toBe("crs_named");
+        current = {
+          status: "accepted",
+          snapshot: {
+            snapshot_id: "crs_named",
+            agreement_id: "ag_identity",
+            corpus_plain: named,
+            corpus_sha256: namedDigest,
+            corpus_length: named.length,
+            status: "accepted",
+          },
+        };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ accepted: current.snapshot }),
+        } as Response;
+      }
+      if (url.includes("/canonical-review-snapshot") && method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "pending",
+            snapshot: {
+              snapshot_id: "crs_named",
+              agreement_id: "ag_identity",
+              corpus_plain: named,
+              corpus_sha256: namedDigest,
+              corpus_length: named.length,
+              status: "pending",
+            },
+          }),
+        } as Response;
+      }
+      if (url.includes("/canonical-review-snapshot") && method === "GET") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => current,
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await prepareCommercialReviewSnapshotAuthority({
+      agreementId: "ag_identity",
+      corpusPlain: named,
+      generationSessionId: "gen_named",
+      allowSupersedingRevision: true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.code);
+    expect(result.snapshot.snapshot_id).toBe("crs_named");
+    expect(result.status).toBe("accepted");
+    expect(result.snapshot.corpus_sha256).toBe(namedDigest);
+  });
+
   it("acceptDisplayedCommercialReviewSnapshot fails when display differs from GET", async () => {
     const corpus = ("OPERATIVE\n\n" + "x".repeat(600)).trim();
     const digest = await sha256CorpusDigest(corpus);

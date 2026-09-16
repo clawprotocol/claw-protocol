@@ -593,19 +593,20 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
   if (!persisted.ok) return { ok: false, code: persisted.code };
 
   // GET prefers the current accepted record. A customer-approved revision must
-  // accept the new pending with allow_revision so named paper becomes GET
-  // authority. The prior accepted digest stays historical (superseded, not rewritten).
+  // accept the pending we just posted so named/payment paper becomes GET
+  // authority. Do not accept an earlier first-draft pending. If a prior
+  // accepted exists, allow_revision supersedes it without rewriting that digest.
   if (
     args.allowSupersedingRevision &&
-    priorAcceptedId &&
+    persisted.snapshot.snapshot_id &&
     persisted.snapshot.snapshot_id !== priorAcceptedId
   ) {
     const accepted = await acceptCanonicalReviewSnapshot({
       agreementId: id,
       snapshotId: persisted.snapshot.snapshot_id,
       expectedDigest: persisted.snapshot.corpus_sha256,
-      expectedAcceptedSnapshotId: priorAcceptedId,
-      allowRevision: true,
+      expectedAcceptedSnapshotId: priorAcceptedId || undefined,
+      allowRevision: Boolean(priorAcceptedId),
       displaySnapshotId: persisted.snapshot.snapshot_id,
       displayDigest: persisted.snapshot.corpus_sha256,
       displayLength: persisted.snapshot.corpus_length,
