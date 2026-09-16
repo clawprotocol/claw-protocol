@@ -380,7 +380,8 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
   if (
     !lockInvite.includes("isDurableSigningParticipantId") ||
     !lockInvite.includes("party_0") ||
-    !lockInvite.includes("putSigningLock")
+    !lockInvite.includes("putSigningLock") ||
+    !lockInvite.includes("lockAndMintSigningInvitesFromPersistedDraft")
   ) {
     throw new Error("direct signing lock helper no longer rejects synthetic ids or locks before mint");
   }

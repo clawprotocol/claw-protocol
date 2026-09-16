@@ -451,7 +451,7 @@ Date: _________________________
     expect(handleBlock).toContain("REVIEW_FIRST_SIMPLE_PRO_SOURCE");
     expect(handleBlock).not.toContain("setPremiumSendConfirmOpen(true)");
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const handoffBlock = intake.slice(handoffIdx, handoffIdx + 15000);
+    const handoffBlock = intake.slice(handoffIdx, handoffIdx + 17000);
     expect(handoffBlock).toContain("logReviewFirstHandoffStart");
     expect(handoffBlock).toContain("writeReviewFirstHandoffSource");
     expect(handoffBlock).toContain("clearReviewFirstHandoffSource");

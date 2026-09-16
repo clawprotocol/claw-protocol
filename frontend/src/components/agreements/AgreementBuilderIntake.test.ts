@@ -913,6 +913,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(sendBlock).toContain('continueGuidedFinalReviewToSigning({ intent: "signature" })');
     expect(sendBlock).toContain("canProceedGuidedFinalReviewToSigning");
     expect(sendBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
+    expect(sendBlock).toContain("lockAndMintSigningInvitesFromPersistedDraft");
     expect(sendBlock).toContain("signatureConfirmationSlotsFromPersistedParties");
     expect(intake).toContain("enterGuidedSignatureTrackRoute:in_flight_wait");
     expect(intake).toContain("owner_delivery_track");
@@ -922,6 +923,12 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("if (!finalized) return;");
     expect(intake).toContain("fetchCanonicalReviewSnapshot({ agreementId: recoveredSigningAgreementId })");
     expect(intake).toContain("enterGuidedSignatureTrackRoute:recover_accepted_server");
+    expect(intake).toContain("lockAndMintSigningInvitesFromPersistedDraft");
+    expect(intake).toContain("handleProSendForSignature:persisted_mint_ok");
+    expect(intake).toContain("handleProSendForSignature:persisted_mint_fail");
+    expect(intake).toContain("retainAuthorizedApiPartiesAfterIntakeDefaults(");
+    expect(intake).toContain("mergePaidProAuthoritativeDraftFieldsFromApi(live, server.draft)");
+    expect(intake).toContain("pendingPlain ||");
     expect(intake).toContain("guidedSignatureTrackPromiseRef");
     const guidedProceedIdx = sendBlock.indexOf(
       "if (canProceedGuidedFinalReviewToSigning && paidProSignatureDetailsReady)",

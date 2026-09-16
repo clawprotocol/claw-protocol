@@ -7,7 +7,7 @@ import {
   fetchAgreementDraft,
   fetchAgreementDraftWithSigningLock,
 } from "../../agreement/agreementWorkspaceApi";
-import { putSigningLock } from "../../agreement/recipientAccessApi";
+import { mintRecipientAccessTokenResult, putSigningLock } from "../../agreement/recipientAccessApi";
 import { persistOwnerDeliveryTrack } from "../../components/agreements/paidProOwnerDeliveryTrack";
 import { persistReviewEmailPartyRolesOnServer } from "./reviewEmailPartyRoles";
 import type { RecipientSetupEmailInput } from "./agreementToVs01SigningBridge";
@@ -178,4 +178,59 @@ export async function lockAuthoritativeVersionAndMintSigningInvites(options: {
     mintAllRequiredSignTokens,
     draft: refreshed.ok && refreshed.draft ? refreshed.draft : authoritative,
   };
+}
+
+function recipientLinkMintKey(): string {
+  return (
+    (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env
+      ?.VITE_RECIPIENT_LINK_MINT_KEY || ""
+  );
+}
+
+/**
+ * Lock + mint from the persisted GET draft. Does not depend on guided UI refs,
+ * remount latches, or packet activation. Freeze persist stays draft; this is
+ * the production boundary that writes the signing lock and phase=sign invites.
+ */
+export async function lockAndMintSigningInvitesFromPersistedDraft(options: {
+  agreementId: string;
+  draft?: AgreementDraft | null;
+}): Promise<
+  | (Extract<DirectSigningLockAndInviteResult, { ok: true }> & { mintedParticipantIds: string[] })
+  | { ok: false; reason: string }
+> {
+  const id = String(options.agreementId || "").trim();
+  if (!id) return { ok: false, reason: "missing_agreement" };
+  const server = await fetchAgreementDraft(id);
+  const authoritative =
+    richerSigningPartyDraft(
+      options.draft,
+      server.ok && server.draft ? server.draft : null,
+    ) ?? options.draft ?? null;
+  if (!authoritative) return { ok: false, reason: "missing_draft" };
+
+  const locked = await lockAuthoritativeVersionAndMintSigningInvites({
+    agreementId: id,
+    draft: authoritative,
+  });
+  if (!locked.ok) return locked;
+
+  const mintedParticipantIds: string[] = [];
+  const mintKey = recipientLinkMintKey();
+  for (const participantId of locked.requiredParticipantIds) {
+    if (!locked.mintAllRequiredSignTokens && participantId === locked.ownerPartyId) continue;
+    const minted = await mintRecipientAccessTokenResult(
+      id,
+      { mode: "sign", role: "signer", recipient_party_id: participantId },
+      mintKey,
+    );
+    if (!minted.ok) {
+      return { ok: false, reason: minted.code || minted.detail || "sign_mint_failed" };
+    }
+    mintedParticipantIds.push(participantId);
+  }
+  if (mintedParticipantIds.length < 1) {
+    return { ok: false, reason: "sign_mint_failed" };
+  }
+  return { ...locked, mintedParticipantIds };
 }

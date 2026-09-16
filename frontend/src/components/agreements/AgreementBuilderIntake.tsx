@@ -594,6 +594,7 @@ import {
   executePaidProPostRecipientSetupHandoff,
   shouldSkipPaidProPrepareReviewLinkInterstitial,
 } from "../../launch/simpleProduct/paidProPostRecipientSetupHandoff";
+import { lockAndMintSigningInvitesFromPersistedDraft } from "../../launch/simpleProduct/paidProDirectSigningLockAndInvite";
 import {
   clearReviewFirstHandoffSource,
   clearReviewFirstMintInFlight,
@@ -18411,7 +18412,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           acceptedAuthority.ok &&
           String(acceptedAuthority.status || acceptedAuthority.snapshot.status).toLowerCase() === "accepted";
         if (!alreadyAccepted) {
+          const pendingPlain = acceptedAuthority.ok
+            ? String(acceptedAuthority.snapshot.corpus_plain || "").trim()
+            : "";
           const editable = (
+            pendingPlain ||
             acceptedReviewCorpusRef.current ||
             lastKnownGoodAuthoritativeDraftRef.current ||
             agreementDocumentTextRef.current ||
@@ -32755,9 +32760,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             }
           }
           if (server.ok && server.draft) {
-            const recoveredDraft = server.draft as unknown as ParsedDraftShape;
-            setDraft(recoveredDraft);
-            draftSnapshotRef.current = recoveredDraft;
+            const live = draftSnapshotRef.current || draft;
+            if (live) {
+              const recoveredDraft = retainAuthorizedApiPartiesAfterIntakeDefaults(
+                mergePaidProAuthoritativeDraftFieldsFromApi(live, server.draft),
+                server.draft,
+              );
+              setDraft(recoveredDraft);
+              draftSnapshotRef.current = recoveredDraft;
+            }
           }
           transition = assertGuidedTransitionReady("signing_confirm");
           if (!transition.ok) {
@@ -33441,7 +33452,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       additionalTerms: draft?.additional_terms,
     });
     if (!reusedAcceptedSnapshot) {
-      const editableBeforeAccept = (rawCorpus || authoritativePaidProReviewPlain || "").trim();
+      const pendingPlain = acceptedAuthority.ok
+        ? String(acceptedAuthority.snapshot.corpus_plain || "").trim()
+        : "";
+      const editableBeforeAccept = (
+        pendingPlain ||
+        rawCorpus ||
+        authoritativePaidProReviewPlain ||
+        ""
+      ).trim();
       const paperHasConfirmedParties = boundParties.every((party) => {
         const name = String(party.name || "").replace(/\.$/, "").trim();
         return name.length >= 2 && editableBeforeAccept.toLowerCase().includes(name.toLowerCase());
@@ -33508,8 +33527,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       onHomeGuidedTransitionPhase?.("review_ready");
       bumpPremiumSurfaceGateTick();
       const signatureTrackRequested =
-        paidProSignaturePrepIntentLatched ||
-        finalReviewSendIntentRef.current === "signature" ||
+        paidProSignaturePrepIntentLatched || finalReviewSendIntentRef.current === "signature" ||
         isPersistedSignatureDeliveryTrack(
           persistAgreementId || durableAgreementId,
           (draft as { owner_delivery_track?: string | null } | null)?.owner_delivery_track ||
@@ -33650,8 +33668,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setLoading(false);
     bumpPremiumSurfaceGateTick();
     const signatureTrackRequested =
-      paidProSignaturePrepIntentLatched ||
-      finalReviewSendIntentRef.current === "signature" ||
+      paidProSignaturePrepIntentLatched || finalReviewSendIntentRef.current === "signature" ||
       isPersistedSignatureDeliveryTrack(
         persistAgreementId || durableAgreementId,
         (draft as { owner_delivery_track?: string | null } | null)?.owner_delivery_track ||
@@ -33735,13 +33752,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           void finalizePaidProSignerMetadataAndOpenReviewDecision();
           return;
         }
-        // Explicit signing decision only: release freeze and enter e-sign preparation.
+        // Explicit signing decision only: lock+mint from persisted parties, then enter e-sign.
         markSigningPreparationRequested();
         setSignaturePreparationRequested(true);
         setPaidProInlineSignerSetupLatched(false);
         finalReviewSendIntentRef.current = "signature";
         handlePremiumSendModePick("signature");
-        void enterGuidedSignatureTrackRoute();
+        void (async () => {
+          const persistId = (
+            reviewAgreementIdRef.current ||
+            readCreateReviewAgreementResumeId() ||
+            ""
+          ).trim();
+          if (persistId) {
+            const mintedFromPersist = await lockAndMintSigningInvitesFromPersistedDraft({
+              agreementId: persistId,
+              draft: (draftSnapshotRef.current || draft) as AgreementDraft | null,
+            });
+            if (!mintedFromPersist.ok) {
+              const message =
+                "We could not lock this version or create participant-bound signing invitations. Confirm the required signer details and try again.";
+              setGuidedFinalizeModalBlockedMessage(message);
+              setHardError(message);
+              const failed = feedbackFailed("create_links", "Links were not created", message, {
+                remedyLabel: "Try again",
+              });
+              setJourneyActionFeedback(failed);
+              publishJourneyActionFlash(failed);
+              return;
+            }
+          }
+          await enterGuidedSignatureTrackRoute();
+        })();
         return;
       }
       enterGuidedSigningConfirmationFromFinalReview(opts.intent);
@@ -34317,6 +34359,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         traceSigningAdvance("handleProSendForSignature:finalize_incomplete");
         const finalized = await finalizePaidProSignerMetadataAndOpenReviewDecision();
         if (!finalized) return;
+      }
+      const persistId = (
+        reviewAgreementIdRef.current ||
+        readCreateReviewAgreementResumeId() ||
+        confirmationAgreementId ||
+        ""
+      ).trim();
+      if (persistId) {
+        const mintedFromPersist = await lockAndMintSigningInvitesFromPersistedDraft({
+          agreementId: persistId,
+          draft: (draftSnapshotRef.current || draft) as AgreementDraft | null,
+        });
+        if (!mintedFromPersist.ok) {
+          traceSigningAdvance(`handleProSendForSignature:persisted_mint_fail:${mintedFromPersist.reason}`);
+          const message =
+            "We could not lock this version or create participant-bound signing invitations. Confirm the required signer details and try again.";
+          setGuidedFinalizeModalBlockedMessage(message);
+          setHardError(message);
+          const failed = feedbackFailed("create_links", "Links were not created", message, {
+            remedyLabel: "Try again",
+          });
+          setJourneyActionFeedback(failed);
+          publishJourneyActionFlash(failed);
+          return;
+        }
+        traceSigningAdvance(
+          `handleProSendForSignature:persisted_mint_ok:${mintedFromPersist.mintedParticipantIds.length}`,
+        );
       }
       await enterGuidedSignatureTrackRoute();
     };
