@@ -9,6 +9,7 @@ import {
   isAgreementSectionHeadingPartyName,
   isAuthoritativeLegalEntityName,
   isTitleCaseNonPersonMention,
+  shouldPreservePartyShortFormMatch,
 } from "./paidProPartyNamePreserve";
 
 describe("paidProPartyNamePreserve", () => {
@@ -65,6 +66,18 @@ describe("paidProPartyNamePreserve", () => {
   it("derives short forms from legal entity names", () => {
     expect(shortFormsFromLegalName("Ironclad Systems Group LLC")).toContain("Ironclad");
     expect(shortFormsFromLegalName("Silver Mesa Analytics LP")).toContain("Silver Mesa");
+  });
+
+  it("detects person-name and postal-address short-form collisions", () => {
+    const oakLine = "Client representative: Avery Oak.";
+    expect(shouldPreservePartyShortFormMatch(oakLine, oakLine.indexOf("Oak"), 3)).toBe(true);
+    const street = "1 Oak Street, Wilmington, DE 19801";
+    expect(shouldPreservePartyShortFormMatch(street, street.indexOf("Oak Street"), "Oak Street".length)).toBe(
+      true,
+    );
+    expect(shouldPreservePartyShortFormMatch("Oak Street shall provide access credentials.", 0, "Oak Street".length)).toBe(
+      false,
+    );
   });
 
   it("collapses a leftover entity word after Inc in a notice header", () => {
@@ -167,6 +180,28 @@ describe("paidProPartyNamePreserve", () => {
       .filter((line) => line.trim() === "Iron Vale Systems Inc.");
     expect(entityBodyLines).toHaveLength(1);
     expect(out).toContain("Attn: Robert Henderson, President");
+  });
+
+  it("keeps overlapping person names and street addresses when expanding short party labels", () => {
+    const oak = "Oak Street Holdings LLC";
+    const pine = "Pine Creek Manufacturing Inc.";
+    const body = [
+      `This Agreement is between ${oak} ("Client") and ${pine} ("Supplier"),`,
+      "with a principal place of business at 1 Oak Street, Wilmington, DE 19801,",
+      "and at 9 Pine Creek Rd, Wilmington, DE 19802.",
+      "Client representative: Avery Oak.",
+      "Supplier representative: Casey Pine.",
+      "Oak Street shall provide access credentials.",
+    ].join("\n");
+    const out = preserveFullLegalPartyNamesInOpeningAndSignatures(body, [oak, pine], null);
+    expect(out).toContain("Client representative: Avery Oak.");
+    expect(out).not.toContain("Avery Oak Street");
+    expect(out).toContain("Supplier representative: Casey Pine.");
+    expect(out).not.toContain("Casey Pine Creek");
+    expect(out).toContain("1 Oak Street, Wilmington, DE 19801");
+    expect(out).not.toContain("1 Oak Street Holdings");
+    expect(out).toContain("9 Pine Creek Rd, Wilmington, DE 19802");
+    expect(out).toContain("Oak Street Holdings LLC shall provide access credentials.");
   });
 
   it("collapseDuplicateNoticeEntityLines removes consecutive canonical entity dupes", () => {

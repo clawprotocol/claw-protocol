@@ -27,6 +27,7 @@ import {
   isAuthoritativeLegalEntityName,
   preserveFullLegalPartyNamesInOpeningAndSignatures,
   shortFormsFromLegalName,
+  shouldPreservePartyShortFormMatch,
 } from "./paidProPartyNamePreserve";
 import { definedShortNameFromLegalEntity } from "./paidProAgreementPolish";
 import type { CanonicalPartyIdentity as SignerCanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
@@ -955,6 +956,7 @@ export function replaceTruncatedPartyRefsWithRoleLabels(
     );
     const next = body.replace(re, (match, offset) => {
       if (typeof offset !== "number") return role;
+      if (shouldPreservePartyShortFormMatch(body, offset, match.length)) return match;
       const window = body.slice(Math.max(0, offset - 12), offset + match.length + full.length);
       if (full.toLowerCase().startsWith(match.toLowerCase()) && window.toLowerCase().includes(full.toLowerCase())) {
         return match;

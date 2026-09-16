@@ -336,6 +336,29 @@ export function shortFormsFromLegalName(full: string): string[] {
   return [...new Set(forms)].filter((f) => f.length >= 3 && f.length < t.length).sort((a, b) => b.length - a.length);
 }
 
+const STREET_DESIGNATOR_AHEAD_RE =
+  /^\s*(?:Street|St\.?|Road|Rd\.?|Avenue|Ave\.?|Boulevard|Blvd\.?|Drive|Dr\.?|Lane|Ln\.?|Way|Court|Ct\.?|Place|Pl\.?|Parkway|Pkwy\.?|Highway|Hwy\.?|Circle|Cir\.?|Trail|Terrace|Ter\.?)\b/i;
+const HOUSE_NUMBER_BEFORE_RE = /\d+[A-Za-z]?[ \t]+$/;
+const GIVEN_NAME_BEFORE_RE = /(?:^|[^A-Za-z])[A-Z][a-z]+(?:-[A-Z][a-z]+)?[ \t]+$/;
+
+/**
+ * True when a party short-form match sits inside a confirmed person name or postal address
+ * (e.g. "Avery Oak", "1 Oak Street") rather than a truncated company alias.
+ */
+export function shouldPreservePartyShortFormMatch(
+  text: string,
+  offset: number,
+  matchLength: number,
+): boolean {
+  if (offset < 0 || matchLength < 1 || offset >= (text || "").length) return false;
+  const before = text.slice(Math.max(0, offset - 48), offset);
+  const after = text.slice(offset + matchLength, offset + matchLength + 32);
+  if (HOUSE_NUMBER_BEFORE_RE.test(before)) return true;
+  if (STREET_DESIGNATOR_AHEAD_RE.test(after)) return true;
+  if (GIVEN_NAME_BEFORE_RE.test(before) && /^(?:$|[\s.,;:'")\]])/.test(after)) return true;
+  return false;
+}
+
 /** Hard cap for paid-Pro recital/signature party lists (never body-derived phrase lists). */
 export const MAX_AUTHORITATIVE_RECITAL_PARTIES = 12;
 
@@ -694,6 +717,7 @@ function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly str
     );
     const next = out.replace(re, (match, offset) => {
       if (typeof offset !== "number") return full;
+      if (shouldPreservePartyShortFormMatch(out, offset, match.length)) return match;
       if (isRoleLabelInNoticeRegion(offset, match)) return match;
       const window = out.slice(Math.max(0, offset - 8), offset + match.length + 16);
       if (/\[\[LDG_(?:EMAIL|URL)_\d+\]\]/i.test(window)) return match;

@@ -286,6 +286,58 @@ describe("applyPaidProRenderPolish", () => {
     expect(three.text).not.toMatch(/This Agreement is between Oak Street/i);
   });
 
+  it("keeps confirmed representatives and postal addresses through normal applyPaidProRenderPolish", () => {
+    const oak = "Oak Street Holdings LLC";
+    const pine = "Pine Creek Manufacturing Inc.";
+    const oakAddr = "1 Oak Street, Wilmington, DE 19801";
+    const pineAddr = "9 Pine Creek Rd, Wilmington, DE 19802";
+    const recordedInput = [
+      `This Agreement is between ${oak}, a Delaware limited liability company ("Client"), with a principal place of business at ${oakAddr},`,
+      `and ${pine}, a Delaware corporation ("Supplier"), with a principal place of business at ${pineAddr}`,
+      `(each a "Party" and collectively the "Parties").`,
+      "Client representative: Avery Oak.",
+      "Supplier representative: Casey Pine.",
+      "Oak Street shall provide access credentials.",
+    ].join("\n");
+    const intake = `Delaware supply agreement between ${oak} and ${pine}.`;
+    const polishOpts = {
+      surface: "contact_name_address_preservation",
+      skipCache: true as const,
+      authorityParties: [
+        {
+          partyIndex: 0,
+          partyLegalName: oak,
+          signerEmail: "legal@new-company.com",
+          signerName: "Avery Oak",
+          signerTitle: "Manager",
+          partyAddress: oakAddr,
+        },
+        {
+          partyIndex: 1,
+          partyLegalName: pine,
+          signerEmail: "purchasing@pine-creek.example",
+          signerName: "Casey Pine",
+          signerTitle: "President",
+          partyAddress: pineAddr,
+        },
+      ] satisfies PaidProSignerMetadataParty[],
+    };
+    expect("skipNoticeRepair" in polishOpts).toBe(false);
+    const first = applyPaidProRenderPolish(recordedInput, intake, [oak, pine], polishOpts);
+    const second = applyPaidProRenderPolish(first.text, intake, [oak, pine], polishOpts);
+    expect(first.text).toContain("Client representative: Avery Oak.");
+    expect(first.text).not.toContain("Avery Oak Street");
+    expect(first.text).toContain("Supplier representative: Casey Pine.");
+    expect(first.text).not.toContain("Casey Pine Creek");
+    expect(first.text).toContain(oakAddr);
+    expect(first.text.split(oakAddr).length - 1).toBeGreaterThanOrEqual(1);
+    expect(first.text).not.toContain("1 Client");
+    expect(first.text).toContain(pineAddr);
+    expect(first.text).not.toContain("9 Service Provider");
+    expect(first.text).toMatch(/Client shall provide access credentials/);
+    expect(second.text).toBe(first.text);
+  });
+
   it("finalize keeps operative payment placeholders fatal and substitutes contact emails", () => {
     const body = padOperative(
       [

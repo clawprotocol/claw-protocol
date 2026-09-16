@@ -466,3 +466,96 @@ describe("defined-opening recital boundary", () => {
   });
 });
 
+describe("party short-form contact preservation", () => {
+  const oak = "Oak Street Holdings LLC";
+  const pine = "Pine Creek Manufacturing Inc.";
+  const oakAddr = "1 Oak Street, Wilmington, DE 19801";
+  const pineAddr = "9 Pine Creek Rd, Wilmington, DE 19802";
+  const wrapped = [
+    `This Agreement is between ${oak}, a Delaware limited liability company ("Client"), with a principal place of business at ${oakAddr},`,
+    `and ${pine}, a Delaware corporation ("Supplier"), with a principal place of business at ${pineAddr}`,
+    `(each a "Party" and collectively the "Parties").`,
+    "Client representative: Avery Oak.",
+    "Supplier representative: Casey Pine.",
+    "Oak Street shall provide access credentials.",
+  ].join("\n");
+  const intake = `Delaware supply agreement between ${oak} and ${pine}.`;
+
+  function expectContacts(text: string) {
+    expect(text).toContain("Client representative: Avery Oak.");
+    expect(text).not.toContain("Avery Oak Street");
+    expect(text).toContain("Supplier representative: Casey Pine.");
+    expect(text).not.toContain("Casey Pine Creek");
+    expect(text).toContain(oakAddr);
+    expect(text.split(oakAddr).length - 1).toBe(1);
+    expect(text).not.toContain("1 Client");
+    expect(text).toContain(pineAddr);
+    expect(text.split(pineAddr).length - 1).toBe(1);
+    expect(text).not.toContain("9 Service Provider");
+  }
+
+  it("replaceTruncatedPartyRefsWithRoleLabels does not rewrite streets or surnames", () => {
+    const records = resolveCanonicalPartyIdentitiesFromIntake(intake, [oak, pine])!;
+    const { text } = replaceTruncatedPartyRefsWithRoleLabels(wrapped, records);
+    expectContacts(text);
+    expect(text).toMatch(/Client shall provide access credentials/);
+    expect(text).not.toMatch(/^Oak Street shall provide access credentials\./m);
+  });
+
+  it("repairFullAgreementPartyIdentity keeps the same contact lines", () => {
+    const { text } = repairFullAgreementPartyIdentity({
+      text: wrapped,
+      intakeRaw: intake,
+      partyNames: [oak, pine],
+    });
+    expectContacts(text);
+    expect(text).toMatch(/Client shall provide access credentials/);
+  });
+
+  it("retains three- and four-party overlapping contact details", () => {
+    const threeBody = [
+      'This Agreement is among Stonebridge Wellness LLC ("Licensor"), NovaPath Learning Inc. ("Platform"), and ClearSpring Distribution LLC ("Distributor").',
+      "Licensor address: 10 Stonebridge Way, Tulsa, OK 74103.",
+      "Licensor representative: Jordan Stonebridge.",
+      "Platform address: 22 NovaPath Ave, Norman, OK 73072.",
+      "Platform representative: Sam NovaPath.",
+    ].join("\n");
+    const three = repairFullAgreementPartyIdentity({
+      text: threeBody,
+      intakeRaw:
+        "Oklahoma license among Stonebridge Wellness LLC, NovaPath Learning Inc., and ClearSpring Distribution LLC.",
+      partyNames: [
+        "Stonebridge Wellness LLC",
+        "NovaPath Learning Inc.",
+        "ClearSpring Distribution LLC",
+      ],
+    });
+    expect(three.text).toContain("Licensor address: 10 Stonebridge Way, Tulsa, OK 74103.");
+    expect(three.text).toContain("Licensor representative: Jordan Stonebridge.");
+    expect(three.text).not.toContain("Jordan Stonebridge Wellness");
+    expect(three.text).toContain("Platform address: 22 NovaPath Ave, Norman, OK 73072.");
+    expect(three.text).toContain("Platform representative: Sam NovaPath.");
+    expect(three.text).not.toContain("Sam NovaPath Learning");
+
+    const fourBody = [
+      "This Agreement is among Ironclad Systems Group LLC, Harborline Data Solutions Inc., Northwind Automation Partners LLC, and Silver Mesa Analytics LP.",
+      "Sponsor representative: Pat Ironclad.",
+      "Sponsor address: 3 Ironclad Way, Austin, TX 78701.",
+    ].join("\n");
+    const four = repairFullAgreementPartyIdentity({
+      text: fourBody,
+      intakeRaw:
+        "Joint rollout among Ironclad Systems Group LLC, Harborline Data Solutions Inc., Northwind Automation Partners LLC, and Silver Mesa Analytics LP.",
+      partyNames: [
+        "Ironclad Systems Group LLC",
+        "Harborline Data Solutions Inc.",
+        "Northwind Automation Partners LLC",
+        "Silver Mesa Analytics LP",
+      ],
+    });
+    expect(four.text).toContain("Sponsor representative: Pat Ironclad.");
+    expect(four.text).not.toContain("Pat Ironclad Systems");
+    expect(four.text).toContain("Sponsor address: 3 Ironclad Way, Austin, TX 78701.");
+  });
+});
+
