@@ -13,7 +13,7 @@ type NamedParty = {
 export type PreservedPartyPayload = {
   id?: string;
   name: string;
-  role?: string | null;
+  role: string;
   email?: string;
   signerName?: string;
   signerTitle?: string;
@@ -48,7 +48,7 @@ export function partiesPayloadPreservingIds(
       return {
         ...(matchedId ? { id: matchedId } : {}),
         name,
-        role: party.role,
+        role: String(party.role || "party").trim() || "party",
         ...(email ? { email } : {}),
         ...(signerName ? { signerName } : {}),
         ...(signerTitle ? { signerTitle } : {}),
