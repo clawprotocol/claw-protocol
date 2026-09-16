@@ -15193,7 +15193,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ) {
       logGuidedSignatureGenericSendBypassed({ phase: createFlowPhase });
       // Sticky/modal "Create signing links" must mint, not die on a second confirm.
-      void enterGuidedSignatureTrackRouteRef.current?.();
+      void (async () => {
+        const persistId = (
+          reviewAgreementIdRef.current ||
+          parseCreateAgreementIdFromSearch() ||
+          readCreateReviewAgreementResumeId() ||
+          productionSendBarAgreementIdRef.current ||
+          String((draft as { id?: string } | null)?.id || "") ||
+          ""
+        ).trim();
+        if (persistId) {
+          const mintedFromPersist = await lockAndMintSigningInvitesFromPersistedDraft({
+            agreementId: persistId,
+            draft: (draftSnapshotRef.current || draft) as AgreementDraft | null,
+          });
+          if (!mintedFromPersist.ok) {
+            const message =
+              "We could not lock this version or create participant-bound signing invitations. Confirm the required signer details and try again.";
+            setGuidedFinalizeModalBlockedMessage(message);
+            setHardError(message);
+            const failed = feedbackFailed("create_links", "Links were not created", message, {
+              remedyLabel: "Try again",
+            });
+            setJourneyActionFeedback(failed);
+            publishJourneyActionFlash(failed);
+            return;
+          }
+        }
+        await enterGuidedSignatureTrackRouteRef.current?.();
+      })();
       return;
     }
     if (
@@ -33540,6 +33568,37 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setSignaturePreparationRequested(true);
         setPaidProInlineSignerSetupLatched(false);
         handlePremiumSendModePick("signature");
+        if (
+          reusedAcceptedSnapshot &&
+          (paidProSignaturePrepIntentLatched || finalReviewSendIntentRef.current === "signature")
+        ) {
+          const persistId = (
+            durableAgreementId ||
+            persistAgreementId ||
+            parseCreateAgreementIdFromSearch() ||
+            readCreateReviewAgreementResumeId() ||
+            productionSendBarAgreementIdRef.current ||
+            ""
+          ).trim();
+          if (persistId) {
+            const mintedFromPersist = await lockAndMintSigningInvitesFromPersistedDraft({
+              agreementId: persistId,
+              draft: (draftSnapshotRef.current || draft) as AgreementDraft | null,
+            });
+            if (!mintedFromPersist.ok) {
+              const message =
+                "We could not lock this version or create participant-bound signing invitations. Confirm the required signer details and try again.";
+              setGuidedFinalizeModalBlockedMessage(message);
+              setHardError(message);
+              const failed = feedbackFailed("create_links", "Links were not created", message, {
+                remedyLabel: "Try again",
+              });
+              setJourneyActionFeedback(failed);
+              publishJourneyActionFlash(failed);
+              return false;
+            }
+          }
+        }
         void enterGuidedSignatureTrackRoute();
         return true;
       }
@@ -33681,6 +33740,37 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setSignaturePreparationRequested(true);
       setPaidProInlineSignerSetupLatched(false);
       handlePremiumSendModePick("signature");
+      if (
+        reusedAcceptedSnapshot &&
+        (paidProSignaturePrepIntentLatched || finalReviewSendIntentRef.current === "signature")
+      ) {
+        const persistId = (
+          durableAgreementId ||
+          persistAgreementId ||
+          parseCreateAgreementIdFromSearch() ||
+          readCreateReviewAgreementResumeId() ||
+          productionSendBarAgreementIdRef.current ||
+          ""
+        ).trim();
+        if (persistId) {
+          const mintedFromPersist = await lockAndMintSigningInvitesFromPersistedDraft({
+            agreementId: persistId,
+            draft: (draftSnapshotRef.current || draft) as AgreementDraft | null,
+          });
+          if (!mintedFromPersist.ok) {
+            const message =
+              "We could not lock this version or create participant-bound signing invitations. Confirm the required signer details and try again.";
+            setGuidedFinalizeModalBlockedMessage(message);
+            setHardError(message);
+            const failed = feedbackFailed("create_links", "Links were not created", message, {
+              remedyLabel: "Try again",
+            });
+            setJourneyActionFeedback(failed);
+            publishJourneyActionFlash(failed);
+            return false;
+          }
+        }
+      }
       void enterGuidedSignatureTrackRoute();
       return true;
     }
@@ -33761,7 +33851,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         void (async () => {
           const persistId = (
             reviewAgreementIdRef.current ||
+            parseCreateAgreementIdFromSearch() ||
             readCreateReviewAgreementResumeId() ||
+            productionSendBarAgreementIdRef.current ||
+            String((draft as { id?: string } | null)?.id || "") ||
             ""
           ).trim();
           if (persistId) {
@@ -34362,8 +34455,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       const persistId = (
         reviewAgreementIdRef.current ||
+        parseCreateAgreementIdFromSearch() ||
         readCreateReviewAgreementResumeId() ||
+        productionSendBarAgreementIdRef.current ||
         confirmationAgreementId ||
+        String((draft as { id?: string } | null)?.id || "") ||
         ""
       ).trim();
       if (persistId) {

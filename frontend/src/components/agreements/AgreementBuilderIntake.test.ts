@@ -926,6 +926,8 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("lockAndMintSigningInvitesFromPersistedDraft");
     expect(intake).toContain("handleProSendForSignature:persisted_mint_ok");
     expect(intake).toContain("handleProSendForSignature:persisted_mint_fail");
+    expect(intake).toContain("parseCreateAgreementIdFromSearch() ||");
+    expect(intake).toContain("reusedAcceptedSnapshot &&");
     expect(intake).toContain("retainAuthorizedApiPartiesAfterIntakeDefaults(");
     expect(intake).toContain("mergePaidProAuthoritativeDraftFieldsFromApi(live, server.draft)");
     expect(intake).toContain("pendingPlain ||");
