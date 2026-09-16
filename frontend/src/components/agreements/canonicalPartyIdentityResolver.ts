@@ -14,6 +14,7 @@ import { resolveCanonicalPartyRoleLabel, isGenericCanonicalRole } from "./canoni
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import {
   collapsePartySlotCandidates,
+  isInternalPartyAliasRole,
   isInvalidPartySlotLegalEntity,
   normalizeAgreementPartyName,
   resolveHirerVersusHiredCompanySlots,
@@ -21,7 +22,7 @@ import {
 import { extractAgreementEntityCandidates, dedupeEntityCandidatesToLegalParties } from "../../agreement/partyPlaceholderDisplay";
 import { logPaidProEntityMap } from "./paidProPlaceholderAttributionLog";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
-import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
+import { repairOpeningRecitalRoleLabelsFromManifest, declaredRoleParentheticalForEntity } from "./paidProOpeningRoleLabelConsistency";
 import {
   isAgreementSectionHeadingPartyName,
   isAuthoritativeLegalEntityName,
@@ -152,17 +153,47 @@ function norm(s: string): string {
   return s.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function roleLabelForIndex(index: number, explicit?: string, intakeRaw?: string | null): string {
+function roleLabelForIndex(
+  index: number,
+  explicit?: string,
+  intakeRaw?: string | null,
+  partyCount = 2,
+): string {
   const t = (explicit || "").trim();
+  if (t && !isGenericCanonicalRole(t) && !isInternalPartyAliasRole(t)) {
+    return resolveCanonicalPartyRoleLabel({
+      partyIndex: index,
+      partyCount,
+      explicitRole: t,
+      preserveIntakeRole: true,
+    });
+  }
   if (intakeRaw && isTripartiteLabeledPartiesIntake(intakeRaw)) {
     return tripartiteRoleLabelForPartyIndex(index);
   }
   return resolveCanonicalPartyRoleLabel({
     partyIndex: index,
-    partyCount: 2,
+    partyCount,
     explicitRole: t,
     preserveIntakeRole: Boolean(t && !isGenericCanonicalRole(t)),
   });
+}
+
+function mergeRoleLabelsFromCorpus(
+  text: string,
+  partyNames: readonly string[] | null | undefined,
+  roleLabels?: readonly string[] | null,
+): string[] | undefined {
+  const names = (partyNames || []).map((n) => String(n || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+  if (names.length < 2) return roleLabels ? [...roleLabels] : undefined;
+  const merged = names.map((name, index) => {
+    const explicit = String(roleLabels?.[index] || "").trim();
+    if (explicit && !isGenericCanonicalRole(explicit) && !isInternalPartyAliasRole(explicit)) {
+      return explicit;
+    }
+    return declaredRoleParentheticalForEntity(text, name) || explicit;
+  });
+  return merged.some((role) => role.length >= 2) ? merged : roleLabels ? [...roleLabels] : undefined;
 }
 
 function normalizedName(s: string): string {
@@ -371,7 +402,7 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
       const signer = signerBySlot[index];
       return {
         fullLegalName: full,
-        roleLabel: roleLabelForIndex(index, hireRoleLabels[index], args.rawIntake),
+        roleLabel: roleLabelForIndex(index, hireRoleLabels[index], args.rawIntake, manifestNames.length),
         displayAlias: definedShortNameFromLegalEntity(full),
         signerName: signer?.signerName?.trim() || null,
         signerTitle: signer?.signerTitle?.trim() || null,
@@ -402,7 +433,7 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
       const signer = signerBySlot[index];
       return {
         fullLegalName: full,
-        roleLabel: roleLabelForIndex(index, lineSeparatedRoleLabels[index], args.rawIntake),
+        roleLabel: roleLabelForIndex(index, lineSeparatedRoleLabels[index], args.rawIntake, manifestNames.length),
         displayAlias: definedShortNameFromLegalEntity(full),
         signerName: signer?.signerName?.trim() || null,
         signerTitle: signer?.signerTitle?.trim() || null,
@@ -465,7 +496,7 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
         const signer = signerBySlot[index];
         return {
           fullLegalName: full,
-          roleLabel: roleLabelForIndex(index, roleLabelsIn[index], args.rawIntake),
+          roleLabel: roleLabelForIndex(index, roleLabelsIn[index], args.rawIntake, manifestNames.length),
           displayAlias: displayAlias === full ? full.split(/\s+/).slice(0, 2).join(" ") : displayAlias,
           signerName: signer?.signerName?.trim() || null,
           signerTitle: signer?.signerTitle?.trim() || null,
@@ -537,7 +568,7 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
     const signer = signerBySlot[index];
     return {
       fullLegalName: full,
-      roleLabel: roleLabelForIndex(index, args.roleLabels?.[index], args.rawIntake),
+      roleLabel: roleLabelForIndex(index, args.roleLabels?.[index], args.rawIntake, fullNames.length),
       displayAlias: displayAlias === full ? full.split(/\s+/).slice(0, 2).join(" ") : displayAlias,
       signerName: signer?.signerName?.trim() || null,
       signerTitle: signer?.signerTitle?.trim() || null,
@@ -575,7 +606,7 @@ export function resolveCommercialPartyRecordsForOpeningRepair(
   if (names.length < 2) return [];
   return names.slice(0, 12).map((fullLegalName, index) => ({
     fullLegalName,
-    roleLabel: roleLabelForIndex(index, roleLabels?.[index], intakeRaw),
+    roleLabel: roleLabelForIndex(index, roleLabels?.[index], intakeRaw, names.length),
     displayAlias: definedShortNameFromLegalEntity(fullLegalName),
     signerName: null,
     signerTitle: null,
@@ -598,7 +629,12 @@ export function canonicalPartyRecordsFromSignerIdentities(
       });
       return {
         fullLegalName,
-        roleLabel: roleLabelForIndex(index, id.blockHeading?.replace(/:$/, "").trim()),
+        roleLabel: roleLabelForIndex(
+          index,
+          id.blockHeading?.replace(/:$/, "").trim(),
+          null,
+          identities.length,
+        ),
         displayAlias: definedShortNameFromLegalEntity(fullLegalName),
         signerName: id.representativeName?.trim() || null,
         signerTitle: id.title?.trim() || null,
@@ -1170,6 +1206,7 @@ export function repairFullAgreementPartyIdentity(args: {
     args.signerIdentities && args.signerIdentities.length >= 2
       ? canonicalPartyRecordsFromSignerIdentities(args.signerIdentities)
       : [];
+  const mergedRoles = mergeRoleLabelsFromCorpus(args.text || "", args.partyNames, args.roleLabels);
   const records =
     fromSigner.length >= 2
       ? fromSigner
@@ -1177,7 +1214,7 @@ export function repairFullAgreementPartyIdentity(args: {
           rawIntake: args.intakeRaw,
           generatedBody: null,
           starterNames: args.partyNames,
-          roleLabels: args.roleLabels,
+          roleLabels: mergedRoles ?? args.roleLabels,
         });
   return repairCanonicalPartyIdentityInCorpus(args.text, records, {
     intakeRaw: args.intakeRaw,

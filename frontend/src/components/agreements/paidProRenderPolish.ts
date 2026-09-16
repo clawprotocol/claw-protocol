@@ -19,6 +19,7 @@ import {
   substitutePaidProIntakeContactPlaceholders,
   type PaidProContactSubstitutionResult,
 } from "./paidProIntakeContactSubstitution";
+import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { polishPaidProAgreementText } from "./paidProAgreementPolish";
 import { forbidPaidProExecutionBlockSynthesis } from "./paidProExecutionBlockAuthority";
@@ -104,6 +105,25 @@ export type PaidProRenderPolishResult = {
   agreementPolish: ReturnType<typeof polishPaidProAgreementText>["log"];
   emailGuard: EmailMutationGuardResult;
 };
+
+/**
+ * Map confirmed authority roles onto `partyNames` by legal identity, never list position.
+ */
+export function confirmedRoleLabelsAlignedToPartyNames(
+  partyNames: readonly string[] | null | undefined,
+  authorityParties?: readonly PaidProSignerMetadataParty[] | null,
+): string[] | undefined {
+  const names = (partyNames || []).map((name) => String(name || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const parties = authorityParties || [];
+  if (names.length < 2 || parties.length < 2) return undefined;
+  const aligned = names.map((name) => {
+    const match = parties.find((party) =>
+      partyLegalNamesMatch(String(party.partyLegalName || ""), name),
+    );
+    return String(match?.roleLabel || "").trim();
+  });
+  return aligned.some((role) => role.length >= 2) ? aligned : undefined;
+}
 
 /**
  * 1) substitute numbered contact emails
@@ -209,10 +229,12 @@ export function applyPaidProRenderPolish(
   let working = contactSub.text;
 
   const { text: masked, emails, urls } = maskProtectedSpans(working);
+  const roleLabels = confirmedRoleLabelsAlignedToPartyNames(partyNames, opts?.authorityParties);
   const agreementPolish = polishPaidProAgreementText(masked, intakeRaw, partyNames, {
     surface,
     explicitPartyList,
     skipInternalMask: true,
+    roleLabels,
   });
   working = unmaskProtectedSpans(agreementPolish.text, emails, urls);
 

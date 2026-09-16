@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   repairCanonicalPartyIdentityInCorpus,
+  repairFullAgreementPartyIdentity,
   resolveCanonicalPartyIdentitiesFromIntake,
 } from "./canonicalPartyIdentityResolver";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
@@ -281,3 +282,87 @@ describe("paidProOpeningRoleLabelConsistency", () => {
     expect(detectExecutionBlockRoleInversion(swappedTail)).toBe(true);
   });
 });
+
+describe("multiparty confirmed role preservation", () => {
+  const stone = "Stonebridge Wellness LLC";
+  const nova = "NovaPath Learning Inc.";
+  const clear = "ClearSpring Distribution LLC";
+  const threeIntake = `Oklahoma license among ${stone}, ${nova}, and ${clear}.`;
+  const threeBody = [
+    `This Agreement is among ${stone} ("Licensor"), ${nova} ("Platform"), and ${clear} ("Distributor").`,
+    "Licensor shall grant a nonexclusive license to the Platform.",
+    "Distributor shall pay $1,000 upon delivery.",
+    `If to ${stone}: notices@stonebridge.example`,
+    `If to ${clear}: notices@clearspring.example`,
+  ].join("\n");
+
+  it("repairFullAgreementPartyIdentity keeps three confirmed company-to-role pairs", () => {
+    const { text } = repairFullAgreementPartyIdentity({
+      text: threeBody,
+      intakeRaw: threeIntake,
+      partyNames: [stone, nova, clear],
+    });
+    expect(text).toContain(`${stone} ("Licensor")`);
+    expect(text).toContain(`${nova} ("Platform")`);
+    expect(text).toContain(`${clear} ("Distributor")`);
+    expect(text).not.toContain(`${stone} ("Client")`);
+    expect(text).not.toContain(`${nova} ("Service Provider")`);
+    expect(text).not.toContain(`${clear} ("Service Provider")`);
+    expect(text).toContain("Licensor shall grant a nonexclusive license to the Platform.");
+    expect(text).toContain("Distributor shall pay $1,000 upon delivery.");
+    expect(text).toContain(`If to ${stone}: notices@stonebridge.example`);
+    expect(text).toContain(`If to ${clear}: notices@clearspring.example`);
+  });
+
+  it("reordering party names does not reassign confirmed roles", () => {
+    const { text } = repairFullAgreementPartyIdentity({
+      text: threeBody,
+      intakeRaw: threeIntake,
+      partyNames: [clear, stone, nova],
+    });
+    expect(text).toContain(`${stone} ("Licensor")`);
+    expect(text).toContain(`${nova} ("Platform")`);
+    expect(text).toContain(`${clear} ("Distributor")`);
+  });
+
+  it("keeps explicit Client / Service Provider / Distributor in a three-party agreement", () => {
+    const body = [
+      `This Agreement is among ${stone} ("Client"), ${nova} ("Service Provider"), and ${clear} ("Distributor").`,
+      "Client shall pay the Service Provider.",
+    ].join("\n");
+    const { text } = repairFullAgreementPartyIdentity({
+      text: body,
+      intakeRaw: threeIntake,
+      partyNames: [stone, nova, clear],
+      roleLabels: ["Client", "Service Provider", "Distributor"],
+    });
+    expect(text).toContain(`${stone} ("Client")`);
+    expect(text).toContain(`${nova} ("Service Provider")`);
+    expect(text).toContain(`${clear} ("Distributor")`);
+    expect(text).toContain("Client shall pay the Service Provider.");
+  });
+
+  it("keeps four confirmed roles on the opening", () => {
+    const iron = "Ironclad Systems Group LLC";
+    const harbor = "Harborline Data Solutions Inc.";
+    const north = "Northwind Automation Partners LLC";
+    const silver = "Silver Mesa Analytics LP";
+    const body = [
+      `This Agreement is among ${iron} ("Sponsor"), ${harbor} ("Vendor"), ${north} ("Integrator"), and ${silver} ("Analyst").`,
+      "Sponsor shall fund the rollout. Vendor shall deliver the platform.",
+      `If to ${iron}: notices@ironcladsg.com`,
+    ].join("\n");
+    const { text } = repairFullAgreementPartyIdentity({
+      text: body,
+      intakeRaw: `Joint rollout among ${iron}, ${harbor}, ${north}, and ${silver}.`,
+      partyNames: [iron, harbor, north, silver],
+    });
+    expect(text).toContain(`${iron} ("Sponsor")`);
+    expect(text).toContain(`${harbor} ("Vendor")`);
+    expect(text).toContain(`${north} ("Integrator")`);
+    expect(text).toContain(`${silver} ("Analyst")`);
+    expect(text).toContain("Sponsor shall fund the rollout. Vendor shall deliver the platform.");
+    expect(text).not.toContain(`${iron} ("Client")`);
+  });
+});
+

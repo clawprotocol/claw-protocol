@@ -369,6 +369,17 @@ export function normalizeOpeningRecital(
   const maskedHead = maskedPack.text;
   const emails = maskedPack.emails;
   const urls = maskedPack.urls;
+  if (
+    !opts?.forceRewrite &&
+    authoritativeCount >= 3 &&
+    parties.every((p) => maskedHead.includes(p.full)) &&
+    parties.every((p) => new RegExp(`${escapeRe(p.full)}\\s*\\(`, "i").test(maskedHead))
+  ) {
+    return {
+      text,
+      log: { ...baseLog, reason: "already_polished" },
+    };
+  }
   const recital = findRecitalSpan(maskedHead);
 
   if (!recital) {
@@ -727,6 +738,8 @@ export function polishPaidProAgreementText(
     skipInternalMask?: boolean;
     /** Guided signer setup identities override intake-only entity extraction. */
     signerPartyIdentities?: readonly CanonicalPartyIdentity[];
+    /** Confirmed revision/intake roles aligned to partyNames. */
+    roleLabels?: readonly string[] | null;
   },
 ): PaidProAgreementPolishResult {
   if (shouldSkipPaidProPolish({ surface: opts?.surface })) {
@@ -828,6 +841,7 @@ export function polishPaidProAgreementText(
     text: working,
     intakeRaw,
     partyNames: authoritativeFullNames,
+    roleLabels: opts?.roleLabels,
     signerIdentities: opts?.signerPartyIdentities,
   });
   working = partyIdentity.text;

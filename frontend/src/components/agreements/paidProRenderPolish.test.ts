@@ -78,10 +78,9 @@ describe("applyPaidProRenderPolish", () => {
 
   it("opening recital in first 1,000 chars uses full legal party names", () => {
     /**
-     * Behavioral contract (updated with role-defined recital polish):
-     * - OLD: short trade-name aliases in parens, e.g. Ironclad Systems Group LLC (“Ironclad”)
-     * - NEW: full legal names with role-defined terms, e.g. Ironclad Systems Group LLC (“Client”)
-     * Full legal names must appear; the short comma-separated trade-name list must not remain.
+     * Five-party fixture is outside the 2–4 party release scope. Recital polish must
+     * expand shorts to full legal names. It must not stamp two-party Client/SP roles
+     * onto an unlabeled multiparty opening.
      */
     const body = padOperative(
       "entered into by and among Ironclad, Harborline, Northwind, Silver Mesa, and VertexGrid.\nKEY CONTACTS\n[EMAIL_1]\n",
@@ -94,7 +93,8 @@ describe("applyPaidProRenderPolish", () => {
     for (const party of IRONCLAD_PARTIES) {
       expect(opening).toContain(party);
     }
-    expect(opening).toMatch(/\(\s*[“"](?:Client|Service Provider|Party)[”"]\s*\)/i);
+    expect(opening).toMatch(/Ironclad Systems Group LLC\s*\(/);
+    expect(opening).not.toMatch(/Ironclad Systems Group LLC\s*\(\s*["'“](?:Client|Service Provider)["'”]\s*\)/i);
     expect(opening).not.toMatch(/among Ironclad, Harborline, Northwind, Silver Mesa, and VertexGrid/i);
   });
 
@@ -336,6 +336,133 @@ describe("applyPaidProRenderPolish", () => {
     expect(first.text).not.toContain("9 Service Provider");
     expect(first.text).toMatch(/Client shall provide access credentials/);
     expect(second.text).toBe(first.text);
+  });
+
+  it("preserves three- and four-party confirmed roles through normal applyPaidProRenderPolish", () => {
+    const stone = "Stonebridge Wellness LLC";
+    const nova = "NovaPath Learning Inc.";
+    const clear = "ClearSpring Distribution LLC";
+    const threeInput = [
+      `This Agreement is among ${stone} ("Licensor"), ${nova} ("Platform"), and ${clear} ("Distributor").`,
+      "Licensor shall grant a nonexclusive license to the Platform.",
+      "Distributor shall pay $1,000 upon delivery.",
+      `If to ${stone}: notices@stonebridge.example`,
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      `${stone} ("Licensor")`,
+      "By: _________________________",
+      `${clear} ("Distributor")`,
+      "By: _________________________",
+    ].join("\n");
+    const threeIntake = `Oklahoma license among ${stone}, ${nova}, and ${clear}.`;
+    const threeOpts = {
+      surface: "multiparty_role_preservation_three",
+      skipCache: true as const,
+      authorityParties: [
+        { partyIndex: 0, partyLegalName: stone, signerEmail: "a@stone.example", signerName: "Jordan Stonebridge", signerTitle: "Manager", partyAddress: "", roleLabel: "Licensor" },
+        { partyIndex: 1, partyLegalName: nova, signerEmail: "b@nova.example", signerName: "Sam NovaPath", signerTitle: "CPO", partyAddress: "", roleLabel: "Platform" },
+        { partyIndex: 2, partyLegalName: clear, signerEmail: "c@clear.example", signerName: "Lee ClearSpring", signerTitle: "President", partyAddress: "", roleLabel: "Distributor" },
+      ] satisfies PaidProSignerMetadataParty[],
+    };
+    expect("skipNoticeRepair" in threeOpts).toBe(false);
+    const threeFirst = applyPaidProRenderPolish(threeInput, threeIntake, [stone, nova, clear], threeOpts);
+    const threeSecond = applyPaidProRenderPolish(threeFirst.text, threeIntake, [stone, nova, clear], threeOpts);
+    expect(threeFirst.text).toContain(`${stone} ("Licensor")`);
+    expect(threeFirst.text).toContain(`${nova} ("Platform")`);
+    expect(threeFirst.text).toContain(`${clear} ("Distributor")`);
+    expect(threeFirst.text).toContain("Licensor shall grant a nonexclusive license to the Platform.");
+    expect(threeFirst.text).toContain("Distributor shall pay $1,000 upon delivery.");
+    expect(threeFirst.text).toContain(`If to ${stone}: notices@stonebridge.example`);
+    expect(threeFirst.text).toMatch(/IN WITNESS WHEREOF[\s\S]*Stonebridge Wellness LLC[\s\S]*By:/i);
+    expect(threeFirst.text).toMatch(/IN WITNESS WHEREOF[\s\S]*ClearSpring Distribution LLC[\s\S]*By:/i);
+    expect(threeFirst.text).not.toContain(`${stone} ("Client")`);
+    expect(threeSecond.text).toBe(threeFirst.text);
+
+    const shuffledAuthority = applyPaidProRenderPolish(threeInput, threeIntake, [stone, nova, clear], {
+      surface: "multiparty_role_preservation_three_reorder",
+      skipCache: true,
+      authorityParties: [
+        { partyIndex: 2, partyLegalName: clear, signerEmail: "c@clear.example", signerName: "Lee ClearSpring", signerTitle: "President", partyAddress: "", roleLabel: "Distributor" },
+        { partyIndex: 0, partyLegalName: stone, signerEmail: "a@stone.example", signerName: "Jordan Stonebridge", signerTitle: "Manager", partyAddress: "", roleLabel: "Licensor" },
+        { partyIndex: 1, partyLegalName: nova, signerEmail: "b@nova.example", signerName: "Sam NovaPath", signerTitle: "CPO", partyAddress: "", roleLabel: "Platform" },
+      ] satisfies PaidProSignerMetadataParty[],
+    });
+    expect(shuffledAuthority.text).toContain(`${stone} ("Licensor")`);
+    expect(shuffledAuthority.text).toContain(`${nova} ("Platform")`);
+    expect(shuffledAuthority.text).toContain(`${clear} ("Distributor")`);
+    expect(shuffledAuthority.text).toContain("Licensor shall grant a nonexclusive license to the Platform.");
+
+    const explicitClientSp = applyPaidProRenderPolish(
+      [
+        `This Agreement is among ${stone} ("Client"), ${nova} ("Service Provider"), and ${clear} ("Distributor").`,
+        "Client shall pay the Service Provider.",
+      ].join("\n"),
+      threeIntake,
+      [stone, nova, clear],
+      {
+        surface: "multiparty_role_preservation_three_client_sp",
+        skipCache: true,
+        authorityParties: [
+          { partyIndex: 0, partyLegalName: stone, signerEmail: "a@stone.example", signerName: "Jordan Stonebridge", signerTitle: "Manager", partyAddress: "", roleLabel: "Client" },
+          { partyIndex: 1, partyLegalName: nova, signerEmail: "b@nova.example", signerName: "Sam NovaPath", signerTitle: "CPO", partyAddress: "", roleLabel: "Service Provider" },
+          { partyIndex: 2, partyLegalName: clear, signerEmail: "c@clear.example", signerName: "Lee ClearSpring", signerTitle: "President", partyAddress: "", roleLabel: "Distributor" },
+        ] satisfies PaidProSignerMetadataParty[],
+      },
+    );
+    expect(explicitClientSp.text).toContain(`${stone} ("Client")`);
+    expect(explicitClientSp.text).toContain(`${nova} ("Service Provider")`);
+    expect(explicitClientSp.text).toContain(`${clear} ("Distributor")`);
+    expect(explicitClientSp.text).toContain("Client shall pay the Service Provider.");
+
+    const oak = "Oak Street Holdings LLC";
+    const pine = "Pine Creek Manufacturing Inc.";
+    const two = applyPaidProRenderPolish(
+      `This Agreement is between ${oak} ("Client") and ${pine} ("Service Provider").\nClient shall pay $5,000 upon delivery.`,
+      `Delaware supply agreement between ${oak} and ${pine}.`,
+      [oak, pine],
+      { surface: "multiparty_role_preservation_two", skipCache: true },
+    );
+    expect(two.text).toContain(`${oak} ("Client")`);
+    expect(two.text).toMatch(/Pine Creek Manufacturing Inc\.?\s*\(["']Service Provider["']\)/);
+    expect(two.text).toContain("Client shall pay $5,000 upon delivery.");
+
+    const iron = "Ironclad Systems Group LLC";
+    const harbor = "Harborline Data Solutions Inc.";
+    const north = "Northwind Automation Partners LLC";
+    const silver = "Silver Mesa Analytics LP";
+    const fourInput = [
+      `This Agreement is among ${iron} ("Sponsor"), ${harbor} ("Vendor"), ${north} ("Integrator"), and ${silver} ("Analyst").`,
+      "Sponsor shall fund the rollout.",
+      `If to ${harbor}: maya.bennett@harborlinedata.com`,
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      `${iron} ("Sponsor")`,
+      "By: _________________________",
+      `${silver} ("Analyst")`,
+      "By: _________________________",
+    ].join("\n");
+    const fourOpts = { surface: "multiparty_role_preservation_four", skipCache: true as const };
+    const four = applyPaidProRenderPolish(
+      fourInput,
+      `Joint rollout among ${iron}, ${harbor}, ${north}, and ${silver}.`,
+      [iron, harbor, north, silver],
+      fourOpts,
+    );
+    const fourAgain = applyPaidProRenderPolish(
+      four.text,
+      `Joint rollout among ${iron}, ${harbor}, ${north}, and ${silver}.`,
+      [iron, harbor, north, silver],
+      fourOpts,
+    );
+    expect(four.text).toContain(`${iron} ("Sponsor")`);
+    expect(four.text).toContain(`${harbor} ("Vendor")`);
+    expect(four.text).toContain(`${north} ("Integrator")`);
+    expect(four.text).toContain(`${silver} ("Analyst")`);
+    expect(four.text).toContain("Sponsor shall fund the rollout.");
+    expect(four.text).toContain("maya.bennett@harborlinedata.com");
+    expect(four.text).toMatch(/If to Harborline Data Solutions Inc\./);
+    expect(four.text).toMatch(/IN WITNESS WHEREOF[\s\S]*Ironclad Systems Group LLC[\s\S]*By:/i);
+    expect(four.text).toMatch(/IN WITNESS WHEREOF[\s\S]*Silver Mesa Analytics LP[\s\S]*By:/i);
+    expect(four.text).not.toContain(`${iron} ("Client")`);
+    expect(fourAgain.text).toBe(four.text);
   });
 
   it("finalize keeps operative payment placeholders fatal and substitutes contact emails", () => {
