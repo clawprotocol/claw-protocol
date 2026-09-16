@@ -32755,8 +32755,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             }
           }
           if (server.ok && server.draft) {
-            setDraft(server.draft as ParsedDraftShape);
-            draftSnapshotRef.current = server.draft as ParsedDraftShape;
+            const recoveredDraft = server.draft as unknown as ParsedDraftShape;
+            setDraft(recoveredDraft);
+            draftSnapshotRef.current = recoveredDraft;
           }
           transition = assertGuidedTransitionReady("signing_confirm");
           if (!transition.ok) {
