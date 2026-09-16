@@ -910,6 +910,51 @@ function mintPartyId(event: RecipientTokenEvent | undefined): string {
   ).trim();
 }
 
+function tokenFromReviewHref(href: string): string {
+  const raw = String(href || "").trim();
+  if (!raw) return "";
+  try {
+    return new URL(raw, "http://127.0.0.1").searchParams.get("t")?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+async function ownerReviewLinkHandoffRows(
+  page: Page,
+  agreementId: string,
+): Promise<Array<{ recipientPartyId?: string; reviewer_id?: string; reviewHref?: string }>> {
+  return page.evaluate((id) => {
+    const key = `claw_simple_done_review_recipient_links_v1_${encodeURIComponent(id)}`;
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw) as {
+        recipients?: Array<{ recipientPartyId?: string; reviewer_id?: string; reviewHref?: string }>;
+      };
+      return Array.isArray(parsed.recipients) ? parsed.recipients : [];
+    } catch {
+      return [];
+    }
+  }, agreementId);
+}
+
+function reviewTokenForParticipant(
+  events: RecipientTokenEvent[],
+  handoff: ReadonlyArray<{ recipientPartyId?: string; reviewer_id?: string; reviewHref?: string }>,
+  participantId: string,
+): string {
+  const captured = String(
+    (mintedTokenForParticipant(events, "review", participantId)?.body as { token?: string } | undefined)?.token || "",
+  ).trim();
+  if (captured.length > 12) return captured;
+  const pid = participantId.trim();
+  const row = handoff.find(
+    (entry) => String(entry.recipientPartyId || entry.reviewer_id || "").trim() === pid,
+  );
+  return tokenFromReviewHref(String(row?.reviewHref || ""));
+}
+
 function mintedTokenForParticipant(
   events: RecipientTokenEvent[],
   mode: "review" | "sign",
@@ -1286,7 +1331,14 @@ export async function completeLocalReviewSignAndFinal(args: {
   await assertSignerFormHoldsIntakeOrFillOnlyOmitted(args.page, args.signers, {
     fillProvidedIfEmpty: args.fillProvidedIfEmpty,
   });
+  const reviewMintWait = args.page
+    .waitForResponse(
+      (res) => res.url().includes("/recipient-access-token") && res.request().method() === "POST",
+      { timeout: 45_000 },
+    )
+    .catch(() => null);
   expect(await clickOwnerSend(args.page, "simple-pro-send-for-review"), "send-for-review must mount").toBeTruthy();
+  await reviewMintWait;
   await expect.poll(async () => (await fetchOwnerParties(args.page, args.agreementId)).length, { timeout: 30_000 }).toBe(
     args.signers.length,
   );
@@ -1308,20 +1360,20 @@ export async function completeLocalReviewSignAndFinal(args: {
     }
   }
   await expect
-    .poll(() => {
+    .poll(async () => {
+      const handoff = await ownerReviewLinkHandoffRows(args.page, args.agreementId);
       return reviewSigners.every((signer) => {
         const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
-        return Boolean(row?.id && mintedTokenForParticipant(minted, "review", String(row.id)));
+        return Boolean(row?.id && reviewTokenForParticipant(minted, handoff, String(row.id)).length > 12);
       })
         ? 1
         : 0;
     }, { timeout: 45_000 })
     .toBe(1);
+  const reviewHandoff = await ownerReviewLinkHandoffRows(args.page, args.agreementId);
   for (const signer of reviewSigners) {
     const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity))!;
-    const token = String(
-      (mintedTokenForParticipant(minted, "review", String(row.id))?.body as { token?: string } | undefined)?.token || "",
-    );
+    const token = reviewTokenForParticipant(minted, reviewHandoff, String(row.id));
     const context = await args.browser.newContext({ viewport: { width: 1280, height: 800 } });
     const recipient = await context.newPage();
     acceptNativeDialogs(recipient);
