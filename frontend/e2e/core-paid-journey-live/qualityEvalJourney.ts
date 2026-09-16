@@ -1084,12 +1084,18 @@ function namedLegalPartyCount(parties: readonly OwnerPartyRow[]): number {
   return parties.filter((party) => String(party.name || "").trim()).length;
 }
 
-/** Matches server recipient-approve: owner uses workspace when fewer than three named legal parties. */
+/** Matches server recipient-approve: two-party owners use workspace, not recipient-approve. */
 function partyUsesWorkspaceNotRecipientApprove(
   row: OwnerPartyRow | undefined,
   parties: readonly OwnerPartyRow[],
 ): boolean {
-  return String(row?.role || "").trim().toLowerCase() === "owner" && namedLegalPartyCount(parties) < 3;
+  if (!row?.id || namedLegalPartyCount(parties) >= 3) return false;
+  const role = String(row.role || "").trim().toLowerCase();
+  if (role === "reviewer") return false;
+  if (role === "owner") return true;
+  const ownerIdx = parties.findIndex((party) => String(party.role || "").trim().toLowerCase() === "owner");
+  const assumedOwner = ownerIdx >= 0 ? ownerIdx : 0;
+  return parties.findIndex((party) => String(party.id || "") === String(row.id)) === assumedOwner;
 }
 
 function recipientApproveSigners(
@@ -1410,6 +1416,7 @@ export async function completeLocalReviewSignAndFinal(args: {
     }, { timeout: 45_000 })
     .toBe(1);
   const reviewHandoff = await ownerReviewLinkHandoffRows(args.page, args.agreementId);
+  const workspaceNotRecipient = new Set<string>();
   for (const signer of reviewSigners) {
     const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity))!;
     const token = reviewTokenForParticipant(minted, reviewHandoff, String(row.id));
@@ -1437,6 +1444,11 @@ export async function completeLocalReviewSignAndFinal(args: {
       .toBeGreaterThan(0);
     const posted = [...approvePosts].reverse().find((event) => event.participantId === String(row.id));
     expect(posted, `${signer.legalEntity} approve POST missing`).toBeTruthy();
+    if (posted?.code === "owner_uses_workspace_not_recipient_approve") {
+      workspaceNotRecipient.add(String(row.id));
+      await context.close();
+      continue;
+    }
     const ownerAfterPost = await fetchOwnerDraftAuthority(args.page, args.agreementId);
     const recordedAfterPost = approvalOnIntendedRevision(
       ownerAfterPost.audit,
@@ -1488,16 +1500,21 @@ export async function completeLocalReviewSignAndFinal(args: {
     await context.close();
   }
 
+  const requiredReviewApprovals = reviewSigners.filter((signer) => {
+    const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
+    return Boolean(row?.id) && !workspaceNotRecipient.has(String(row?.id));
+  });
+  expect(requiredReviewApprovals.length, "counterparty must still recipient-approve").toBeGreaterThan(0);
   await expect
     .poll(async () => {
       const authority = await fetchOwnerDraftAuthority(args.page, args.agreementId);
-      const approved = reviewSigners.filter((signer) => {
+      const approved = requiredReviewApprovals.filter((signer) => {
         const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
         return row?.id && approvalOnIntendedRevision(authority.audit, String(row.id), args.snapshotId, args.digest);
       });
       return approved.length;
     }, { timeout: 30_000 })
-    .toBe(reviewSigners.length);
+    .toBe(requiredReviewApprovals.length);
 
   await seedCorePaidJourneyOwner(args.page);
   await args.page.goto(`/app/create?agreementId=${args.agreementId}`, { waitUntil: "domcontentloaded" });
