@@ -33116,6 +33116,41 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const finalizePaidProSignerMetadataAndOpenReviewDecision = React.useCallback(async (): Promise<boolean> => {
+    const committedSignerUi = flushGuidedSignerMetadataBeforeFinalReview();
+    const persistAgreementId = (
+      reviewAgreementIdRef.current ||
+      parseCreateAgreementIdFromSearch() ||
+      readCreateReviewAgreementResumeId() ||
+      productionSendBarAgreementIdRef.current ||
+      ""
+    ).trim();
+    if (persistAgreementId && (draft?.parties || []).length >= 2) {
+      const uiSlots = [
+        {
+          partyLegalName: committedSignerUi.recipient1Name,
+          signerName: committedSignerUi.partySignerNames[0],
+          signerEmail: committedSignerUi.recipient1Email,
+        },
+        {
+          partyLegalName: committedSignerUi.recipient2Name,
+          signerName: committedSignerUi.partySignerNames[1],
+          signerEmail: committedSignerUi.recipient2Email,
+        },
+        ...(committedSignerUi.extraPartyLegalNames || []).map((name, idx) => ({
+          partyLegalName: name,
+          signerName: committedSignerUi.partySignerNames[idx + 2],
+          signerEmail: committedSignerUi.extraPartyReviewEmails[idx],
+        })),
+      ];
+      await persistConfirmedIdentityIntoLiveDraft({
+        agreementId: persistAgreementId,
+        parties: bindSignerDetailsToConfirmedParties(draft?.parties || [], uiSlots),
+        unresolvedSubjects: Array.isArray(draft?.unresolvedIdentitySubjects)
+          ? draft.unresolvedIdentitySubjects
+          : [],
+        additionalTerms: draft?.additional_terms,
+      });
+    }
     if (
       !paidProSignerDetailsGate.complete &&
       !paidSessionFinalReviewAfterSignersReady &&
@@ -33130,7 +33165,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       navigationTarget: "review_decision",
       reason: "paid_pro_signer_details_finalize",
     });
-    const committedSignerUi = flushGuidedSignerMetadataBeforeFinalReview();
     const signerFinalizeReviewSessionId = getOrInitSessionAgreementGenerationId();
     const intakeForHydration = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
     const draftPartyNames = (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim());
@@ -35178,6 +35212,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         (unifiedPrimaryCta.reason === "paid_pro_signer_details_complete" ||
           unifiedPrimaryCta.reason === "demo_session_signer_details_complete" ||
           unifiedPrimaryCta.reason === "demo_session_signer_details_complete_fallback" ||
+          unifiedPrimaryCta.reason === "dashboard_signer_setup_resume_complete" ||
           paidSessionTwoSignersReady ||
           paidSessionFinalReviewAfterSignersReady) &&
         !signaturePreparationRequested &&
