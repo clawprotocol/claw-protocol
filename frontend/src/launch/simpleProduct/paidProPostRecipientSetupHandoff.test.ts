@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   resolveOwnerSigningPartyId,
+  shouldIncludeOwnerReviewLink,
   shouldSkipPaidProPrepareReviewLinkInterstitial,
 } from "./paidProPostRecipientSetupHandoff";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
@@ -19,6 +20,7 @@ describe("paidProPostRecipientSetupHandoff", () => {
     expect(s).toContain("resolveGuidedVs01SigningHandoffForBridge");
     expect(s).toContain("mergeAgreementDraftWithGuidedSigningHandoff");
     expect(s).toContain("mintSimpleDoneReviewRecipientLinkRows");
+    expect(s).toContain("shouldIncludeOwnerReviewLink");
     expect(s).toContain("resolveReviewFirstMintPolicyGate");
     expect(s).toContain("postReviewSentServer");
     expect(s).toContain("maybePostReviewSentAfterReviewFirstHandoff");
@@ -102,6 +104,31 @@ describe("resolveOwnerSigningPartyId", () => {
       } as AgreementDraft),
     ).toBeNull();
     expect(resolveOwnerSigningPartyId({ parties: [{ ...harbor, id: "" }] } as AgreementDraft)).toBeNull();
+  });
+});
+
+describe("shouldIncludeOwnerReviewLink", () => {
+  it("keeps owner review links at three or more named legal parties", () => {
+    expect(
+      shouldIncludeOwnerReviewLink({
+        parties: [
+          { id: "o", name: "Harbor Peak Analytics LLC", role: "owner" },
+          { id: "c", name: "Ironvale Manufacturing Inc.", role: "reviewer" },
+          { id: "a", name: "Alex Rivera", role: "reviewer" },
+        ],
+      } as AgreementDraft),
+    ).toBe(true);
+  });
+
+  it("omits the two-party owner so they use workspace, not recipient-approve", () => {
+    expect(
+      shouldIncludeOwnerReviewLink({
+        parties: [
+          { id: "o", name: "Orion Harbor LLC", role: "owner" },
+          { id: "c", name: "Northwind Retail Inc", role: "reviewer" },
+        ],
+      } as AgreementDraft),
+    ).toBe(false);
   });
 });
 

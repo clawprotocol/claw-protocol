@@ -71,11 +71,18 @@ export function computeReviewApprovalStatus(
   const parties = d?.parties ?? [];
   const audit = d?.audit_log;
   const minted = Math.max(0, Math.floor(opts.mintedReviewerLinkCount ?? 0));
+  const namedLegalCount = parties.filter((p) => String(p?.name ?? "").trim()).length;
   const reviewerPartyIds = parties
     .filter((p) => normalizeWorkflowRoleForNegotiation(String(p?.role ?? "")) === "reviewer")
     .map((p) => String(p?.id ?? "").trim())
     .filter(Boolean);
   let required = Math.max(minted, reviewerPartyIds.length);
+  // Two-party owners cannot recipient-approve. Do not let an owner mint inflate the gate.
+  if (namedLegalCount > 0 && namedLegalCount < 3) {
+    const counterpartyCount = countReadyReviewLinkInviteParties(parties);
+    const twoPartyRequired = Math.max(reviewerPartyIds.length, counterpartyCount);
+    if (twoPartyRequired > 0) required = twoPartyRequired;
+  }
   const approvedIds = approvedParticipantIds(audit);
   let approved = reviewerPartyIds.filter((id) => approvedIds.has(id)).length;
   const legacy = Boolean(d && legacyRecipientApprovalWithoutParticipantId(d));

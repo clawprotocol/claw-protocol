@@ -84,6 +84,17 @@ export function resolveOwnerSigningPartyId(draft: AgreementDraft | null | undefi
   return id || null;
 }
 
+/**
+ * Recipient-approve is allowed for an owner-stamped legal party only at 3+ named parties.
+ * Two-party owners use workspace, so minting them a review-approve link is unusable.
+ */
+export function shouldIncludeOwnerReviewLink(draft: AgreementDraft | null | undefined): boolean {
+  const named = (Array.isArray(draft?.parties) ? draft.parties : []).filter((party) =>
+    String(party?.name ?? "").trim(),
+  ).length;
+  return named >= 3;
+}
+
 /** Paid/pro paths that already confirmed recipients in intake — skip `/app/send` “Prepare review link”. */
 export function shouldSkipPaidProPrepareReviewLinkInterstitial(params: {
   draft: AgreementDraft | null;
@@ -188,7 +199,7 @@ async function mintAndPersistReviewLinksForHandoffUnlocked(
     const minted = await mintSimpleDoneReviewRecipientLinkRows({
       agreementId: id,
       draft: draftForMint,
-      includeOwnerWithReadyReviewEmail: true,
+      includeOwnerWithReadyReviewEmail: shouldIncludeOwnerReviewLink(draftForMint),
       signingCorpusPlain: signingCorpusPlain || undefined,
       signingCorpusSource: signingCorpusPlain
         ? (agreementCorpusSource ?? "review_first_pinned_corpus").trim() || "review_first_pinned_corpus"
