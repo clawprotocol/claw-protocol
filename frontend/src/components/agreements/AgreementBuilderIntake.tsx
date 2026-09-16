@@ -18377,6 +18377,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         args.parties || [],
         draftSnapshotRef.current?.parties || [],
       );
+      const namedParties = nextParties.filter(
+        (party) => String(party.signerName || party.signer_name || "").trim().length >= 2,
+      );
+      if (namedParties.length) {
+        const acceptedAuthority = await fetchCanonicalReviewSnapshot({ agreementId: args.agreementId });
+        const snapshotPlain = acceptedAuthority.ok
+          ? String(acceptedAuthority.snapshot.corpus_plain || "").trim()
+          : "";
+        const editable = (
+          snapshotPlain ||
+          acceptedReviewCorpusRef.current ||
+          lastKnownGoodAuthoritativeDraftRef.current ||
+          agreementDocumentTextRef.current ||
+          getPaidProSourceOfTruthText() ||
+          ""
+        ).trim();
+        const paperHasConfirmedParties = nextParties.every((party) => {
+          const name = String(party.name || "").replace(/\.$/, "").trim();
+          return name.length >= 2 && editable.toLowerCase().includes(name.toLowerCase());
+        });
+        if (editable.length >= PAID_PRO_AUTHORITY_MIN_LEN && paperHasConfirmedParties) {
+          const patched = applyIdentityResolutionToAuthorizedPaper(editable, nextParties).trim();
+          if (patched.length >= PAID_PRO_AUTHORITY_MIN_LEN && patched !== editable) {
+            await commitPaidProUserApprovedRevision(patched, "confirmed_signer_details_revision");
+          }
+        }
+      }
       await postAgreementFieldUpdate(args.agreementId, "parties", nextParties);
       await postAgreementFieldUpdate(args.agreementId, "unresolved_identity_v1", args.unresolvedSubjects);
       const nextDraft = {
@@ -18431,34 +18458,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return next;
       });
       setSignerSetupUiPartyCount(Math.max(nextParties.length, 2));
-      const namedParties = nextParties.filter(
-        (party) => String(party.signerName || party.signer_name || "").trim().length >= 2,
-      );
-      if (namedParties.length) {
-        const acceptedAuthority = await fetchCanonicalReviewSnapshot({ agreementId: args.agreementId });
-        const snapshotPlain = acceptedAuthority.ok
-          ? String(acceptedAuthority.snapshot.corpus_plain || "").trim()
-          : "";
-        const editable = (
-          snapshotPlain ||
-          acceptedReviewCorpusRef.current ||
-          lastKnownGoodAuthoritativeDraftRef.current ||
-          agreementDocumentTextRef.current ||
-          getPaidProSourceOfTruthText() ||
-          ""
-        ).trim();
-        const paperHasConfirmedParties = nextParties.every((party) => {
-          const name = String(party.name || "").replace(/\.$/, "").trim();
-          return name.length >= 2 && editable.toLowerCase().includes(name.toLowerCase());
-        });
-        if (editable.length >= PAID_PRO_AUTHORITY_MIN_LEN && paperHasConfirmedParties) {
-          const patched = applyIdentityResolutionToAuthorizedPaper(editable, nextParties).trim();
-          if (patched.length >= PAID_PRO_AUTHORITY_MIN_LEN && patched !== editable) {
-            await commitPaidProUserApprovedRevision(patched, "confirmed_signer_details_revision");
-          }
-        }
-      }
-    },
+    },)
     [commitPaidProUserApprovedRevision],
   );
 
@@ -30183,7 +30183,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               navigationTarget: "review_decision",
               reason: "paid_pro_signer_setup_skip_guided_final_review",
             });
-            void finalizePaidProSignerMetadataAndOpenReviewDecisionRef.current();
+            await finalizePaidProSignerMetadataAndOpenReviewDecisionRef.current();
             return;
           }
 
@@ -35564,7 +35564,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     })();
   };
 
-  const runPrimaryIntakeAction = () => {
+  const runPrimaryIntakeAction = async () => {
     if (draftPreCommitFreeze) {
       if (simpleCreateUnifiedBottomCta) {
         setHardError(humanizePrimaryCtaBlockedReason("draft_pre_commit"));
@@ -35607,7 +35607,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           paidSessionFinalReviewAfterSignersReady ||
           paidSessionTwoSignersReady)
       ) {
-        void finalizePaidProSignerMetadataAndOpenReviewDecision();
+        await finalizePaidProSignerMetadataAndOpenReviewDecision();
         return;
       }
       if (
@@ -35638,10 +35638,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             navigationTarget: "review_decision",
             reason: "paid_pro_signer_setup_skip_guided_final_review",
           });
-          void finalizePaidProSignerMetadataAndOpenReviewDecision();
+          await finalizePaidProSignerMetadataAndOpenReviewDecision();
           return;
         }
-        void continueGuidedSignerSetupToFinalReview(
+        await continueGuidedSignerSetupToFinalReview(
           unifiedPrimaryCta.reason === "guided_final_review_inline_cta" ? "inline_cta" : "sticky_cta",
         );
         return;

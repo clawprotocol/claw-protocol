@@ -653,6 +653,34 @@ describe("legal party identity clarification", () => {
     expect(after).not.toMatch(/If to Ironvale Manufacturing Inc\.:[\s\S]{0,240}Attn:\s*Sam Ironvale/);
   });
 
+  it("fills Name lines when Ironvale's execution entity omits the trailing period", () => {
+    const before = [
+      `This Services Agreement (this "Agreement") is entered into by and between ${HARBOR} ("Consultant") and ${IRONVALE} ("Client") and Alex Rivera ("Advisor").`,
+      "Consultant's authorized signer is __.",
+      "Client's authorized signer is __.",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "CLIENT:",
+      "Ironvale Manufacturing Inc",
+      "By: __________________________",
+      "Name: __________________________",
+      "CONSULTANT:",
+      HARBOR,
+      "By: __________________________",
+      "Name: __________________________",
+      "ADVISOR:",
+      "Alex Rivera",
+      "By: __________________________",
+      "Name: Alex Rivera",
+    ].join("\n");
+    const after = applyIdentityResolutionToAuthorizedPaper(before, [
+      { name: HARBOR, role: "Consultant", signerName: "Pat Harbor", email: "pat.harbor@harbor.test" },
+      { name: IRONVALE, role: "Client", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+      { name: "Alex Rivera", role: "Advisor", signerName: "Alex Rivera", email: "alex.rivera@advisor.test" },
+    ]);
+    expect(after).toMatch(/CONSULTANT:\s*\nHarbor Peak Analytics LLC\s*\nBy:[^\n]+\nName: Pat Harbor/);
+    expect(after).toMatch(/CLIENT:\s*\nIronvale Manufacturing Inc\.?\s*\nBy:[^\n]+\nName: Sam Ironvale/);
+  });
+
   it("keeps opening Consultant/Client collective roles when stored parties say Client/Service Provider", () => {
     const before = [
       `This Services Agreement (this "Agreement") is entered into by and between ${HARBOR} ("Consultant") and ${IRONVALE} ("Client"). Client, Service Provider, and Advisor may be referred to individually as a "Party" and collectively as the "Parties".`,

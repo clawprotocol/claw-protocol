@@ -1345,6 +1345,28 @@ export async function completeSignerDetailsThroughVisibleCustomerUi(
       `signer_details_did_not_persist agreement=${agreementId} parties=${JSON.stringify(saved.parties)} source=${String(error)}`,
     );
   }
+  const named = signers.filter((signer) => signer.signerName.trim().length >= 2);
+  if (named.length) {
+    try {
+      await expect
+        .poll(async () => {
+          const snap = await fetchOwnerCanonicalSnapshot(page, agreementId);
+          return named.every((signer) =>
+            new RegExp(`Name:\\s*${signer.signerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(
+              snap.corpus,
+            ),
+          )
+            ? 1
+            : 0;
+        }, { timeout: 20_000 })
+        .toBe(1);
+    } catch (error) {
+      const snap = await fetchOwnerCanonicalSnapshot(page, agreementId).catch(() => ({ corpus: "" }));
+      throw new Error(
+        `signer_details_did_not_bind_accepted_paper agreement=${agreementId} source=${String(error)} corpus=${snap.corpus.slice(-800)}`,
+      );
+    }
+  }
 }
 
 async function assertSignerFormHoldsIntakeOrFillOnlyOmitted(
