@@ -55,7 +55,25 @@ describe("legal party identity clarification", () => {
     });
     expect(applied.parties.map((p) => p.name)).toEqual([HARBOR, IRONVALE, "Alex Rivera"]);
     expect(applied.parties[2]).toMatchObject({ name: "Alex Rivera", role: "Advisor" });
+    expect(applied.parties[0]?.signerName || "").toBe("");
     expect(applied.clarificationQuestion).toBeNull();
+    const inferredThenIndependent = applyIdentityClarificationAnswers({
+      parties: [
+        { name: HARBOR, role: "Consultant", signerName: "Alex Rivera", email: "alex.rivera@advisor.test" },
+        { name: IRONVALE, role: "Client" },
+      ],
+      intake: INTAKE,
+      answers: answer,
+    });
+    expect(inferredThenIndependent.parties.map((p) => p.name)).toEqual([HARBOR, IRONVALE, "Alex Rivera"]);
+    expect(inferredThenIndependent.parties[0]).toMatchObject({ name: HARBOR, role: "Consultant" });
+    expect(inferredThenIndependent.parties[0]?.signerName || "").toBe("");
+    expect(inferredThenIndependent.parties[0]?.email || "").toBe("");
+    expect(inferredThenIndependent.parties[2]).toMatchObject({
+      name: "Alex Rivera",
+      role: "Advisor",
+      email: "alex.rivera@advisor.test",
+    });
     const withEmail = applyIdentityClarificationAnswers({
       parties: NORMALIZED_PARTIES,
       intake: INTAKE,
@@ -525,6 +543,7 @@ describe("legal party identity clarification", () => {
       "",
       `If to ${HARBOR}:`,
       HARBOR,
+      "Attn: Alex Rivera",
       "Email: alex.rivera@advisor.test",
       "",
       `If to ${IRONVALE}:`,
@@ -533,12 +552,14 @@ describe("legal party identity clarification", () => {
       "IN WITNESS WHEREOF, the Parties execute this Agreement.",
       "",
       "CLIENT:",
-      HARBOR,
-      "By: __________________________",
-      "",
-      "SERVICE PROVIDER:",
       IRONVALE,
       "By: __________________________",
+      "Name: Harbor Peak Analytics LLC",
+      "",
+      "CONSULTANT:",
+      HARBOR,
+      "By: __________________________",
+      "Name: __________________________",
     ].join("\n");
     const after = applyIdentityResolutionToAuthorizedPaper(before, [
       { name: HARBOR, role: "Consultant" },
@@ -551,6 +572,8 @@ describe("legal party identity clarification", () => {
     expect(after).not.toMatch(
       /If to Harbor Peak Analytics LLC:\s*\nHarbor Peak Analytics LLC\s*\nEmail: alex\.rivera@advisor\.test/,
     );
+    expect(after).not.toMatch(/If to Harbor Peak Analytics LLC:[\s\S]{0,240}Attn:\s*Alex Rivera/);
+    expect(after).not.toMatch(/CLIENT:[\s\S]{0,220}Name:\s*Harbor Peak Analytics LLC/);
     expect(after).toMatch(/CONSULTANT:\s*\nHarbor Peak Analytics LLC/);
     expect(after).toMatch(/CLIENT:\s*\nIronvale Manufacturing Inc/);
     expect(after).toMatch(/ADVISOR:\s*\nAlex Rivera/);

@@ -11,9 +11,9 @@ import {
   captureCanonicalSnapshotCreates,
   captureServerAgreementIds,
   completeLocalReviewSignAndFinal,
+  completeSignerDetailsThroughVisibleCustomerUi,
   fetchOwnerCanonicalSnapshot,
   fetchOwnerIdentityState,
-  persistOwnerPartyContacts,
   installQualityEvalPageGuards,
   qualityEvalViewportName,
   submitIntake,
@@ -201,8 +201,14 @@ test.describe("identity-resolution customer flow", () => {
       .toEqual(["Harbor Peak Analytics LLC", "Ironvale Manufacturing Inc", "Alex Rivera"]);
     const saved = await fetchOwnerIdentityState(page, started.agreementId);
     const added = saved.parties.find((row) => /Alex Rivera/i.test(String(row.name || "")));
+    const harbor = saved.parties.find((row) => /Harbor Peak Analytics LLC/i.test(String(row.name || "")));
+    const ironvale = saved.parties.find((row) => /Ironvale Manufacturing Inc/i.test(String(row.name || "")));
     expect(added).toMatchObject({ name: "Alex Rivera" });
     expect(String(added?.email || "")).toMatch(/alex\.rivera@advisor\.test/i);
+    expect(String(added?.role || "")).toMatch(/Advisor/i);
+    expect(String(harbor?.role || "")).toMatch(/Consultant/i);
+    expect(String(ironvale?.role || "")).toMatch(/Client/i);
+    expect(String(harbor?.signerName || harbor?.signer_name || "")).not.toMatch(/Alex Rivera/i);
     await expect(page.getByTestId("identity-clarification-question")).toHaveCount(0, { timeout: 20_000 });
     const after = await articleText(page, IDENTITY_SCENARIO.partyCue);
     expect(after).toContain("Alex Rivera");
@@ -212,18 +218,22 @@ test.describe("identity-resolution customer flow", () => {
     expect(after).not.toMatch(
       /If to Harbor Peak Analytics LLC:\s*\nHarbor Peak Analytics LLC\s*\nEmail:\s*alex\.rivera@advisor\.test/i,
     );
+    expect(after).not.toMatch(/If to Harbor Peak Analytics LLC:[\s\S]{0,240}Attn:\s*Alex Rivera/i);
+    expect(after).not.toMatch(/CLIENT:[\s\S]{0,220}Name:\s*Harbor Peak Analytics LLC/i);
     expect(after).not.toMatch(/CLIENT:\s*\n\s*Harbor Peak Analytics LLC/i);
     expect(after).not.toMatch(/SERVICE PROVIDER:\s*\n\s*Ironvale Manufacturing Inc/i);
-    const persisted = await fetchOwnerCanonicalSnapshot(page, started.agreementId);
-    expect(persisted.corpus).toContain("Alex Rivera");
-    const reopened = await freshReopenWithoutIdentityQuestion(browser, page, started.agreementId, ["Alex Rivera"], {
+    const appliedSnapshot = await fetchOwnerCanonicalSnapshot(page, started.agreementId);
+    expect(appliedSnapshot.corpus).toContain("Alex Rivera");
+    expect(appliedSnapshot.corpus).not.toMatch(/If to Harbor Peak Analytics LLC:[\s\S]{0,240}Attn:\s*Alex Rivera/i);
+    expect(appliedSnapshot.corpus).not.toMatch(/CLIENT:[\s\S]{0,220}Name:\s*Harbor Peak Analytics LLC/i);
+    const firstReopen = await freshReopenWithoutIdentityQuestion(browser, page, started.agreementId, ["Alex Rivera"], {
       keepOpen: true,
     });
-    if (!reopened.page || !reopened.context) throw new Error("fresh reopen page was not kept open");
-    await expect(reopened.page.getByTestId("simple-pro-send-for-review")).toBeVisible({ timeout: 20_000 });
-    await expect(reopened.page.getByTestId("simple-pro-send-for-signature")).toBeVisible();
-    await expect(reopened.page.locator("body")).toContainText(/one authorized signer.*each contracting party/i);
-    const reopenState = await fetchOwnerIdentityState(reopened.page, started.agreementId);
+    if (!firstReopen.page || !firstReopen.context) throw new Error("fresh reopen page was not kept open");
+    await expect(firstReopen.page.getByTestId("simple-pro-send-for-review")).toBeVisible({ timeout: 20_000 });
+    await expect(firstReopen.page.getByTestId("simple-pro-send-for-signature")).toBeVisible();
+    await expect(firstReopen.page.locator("body")).toContainText(/one authorized signer.*each contracting party/i);
+    const reopenState = await fetchOwnerIdentityState(firstReopen.page, started.agreementId);
     expect(legalPartyNames(reopenState.parties)).toEqual([
       "Harbor Peak Analytics LLC",
       "Ironvale Manufacturing Inc",
@@ -234,10 +244,26 @@ test.describe("identity-resolution customer flow", () => {
       { legalEntity: "Ironvale Manufacturing Inc", signerName: "Sam Ironvale", signerEmail: "sam.ironvale@ironvale.test" },
       { legalEntity: "Alex Rivera", signerName: "Alex Rivera", signerEmail: "alex.rivera@advisor.test" },
     ] as const;
-    await persistOwnerPartyContacts(reopened.page, started.agreementId, signers);
-    await seedCorePaidJourneyOwner(reopened.page);
-    await reopened.page.goto(`/app/create?agreementId=${started.agreementId}`, { waitUntil: "domcontentloaded" });
-    await waitForOwnerWorkspaceReady(reopened.page, started.agreementId);
+    await completeSignerDetailsThroughVisibleCustomerUi(firstReopen.page, signers);
+    await firstReopen.context.close();
+    const reopened = await freshReopenWithoutIdentityQuestion(browser, page, started.agreementId, ["Alex Rivera"], {
+      keepOpen: true,
+    });
+    if (!reopened.page || !reopened.context) throw new Error("signer-details reopen page was not kept open");
+    const persistedParties = await fetchOwnerIdentityState(reopened.page, started.agreementId);
+    for (const signer of signers) {
+      const row = persistedParties.parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
+      expect(row, `persisted party missing after reopen ${signer.legalEntity}`).toBeTruthy();
+      expect(String(row?.signerName || row?.signer_name || ""), `signer re-entry required ${signer.legalEntity}`).toMatch(
+        new RegExp(signer.signerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+      );
+      expect(String(row?.email || "").toLowerCase(), `email re-entry required ${signer.legalEntity}`).toBe(
+        signer.signerEmail.toLowerCase(),
+      );
+    }
+    const persisted = await fetchOwnerCanonicalSnapshot(reopened.page, started.agreementId);
+    expect(persisted.corpus).not.toMatch(/If to Harbor Peak Analytics LLC:[\s\S]{0,240}Attn:\s*Alex Rivera/i);
+    expect(persisted.corpus).not.toMatch(/CLIENT:[\s\S]{0,220}Name:\s*Harbor Peak Analytics LLC/i);
     await expect(reopened.page.getByTestId("identity-clarification-question")).toHaveCount(0);
     const finished = await completeLocalReviewSignAndFinal({
       page: reopened.page,
@@ -251,6 +277,11 @@ test.describe("identity-resolution customer flow", () => {
     });
     expect(finished.signedCount).toBe(3);
     expect(finished.receiptId.length).toBeGreaterThan(8);
+    const accepted = await fetchOwnerCanonicalSnapshot(reopened.page, started.agreementId);
+    expect(accepted.digest).toBe(persisted.digest);
+    expect(accepted.corpus).not.toMatch(/If to Harbor Peak Analytics LLC:[\s\S]{0,240}Attn:\s*Alex Rivera/i);
+    expect(accepted.corpus).not.toMatch(/CLIENT:[\s\S]{0,220}Name:\s*Harbor Peak Analytics LLC/i);
+    expect(accepted.corpus).toMatch(/ADVISOR:[\s\S]{0,160}Alex Rivera/i);
     const finalState = await fetchOwnerIdentityState(page, started.agreementId);
     expect(legalPartyNames(finalState.parties)).toEqual([
       "Harbor Peak Analytics LLC",
@@ -267,6 +298,7 @@ test.describe("identity-resolution customer flow", () => {
         digest: persisted.digest,
         receipt_id: finished.receiptId,
         recipient_path: "local_review_sign_final",
+        signer_details_path: "visible_customer_ui_then_reopen",
       }),
       "identity_individual",
     );

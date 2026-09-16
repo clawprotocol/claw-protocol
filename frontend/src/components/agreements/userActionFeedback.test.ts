@@ -21,6 +21,7 @@ const catalog: Array<Parameters<typeof resolveUserActionFeedback>[0]> = [
   { actor: "owner", action: "choose_signature_track", outcome: "succeeded" },
   { actor: "owner", action: "add_party", outcome: "succeeded", remainder: "Remint Gamma LLC" },
   { actor: "owner", action: "create_review_links", outcome: "working" },
+  { actor: "owner", action: "create_review_links", outcome: "succeeded", linkCount: 1 },
   { actor: "owner", action: "create_review_links", outcome: "succeeded", linkCount: 3 },
   { actor: "owner", action: "create_review_links", outcome: "already_complete" },
   { actor: "owner", action: "create_review_links", outcome: "failed" },
@@ -80,6 +81,25 @@ describe("user action feedback thread", () => {
         reviewLinksAlreadyReady: true,
       }),
     ).toBe(CUSTOMER_JOURNEY_STATE.reviewLinksAlreadyReady);
+  });
+
+  it("review-link success names the minted link count, not recipient emails", () => {
+    expect(
+      resolveUserActionFeedback({
+        actor: "owner",
+        action: "create_review_links",
+        outcome: "succeeded",
+        linkCount: 1,
+      }).body,
+    ).toMatch(/One private review link was created/i);
+    expect(
+      resolveUserActionFeedback({
+        actor: "owner",
+        action: "create_review_links",
+        outcome: "succeeded",
+        linkCount: 2,
+      }).body,
+    ).toMatch(/Two private review links were created/i);
   });
 
   it("created drafts name 2–4 parties and track choice uses existing GTM copy", () => {

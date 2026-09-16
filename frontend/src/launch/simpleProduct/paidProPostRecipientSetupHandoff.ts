@@ -72,8 +72,16 @@ export type PaidProPostRecipientSetupResult =
       ownerRoutePath: string;
       alreadyReady?: boolean;
       userMessage?: string;
+      /** Minted counterparty review links — not recipient-email count. */
+      linkCount?: number;
     }
   | { ok: false; failure: PaidProPostRecipientSetupFailure };
+
+export function countUsableReviewRecipientLinks(
+  rows: ReadonlyArray<{ reviewHref?: string | null }>,
+): number {
+  return rows.filter((row) => String(row.reviewHref || "").trim().length > 0).length;
+}
 
 /** Owner signing party is the draft party whose workflow role is owner — never array position. */
 export function resolveOwnerSigningPartyId(draft: AgreementDraft | null | undefined): string | null {
@@ -114,7 +122,10 @@ export function shouldSkipPaidProPrepareReviewLinkInterstitial(params: {
 
 const reviewLinkHandoffInFlight = new Map<
   string,
-  Promise<{ ok: true; alreadyReady: boolean } | { ok: false; failure: PaidProPostRecipientSetupFailure }>
+  Promise<
+    | { ok: true; alreadyReady: boolean; linkCount: number }
+    | { ok: false; failure: PaidProPostRecipientSetupFailure }
+  >
 >();
 
 async function mintAndPersistReviewLinksForHandoff(
@@ -125,7 +136,7 @@ async function mintAndPersistReviewLinksForHandoff(
   logSource?: string,
   agreementCorpusSource?: string | null,
 ): Promise<
-  | { ok: true; alreadyReady: boolean }
+  | { ok: true; alreadyReady: boolean; linkCount: number }
   | { ok: false; failure: PaidProPostRecipientSetupFailure }
 > {
   const id = agreementId.trim();
@@ -155,7 +166,7 @@ async function mintAndPersistReviewLinksForHandoffUnlocked(
   logSource?: string,
   agreementCorpusSource?: string | null,
 ): Promise<
-  | { ok: true; alreadyReady: boolean }
+  | { ok: true; alreadyReady: boolean; linkCount: number }
   | { ok: false; failure: PaidProPostRecipientSetupFailure }
 > {
   const draftForMint = mergeDraftWithReviewFirstPinnedCorpus(draft, id);
@@ -222,7 +233,7 @@ async function mintAndPersistReviewLinksForHandoffUnlocked(
         source: logSource ?? null,
         recipientCount: linkRows.length,
       });
-      return { ok: true, alreadyReady: true };
+      return { ok: true, alreadyReady: true, linkCount: countUsableReviewRecipientLinks(linkRows) };
     }
   } catch {
     mintThrew = true;
@@ -266,7 +277,7 @@ async function mintAndPersistReviewLinksForHandoffUnlocked(
     recipients: linkRows,
     agreementPartyDisplayNames: orderedAuthoritativePartyDisplayNames(draftForMint.parties),
   });
-  return { ok: true, alreadyReady: false };
+  return { ok: true, alreadyReady: false, linkCount: countUsableReviewRecipientLinks(linkRows) };
 }
 
 export type ReviewSentHandoffResult = {
@@ -335,7 +346,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
   draft: AgreementDraft;
   premiumSendIntent: PremiumSendIntent;
   recipientSetup?: RecipientSetupEmailInput | null;
-  onReviewLinksReady?: (info: { alreadyReady: boolean }) => void;
+  onReviewLinksReady?: (info: { alreadyReady: boolean; linkCount: number }) => void;
   logSource: string;
   /** Final agreement plain text for VS01 signature-block anchor placement. */
   agreementCorpusText?: string | null;
@@ -386,7 +397,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
           reviewEmailDeliveryAttempted: true,
           reviewInviteEmailsSent: true,
         });
-        options.onReviewLinksReady?.({ alreadyReady: true });
+        options.onReviewLinksReady?.({ alreadyReady: true, linkCount: minted.linkCount });
         void options.navigate(route.path);
         return {
           ok: true,
@@ -394,6 +405,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
           ownerRoutePath: route.path,
           alreadyReady: true,
           userMessage: REVIEW_LINKS_ALREADY_READY_MESSAGE,
+          linkCount: minted.linkCount,
         };
       }
       return {
@@ -463,13 +475,14 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
       if (route.destination === "dashboard") {
         writeCreateReviewAgreementResumeId(id);
       }
-      options.onReviewLinksReady?.({ alreadyReady });
+      options.onReviewLinksReady?.({ alreadyReady, linkCount: minted.linkCount });
       void options.navigate(route.path);
       return {
         ok: true,
         destination: route.destination,
         ownerRoutePath: route.path,
         alreadyReady,
+        linkCount: minted.linkCount,
         ...(alreadyReady ? { userMessage: REVIEW_LINKS_ALREADY_READY_MESSAGE } : {}),
       };
     } finally {

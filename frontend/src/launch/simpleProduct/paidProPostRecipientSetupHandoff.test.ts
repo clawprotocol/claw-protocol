@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  countUsableReviewRecipientLinks,
   resolveOwnerSigningPartyId,
   shouldIncludeOwnerReviewLink,
   shouldSkipPaidProPrepareReviewLinkInterstitial,
@@ -21,6 +22,8 @@ describe("paidProPostRecipientSetupHandoff", () => {
     expect(s).toContain("mergeAgreementDraftWithGuidedSigningHandoff");
     expect(s).toContain("mintSimpleDoneReviewRecipientLinkRows");
     expect(s).toContain("shouldIncludeOwnerReviewLink");
+    expect(s).toContain("countUsableReviewRecipientLinks");
+    expect(s).toContain("linkCount");
     expect(s).toContain("resolveReviewFirstMintPolicyGate");
     expect(s).toContain("postReviewSentServer");
     expect(s).toContain("maybePostReviewSentAfterReviewFirstHandoff");
@@ -65,6 +68,8 @@ describe("paidProPostRecipientSetupHandoff", () => {
     );
     expect(block).toContain("executePaidProPostRecipientSetupHandoff");
     expect(block).toContain("shouldSkipPaidProPrepareReviewLinkInterstitial");
+    expect(intake).toContain("linkCount: Math.max(1, result.linkCount ?? 0)");
+    expect(intake).not.toContain("linkCount: Math.max(1, paidProDistinctValidRecipientEmailCount)");
     const handoffIdx = block.indexOf("executePaidProPostRecipientSetupHandoff");
     const sendIdx = block.indexOf("/app/send/");
     expect(handoffIdx).toBeGreaterThanOrEqual(0);
@@ -118,6 +123,15 @@ describe("shouldIncludeOwnerReviewLink", () => {
         ],
       } as AgreementDraft),
     ).toBe(true);
+  });
+
+  it("counts minted review hrefs, not recipient emails", () => {
+    expect(
+      countUsableReviewRecipientLinks([
+        { reviewHref: "https://app.example.com/agreements/a1/review?t=tok-northwind" },
+        { reviewHref: "   " },
+      ]),
+    ).toBe(1);
   });
 
   it("omits the two-party owner so they use workspace, not recipient-approve", () => {

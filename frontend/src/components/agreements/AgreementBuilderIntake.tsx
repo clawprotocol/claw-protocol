@@ -32379,13 +32379,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           navigate: (to) => {
             void navigate(to);
           },
-          onReviewLinksReady: ({ alreadyReady }) => {
+          onReviewLinksReady: ({ alreadyReady, linkCount }) => {
             publishJourneyActionFlash(
               resolveUserActionFeedback({
                 actor: "owner",
                 action: "create_review_links",
                 outcome: alreadyReady ? "already_complete" : "succeeded",
-                linkCount: Math.max(1, paidProDistinctValidRecipientEmailCount),
+                linkCount: Math.max(1, linkCount),
               }),
             );
           },
@@ -32418,7 +32418,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             actor: "owner",
             action: "create_review_links",
             outcome: result.alreadyReady ? "already_complete" : "succeeded",
-            linkCount: Math.max(1, paidProDistinctValidRecipientEmailCount),
+            linkCount: Math.max(1, result.linkCount ?? 0),
           }),
         );
         logReviewFirstNavigateDone({ agreementId: id, path: result.ownerRoutePath, source });

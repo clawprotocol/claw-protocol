@@ -600,6 +600,11 @@ export async function observeSnapshotCreateResponse(
   return { ...posted, agreementId: posted.agreementId || agreementId };
 }
 
+/**
+ * Integration-only party-contact persist via `/update-field`.
+ * Not customer-journey proof. Use `completeSignerDetailsThroughVisibleCustomerUi`
+ * for qualification. Keep this helper in separately labeled integration tests.
+ */
 export async function persistOwnerPartyContacts(
   page: Page,
   agreementId: string,
@@ -964,6 +969,56 @@ function reviewTokenForParticipant(
   return tokenFromReviewHref(String(row?.reviewHref || ""));
 }
 
+async function readCustomerVisibleReviewHrefs(page: Page): Promise<string[]> {
+  const hrefs = await page.evaluate(() => {
+    const out: string[] = [];
+    for (const node of Array.from(document.querySelectorAll("a[href*='/review']"))) {
+      const href = (node as HTMLAnchorElement).href || node.getAttribute("href") || "";
+      if (href.includes("/review")) out.push(href);
+    }
+    for (const node of Array.from(document.querySelectorAll("[data-review-href], [data-href]"))) {
+      const href = node.getAttribute("data-review-href") || node.getAttribute("data-href") || "";
+      if (href.includes("/review")) out.push(href);
+    }
+    return out;
+  });
+  return hrefs.filter((href) => tokenFromReviewHref(href).length > 12);
+}
+
+async function recoverCustomerReviewTokenFromVisibleUi(
+  page: Page,
+  agreementId: string,
+  participantId: string,
+): Promise<{ token: string; source: string } | null> {
+  const copyButtons = page
+    .getByTestId("simple-done-copy-review-link-primary")
+    .or(page.getByTestId("simple-done-copy-review-link-secondary"))
+    .or(page.getByRole("button", { name: /Copy review link/i }));
+  if (await copyButtons.first().isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await copyButtons.first().click();
+    writeQualityEvalArtifact(
+      "review-link-recovery.json",
+      JSON.stringify(
+        {
+          agreement_id: agreementId,
+          participant_id: participantId,
+          action: "copy_review_link",
+        },
+        null,
+        2,
+      ),
+      "review_link_recovery",
+    );
+  }
+  const visible = await readCustomerVisibleReviewHrefs(page);
+  const fromVisible = visible.map((href) => tokenFromReviewHref(href)).find((token) => token.length > 12);
+  if (fromVisible) return { token: fromVisible, source: "visible_copy_review_link" };
+  const afterCopy = await ownerReviewLinkHandoffRows(page, agreementId).catch(() => []);
+  const fromHandoff = reviewTokenForParticipant([], afterCopy, participantId);
+  if (fromHandoff.length > 12) return { token: fromHandoff, source: "customer_copy_review_link_handoff" };
+  return null;
+}
+
 function mintedTokenForParticipant(
   events: RecipientTokenEvent[],
   mode: "review" | "sign",
@@ -981,32 +1036,6 @@ function mintedTokenForParticipant(
       mintPartyId(row) === pid
     );
   });
-}
-
-async function ownerRemintReviewToken(
-  page: Page,
-  agreementId: string,
-  participantId: string,
-): Promise<RecipientTokenEvent | null> {
-  const api = configuredLiveApiBase();
-  const runtime = loadCorePaidJourneyRuntime();
-  const res = await page.request.post(`${api}/api/agreements/${encodeURIComponent(agreementId)}/recipient-access-token`, {
-    headers: {
-      Authorization: `Bearer ${runtime.access_token}`,
-      "X-Claw-Org-Id": runtime.org_id,
-      "Content-Type": "application/json",
-    },
-    data: { mode: "review", role: "reviewer", recipient_party_id: participantId },
-  });
-  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok() || String(body.token || "").length <= 12) return null;
-  return {
-    ok: true,
-    status: res.status(),
-    url: res.url(),
-    request: { mode: "review", recipient_party_id: participantId },
-    body,
-  };
 }
 
 type OwnerPartyRow = {
@@ -1221,6 +1250,13 @@ function ownerOrigin(page: Page): string {
   }
 }
 
+export async function completeSignerDetailsThroughVisibleCustomerUi(
+  page: Page,
+  signers: readonly { legalEntity: string; signerName: string; signerEmail?: string }[],
+): Promise<void> {
+  await assertSignerFormHoldsIntakeOrFillOnlyOmitted(page, signers, { fillProvidedIfEmpty: true });
+}
+
 async function assertSignerFormHoldsIntakeOrFillOnlyOmitted(
   page: Page,
   signers: readonly { legalEntity: string; signerName: string; signerEmail?: string }[],
@@ -1393,33 +1429,63 @@ export async function completeLocalReviewSignAndFinal(args: {
       );
     }
   }
-  const remintedReview = new Set<string>();
-  await expect
-    .poll(async () => {
+  const recoveredReview = new Map<string, string>();
+  const workflowLinksReady = async () => {
+    const handoff = await ownerReviewLinkHandoffRows(args.page, args.agreementId).catch(() => []);
+    return reviewSigners.every((signer) => {
+      const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
+      return Boolean(row?.id && reviewTokenForParticipant(minted, handoff, String(row.id)).length > 12);
+    });
+  };
+  const workflowReady = await expect
+    .poll(async () => ((await workflowLinksReady()) ? 1 : 0), { timeout: 30_000 })
+    .toBe(1)
+    .then(() => true)
+    .catch(() => false);
+  if (!workflowReady) {
+    for (const signer of reviewSigners) {
+      const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
+      if (!row?.id) continue;
+      const pid = String(row.id);
       const handoff = await ownerReviewLinkHandoffRows(args.page, args.agreementId).catch(() => []);
-      for (const signer of reviewSigners) {
-        const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
-        if (!row?.id) continue;
-        const pid = String(row.id);
-        if (reviewTokenForParticipant(minted, handoff, pid).length > 12) continue;
-        if (remintedReview.has(pid)) continue;
-        remintedReview.add(pid);
-        const reminted = await ownerRemintReviewToken(args.page, args.agreementId, pid);
-        if (reminted) minted.push(reminted);
-      }
-      return reviewSigners.every((signer) => {
-        const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
-        return Boolean(row?.id && reviewTokenForParticipant(minted, handoff, String(row.id)).length > 12);
-      })
-        ? 1
-        : 0;
-    }, { timeout: 45_000 })
-    .toBe(1);
+      if (reviewTokenForParticipant(minted, handoff, pid).length > 12) continue;
+      const recovered = await recoverCustomerReviewTokenFromVisibleUi(args.page, args.agreementId, pid);
+      if (recovered?.token) recoveredReview.set(pid, recovered.token);
+    }
+  }
+  const stillMissing = reviewSigners.filter((signer) => {
+    const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
+    if (!row?.id) return true;
+    const pid = String(row.id);
+    const handoffReady = reviewTokenForParticipant(
+      minted,
+      [],
+      pid,
+    );
+    return handoffReady.length <= 12 && String(recoveredReview.get(pid) || "").length <= 12;
+  });
+  if (stillMissing.length) {
+    const handoff = await ownerReviewLinkHandoffRows(args.page, args.agreementId).catch(() => []);
+    const unresolved = stillMissing.filter((signer) => {
+      const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
+      return !row?.id || reviewTokenForParticipant(minted, handoff, String(row.id)).length <= 12;
+    });
+    if (unresolved.length) {
+      throw new Error(
+        `product_review_link_unavailable agreement=${args.agreementId} counterparties=${unresolved
+          .map((signer) => signer.legalEntity)
+          .join(", ")}. Capture, session handoff, and customer Copy review link did not provide a token. Do not remint through a test-only API.`,
+      );
+    }
+  }
   const reviewHandoff = await ownerReviewLinkHandoffRows(args.page, args.agreementId);
   const workspaceNotRecipient = new Set<string>();
   for (const signer of reviewSigners) {
     const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity))!;
-    const token = reviewTokenForParticipant(minted, reviewHandoff, String(row.id));
+    const token =
+      reviewTokenForParticipant(minted, reviewHandoff, String(row.id)) ||
+      String(recoveredReview.get(String(row.id)) || "");
+    expect(token.length, `product_review_link_unavailable ${signer.legalEntity}`).toBeGreaterThan(12);
     const context = await args.browser.newContext({ viewport: { width: 1280, height: 800 } });
     const recipient = await context.newPage();
     acceptNativeDialogs(recipient);

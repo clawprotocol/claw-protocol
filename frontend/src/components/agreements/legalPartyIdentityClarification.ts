@@ -500,7 +500,23 @@ export function applyIdentityClarificationAnswers<T extends BindableParty>(args:
       const source =
         unresolved.find((row) => samePerson(row.name, person)) ||
         args.unresolvedSubjects?.find((row) => samePerson(row.name, person));
-      const email = source?.email || emailFromText(line);
+      let email = source?.email || emailFromText(line);
+      for (const party of parties) {
+        if (samePerson(String(party.signerName || ""), person) && party.email && !email) {
+          email = String(party.email).trim();
+        }
+      }
+      parties = parties.map((party) => {
+        if (samePerson(party.name, person)) return party;
+        const next = { ...party };
+        if (samePerson(String(party.signerName || ""), person)) {
+          next.signerName = "";
+        }
+        if (email && String(party.email || "").trim().toLowerCase() === email.toLowerCase()) {
+          delete (next as { email?: string }).email;
+        }
+        return next;
+      }) as T[];
       parties = [
         ...parties,
         {
@@ -646,15 +662,21 @@ function displayRoleForParty(party: BindableParty, paper?: string): string {
   return isLikelyHumanSignerName(party.name) ? "Advisor" : "Party";
 }
 
-function removeEmailFromUnrelatedNoticeStanzas(doc: string, ownerName: string, email: string): string {
-  if (!email) return doc;
+function removePersonContactFromUnrelatedNoticeStanzas(
+  doc: string,
+  ownerName: string,
+  email?: string,
+): string {
   const ownerRe = new RegExp(`^If to\\s+${escapeRe(ownerName)}\\b`, "i");
-  const emailLine = new RegExp(`^Email:\\s*${escapeRe(email)}\\s*\\n?`, "im");
+  const emailLine = email ? new RegExp(`^Email:\\s*${escapeRe(email)}\\s*\\n?`, "im") : null;
+  const attnLine = new RegExp(`^Attn:\\s*${escapeRe(ownerName)}(?:,[^\\n]*)?\\s*\\n?`, "im");
   return doc
     .split(/(?=^If to )/m)
     .map((stanza) => {
       if (!/^If to /i.test(stanza) || ownerRe.test(stanza.trimStart())) return stanza;
-      return stanza.replace(emailLine, "");
+      let next = stanza.replace(attnLine, "");
+      if (emailLine) next = next.replace(emailLine, "");
+      return next;
     })
     .join("");
 }
@@ -710,6 +732,15 @@ function remapInvertedConsultantClientHeadings(doc: string): string {
   return `${prefix}${tail}`;
 }
 
+function executionBlockEntityLine(block: string): string {
+  return (
+    block.split("\n").find((line, idx) => {
+      const trimmed = line.trim();
+      return idx > 0 && trimmed && !/^(By:|Name:|Title:|Date:)/i.test(trimmed);
+    }) || ""
+  );
+}
+
 function clearStaleSignerNameFromOtherExecutionBlocks(doc: string, person: BindableParty): string {
   const heading = displayRoleForParty(person).toUpperCase();
   const witness = doc.search(/\bIN WITNESS WHEREOF\b/i);
@@ -721,6 +752,36 @@ function clearStaleSignerNameFromOtherExecutionBlocks(doc: string, person: Binda
     const first = block.split("\n").find((line) => line.trim()) || "";
     const ownHeading = new RegExp(`^\\s*${escapeRe(heading)}\\s*:`, "i").test(first);
     return ownHeading ? block : block.replace(nameRe, "$1__________________________");
+  });
+  return `${prefix}${rewritten.join("")}`;
+}
+
+function clearForeignLegalNamesFromExecutionNameFields(
+  doc: string,
+  parties: readonly BindableParty[],
+): string {
+  const witness = doc.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witness < 0) return doc;
+  const legalNames = parties
+    .map((party) => String(party.name || "").trim())
+    .filter((name) => name && !isLikelyHumanSignerName(name));
+  if (!legalNames.length) return doc;
+  const prefix = doc.slice(0, witness);
+  const rewritten = doc.slice(witness).split(/(?=^[A-Z][A-Z\s]+:\s*$)/m).map((block) => {
+    const first = block.split("\n").find((line) => line.trim()) || "";
+    const entityLine = executionBlockEntityLine(block);
+    const ownEntity = legalNames.find(
+      (name) =>
+        partyLegalNamesMatch(name, first.replace(/:\s*$/, "")) ||
+        partyLegalNamesMatch(name, entityLine.replace(/\.$/, "")),
+    );
+    return legalNames.reduce((acc, name) => {
+      if (ownEntity && partyLegalNamesMatch(name, ownEntity)) return acc;
+      return acc.replace(
+        new RegExp(`^(\\s*Name:\\s*)${escapeRe(name)}\\.?[ \\t]*$`, "im"),
+        "$1__________________________",
+      );
+    }, block);
   });
   return `${prefix}${rewritten.join("")}`;
 }
@@ -773,6 +834,10 @@ export function applyIdentityResolutionToAuthorizedPaper(
     );
   }
   for (const person of individuals) {
+    const email = String(person.email || "").trim();
+    doc = removePersonContactFromUnrelatedNoticeStanzas(doc, person.name, email);
+  }
+  for (const person of individuals) {
     const role = displayRoleForParty(person, doc);
     if (!new RegExp(`\\b${escapeRe(person.name)}\\b`, "i").test(doc)) {
       doc = doc.replace(
@@ -795,7 +860,6 @@ export function applyIdentityResolutionToAuthorizedPaper(
   for (const person of individuals) {
     const email = String(person.email || "").trim();
     if (email) {
-      doc = removeEmailFromUnrelatedNoticeStanzas(doc, person.name, email);
       doc = ensureNoticeStanzaForParty(doc, person.name, email);
     }
   }
@@ -804,5 +868,6 @@ export function applyIdentityResolutionToAuthorizedPaper(
     doc = ensureIndividualExecutionBlock(doc, person);
     doc = clearStaleSignerNameFromOtherExecutionBlocks(doc, person);
   }
+  doc = clearForeignLegalNamesFromExecutionNameFields(doc, parties);
   return doc;
 }
