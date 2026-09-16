@@ -89,6 +89,9 @@ export async function commitPaidProUserApprovedRevisionCorpus(args: {
     organizationId: args.operation.organizationId,
     revisionId: args.operation.revisionId,
     customerConfirmedAnswers: args.customerConfirmedAnswers,
+    allowSupersedingRevision:
+      args.reason === "confirmed_signer_details_revision" ||
+      args.reason === "payment_clarification_answer",
   });
   if (!prepared.ok) {
     return { ok: false, corpus: "", displayed: false, code: prepared.code };

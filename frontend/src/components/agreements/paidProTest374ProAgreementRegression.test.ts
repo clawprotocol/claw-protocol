@@ -45,6 +45,30 @@ describe("Test374 Pro agreement professional-grade regression", () => {
     expect(out).not.toMatch(/configured AI workflow setup/i);
   });
 
+  it("restores ClearSpring LLC in the opening even when notices still have the full name", () => {
+    const stone = "Stonebridge Wellness LLC";
+    const nova = "NovaPath Learning Inc.";
+    const clear = "ClearSpring Distribution LLC";
+    const body = [
+      `This Agreement is entered into by and among ${stone} ("Content Owner / Licensor"), ${nova} ("Platform Adapter / Host"), and ClearSpring Distribution ("Distributor").`,
+      `${stone}'s authorized signer is Sandra Wells. ${nova}'s authorized signer is Caleb Price. ClearSpring Distribution 's authorized signer is Maya Coleman.`,
+      `${clear} will market and sell subscriptions.`,
+      `Subscription revenue is split 20% to ClearSpring Distribution .`,
+      `If to ${clear}:`,
+      clear,
+      "IN WITNESS WHEREOF",
+      clear,
+    ].join("\n");
+    const { text, repairs } = repairProtectedLegalEntitySuffixes(body, [stone, nova, clear], body);
+    expect(repairs).toBeGreaterThan(0);
+    expect(text).toContain(`${clear} ("Distributor")`);
+    expect(text).toContain(`${clear}'s authorized signer is Maya Coleman`);
+    expect(text).toContain(`20% to ${clear}.`);
+    expect(text).not.toMatch(/ClearSpring Distribution \("Distributor"\)/);
+    expect(text).not.toMatch(/ClearSpring Distribution 's authorized signer/);
+    expect(text).not.toMatch(/20% to ClearSpring Distribution \./);
+  });
+
   it("repairs truncated legal entity suffix in recital", () => {
     const body = `This Agreement is between ${BLUE} ("Client") and Harbor Peak Automation ("Service Provider").`;
     const { text } = repairProtectedLegalEntitySuffixes(body, [BLUE, HARBOR], TEST372_FREE_STACKED_PARTY_INTAKE);

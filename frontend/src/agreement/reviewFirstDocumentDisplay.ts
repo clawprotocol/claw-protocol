@@ -6,6 +6,7 @@ import {
   repairExecutionBlockEntityHeadingLines,
 } from "../components/agreements/paidProExecutionBlockEntityHeading";
 import { polishProAgreementDisplayLayer } from "../components/agreements/polishProAgreementDisplayLayer";
+import { repairProtectedLegalEntitySuffixes } from "../components/agreements/paidProProtectedEntityRepair";
 import { restoreDeclaredConsultantClientPaper } from "../components/agreements/paidProDeclaredConsultantClientPaper";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "../components/agreements/paidProSignerMetadataCommitPolicy";
 import { readConsumedPaidProSignerMetadataAuthority } from "../components/agreements/paidProSignerMetadataAuthority";
@@ -148,7 +149,13 @@ export function buildReviewFirstDocumentDisplayHtml(args: {
 
     // Review track: render the same backfilled corpus as copy/export. Display polish can drop
     // integration clauses (§9 miscellaneous) that mention "between the parties".
-    const displayCorpus = reviewTrack ? corpusBeforePolish : polished;
+    let displayCorpus = reviewTrack ? corpusBeforePolish : polished;
+    if (surface === "owner_done" && passedCorpus.length >= 80) {
+      const names = (args.partyNames || [])
+        .map((n) => String(n ?? "").trim())
+        .filter((n) => n.length >= 2);
+      displayCorpus = repairProtectedLegalEntitySuffixes(displayCorpus, names, passedCorpus).text;
+    }
 
     const names = (args.partyNames || [])
       .map((n) => repairDuplicatedEntityPunctuationInDisplay(String(n ?? "").trim()))

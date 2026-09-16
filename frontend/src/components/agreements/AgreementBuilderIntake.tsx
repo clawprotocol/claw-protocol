@@ -18436,30 +18436,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       );
       if (namedParties.length) {
         const acceptedAuthority = await fetchCanonicalReviewSnapshot({ agreementId: args.agreementId });
-        const alreadyAccepted =
-          acceptedAuthority.ok &&
-          String(acceptedAuthority.status || acceptedAuthority.snapshot.status).toLowerCase() === "accepted";
-        if (!alreadyAccepted) {
-          const pendingPlain = acceptedAuthority.ok
-            ? String(acceptedAuthority.snapshot.corpus_plain || "").trim()
-            : "";
-          const editable = (
-            pendingPlain ||
-            acceptedReviewCorpusRef.current ||
-            lastKnownGoodAuthoritativeDraftRef.current ||
-            agreementDocumentTextRef.current ||
-            getPaidProSourceOfTruthText() ||
-            ""
-          ).trim();
-          const paperHasConfirmedParties = nextParties.every((party) => {
-            const name = String(party.name || "").replace(/\.$/, "").trim();
-            return name.length >= 2 && editable.toLowerCase().includes(name.toLowerCase());
-          });
-          if (editable.length >= PAID_PRO_AUTHORITY_MIN_LEN && paperHasConfirmedParties) {
-            const patched = applyIdentityResolutionToAuthorizedPaper(editable, nextParties).trim();
-            if (patched.length >= PAID_PRO_AUTHORITY_MIN_LEN && patched !== editable) {
-              await commitPaidProUserApprovedRevision(patched, "confirmed_signer_details_revision");
-            }
+        const snapshotPlain = acceptedAuthority.ok
+          ? String(acceptedAuthority.snapshot.corpus_plain || "").trim()
+          : "";
+        const editable = (
+          snapshotPlain ||
+          acceptedReviewCorpusRef.current ||
+          lastKnownGoodAuthoritativeDraftRef.current ||
+          agreementDocumentTextRef.current ||
+          getPaidProSourceOfTruthText() ||
+          ""
+        ).trim();
+        const paperHasConfirmedParties = nextParties.every((party) => {
+          const name = String(party.name || "").replace(/\.$/, "").trim();
+          return name.length >= 2 && editable.toLowerCase().includes(name.toLowerCase());
+        });
+        if (editable.length >= PAID_PRO_AUTHORITY_MIN_LEN && paperHasConfirmedParties) {
+          const patched = applyIdentityResolutionToAuthorizedPaper(editable, nextParties).trim();
+          if (patched.length >= PAID_PRO_AUTHORITY_MIN_LEN && patched !== editable) {
+            await commitPaidProUserApprovedRevision(patched, "confirmed_signer_details_revision");
           }
         }
       }
@@ -18569,6 +18564,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const authorizedPaper = (
         getPaidProSourceOfTruthText().trim() ||
         selectVerifiedPaidReviewPaper({ agreementId: captured.agreementId })?.plain ||
+        acceptedReviewCorpusRef.current ||
+        lastKnownGoodAuthoritativeDraftRef.current ||
+        agreementDocumentTextRef.current ||
         ""
       ).trim();
       const persistIdentityAndClose = async (revisionId: string) => {
@@ -33479,33 +33477,37 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         : [],
       additionalTerms: draft?.additional_terms,
     });
-    if (!reusedAcceptedSnapshot) {
-      const pendingPlain = acceptedAuthority.ok
-        ? String(acceptedAuthority.snapshot.corpus_plain || "").trim()
-        : "";
-      const editableBeforeAccept = (
-        pendingPlain ||
-        rawCorpus ||
-        authoritativePaidProReviewPlain ||
-        ""
-      ).trim();
-      const paperHasConfirmedParties = boundParties.every((party) => {
-        const name = String(party.name || "").replace(/\.$/, "").trim();
-        return name.length >= 2 && editableBeforeAccept.toLowerCase().includes(name.toLowerCase());
-      });
-      if (editableBeforeAccept.length >= PAID_PRO_AUTHORITY_MIN_LEN && paperHasConfirmedParties) {
-        const namedPaper = applyIdentityResolutionToAuthorizedPaper(editableBeforeAccept, boundParties).trim();
-        if (namedPaper.length >= PAID_PRO_AUTHORITY_MIN_LEN && namedPaper !== editableBeforeAccept) {
-          await commitPaidProUserApprovedRevision(namedPaper, "confirmed_signer_details_revision");
-        }
+    const pendingPlain = acceptedAuthority.ok
+      ? String(acceptedAuthority.snapshot.corpus_plain || "").trim()
+      : "";
+    const editableBeforeAccept = (
+      pendingPlain ||
+      rawCorpus ||
+      authoritativePaidProReviewPlain ||
+      ""
+    ).trim();
+    let paperForFinalize = reusedAcceptedSnapshot ? acceptedPlain : rawCorpus;
+    const paperHasConfirmedParties = boundParties.every((party) => {
+      const name = String(party.name || "").replace(/\.$/, "").trim();
+      return name.length >= 2 && editableBeforeAccept.toLowerCase().includes(name.toLowerCase());
+    });
+    if (editableBeforeAccept.length >= PAID_PRO_AUTHORITY_MIN_LEN && paperHasConfirmedParties) {
+      const namedPaper = applyIdentityResolutionToAuthorizedPaper(editableBeforeAccept, boundParties).trim();
+      if (namedPaper.length >= PAID_PRO_AUTHORITY_MIN_LEN && namedPaper !== editableBeforeAccept) {
+        const namedCommit = await commitPaidProUserApprovedRevision(
+          namedPaper,
+          "confirmed_signer_details_revision",
+        );
+        paperForFinalize = (namedCommit.ok && namedCommit.corpus.trim()) || namedPaper;
       }
     }
-    if (reusedAcceptedSnapshot) {
+    const reusedUnchangedAccepted = reusedAcceptedSnapshot && paperForFinalize === acceptedPlain;
+    if (reusedAcceptedSnapshot && reusedUnchangedAccepted) {
       writePremiumRecipientHandoffFromAuthorityParties(finalizeAuthority.parties);
       setConsumedPaidProSignerMetadataAuthority(finalizeAuthority);
     }
     const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
-      rawCorpus: reusedAcceptedSnapshot ? acceptedPlain : rawCorpus,
+      rawCorpus: paperForFinalize || (reusedAcceptedSnapshot ? acceptedPlain : rawCorpus),
       authority: finalizeAuthority,
       intakeRaw: intakeForHydration,
       surface: "finalize_paid_pro_signer_metadata",
@@ -33515,7 +33517,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       organizationId,
       expectedFrozenHash,
     });
-    const corpusForSnapshot = reusedAcceptedSnapshot ? acceptedPlain : hydrated.corpus;
+    const corpusForSnapshot = reusedUnchangedAccepted ? acceptedPlain : hydrated.corpus;
     if (
       shouldBlockSignerFinalizeFrozenMismatch({
         agreementId: durableAgreementId,
@@ -33569,7 +33571,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setPaidProInlineSignerSetupLatched(false);
         handlePremiumSendModePick("signature");
         if (
-          reusedAcceptedSnapshot &&
+          reusedUnchangedAccepted &&
           (paidProSignaturePrepIntentLatched || finalReviewSendIntentRef.current === "signature")
         ) {
           const persistId = (
@@ -33614,7 +33616,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       authorityParties: finalizeAuthority.parties,
       replaceExisting: true,
       preserveFrozenServerFullHydratedCorpus:
-        reusedAcceptedSnapshot || rawCorpusResolution.source === "paid_pro_source_of_truth",
+        reusedUnchangedAccepted || rawCorpusResolution.source === "paid_pro_source_of_truth",
       agreementId: durableAgreementId,
       // Await durable persist below — never advance into broken final review on 403/404.
       persistFrozenToBackend: false,
@@ -33625,12 +33627,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       postFinalizePlain: resolvePaidProPostFinalizeReviewPlain(),
       snapshotCorpus: getAuthoritativeSigningSnapshot()?.corpus,
     });
-    if (reusedAcceptedSnapshot) {
+    if (reusedUnchangedAccepted) {
       signingReadyPlain = acceptedPlain;
     }
     if (
       shouldRollbackSignerFinalizeUnreadyCorpus({
-        reusedAcceptedSnapshot,
+        reusedAcceptedSnapshot: reusedUnchangedAccepted,
         signingReadyPlain,
         hydratedRejected: hydrated.rejected,
       })
@@ -33645,9 +33647,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       agreementId: durableAgreementId,
       corpusPlain: signingReadyPlain,
       generationSessionId: signerFinalizeReviewSessionId,
+      allowSupersedingRevision: !reusedUnchangedAccepted,
     });
     if (!prepared.ok) {
-      if (!(reusedAcceptedSnapshot && prepared.code === "accepted_snapshot_immutable")) {
+      if (!(reusedUnchangedAccepted && prepared.code === "accepted_snapshot_immutable")) {
         if (!demoSessionMayContinueWithoutServerSnapshot(prepared.code)) {
           rollbackFinalizeFailure(
             `Could not persist the finalized agreement snapshot (${prepared.code}). Stay in signer setup and try again.`,
@@ -33665,7 +33668,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     if (
       prepared.ok ||
-      (reusedAcceptedSnapshot && prepared.code === "accepted_snapshot_immutable")
+      (reusedUnchangedAccepted && prepared.code === "accepted_snapshot_immutable")
     ) {
       const freezePersist = await persistFrozenSigningAuthorityToBackendDetailed(
         durableAgreementId,
@@ -33741,7 +33744,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setPaidProInlineSignerSetupLatched(false);
       handlePremiumSendModePick("signature");
       if (
-        reusedAcceptedSnapshot &&
+        reusedUnchangedAccepted &&
         (paidProSignaturePrepIntentLatched || finalReviewSendIntentRef.current === "signature")
       ) {
         const persistId = (

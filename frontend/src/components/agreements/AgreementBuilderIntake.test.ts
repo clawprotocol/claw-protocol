@@ -920,6 +920,10 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("isPersistedSignatureDeliveryTrack");
     expect(intake).toContain("confirmed_signer_details_revision");
     expect(intake).toContain("paperHasConfirmedParties");
+    expect(intake).toContain("reusedUnchangedAccepted");
+    expect(intake).not.toMatch(/if \(!alreadyAccepted\) \{/);
+    expect(intake).toContain("acceptedReviewCorpusRef.current ||");
+    expect(intake).toContain("agreementDocumentTextRef.current ||");
     expect(intake).toContain("if (!finalized) return;");
     expect(intake).toContain("fetchCanonicalReviewSnapshot({ agreementId: recoveredSigningAgreementId })");
     expect(intake).toContain("enterGuidedSignatureTrackRoute:recover_accepted_server");

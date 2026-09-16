@@ -504,6 +504,8 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
   organizationId?: string | null;
   revisionId?: string | null;
   customerConfirmedAnswers?: string | null;
+  /** Customer-approved revision: persist a new pending without rewriting the accepted hash. */
+  allowSupersedingRevision?: boolean;
 }): Promise<
   | {
       ok: true;
@@ -544,32 +546,36 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
     const acceptedDigest = String(existing.snapshot.corpus_sha256 || "").trim().toLowerCase();
     const acceptedPlain = (existing.snapshot.corpus_plain || "").trim();
     if (incomingDigest !== acceptedDigest || acceptedPlain !== corpus) {
-      return { ok: false, code: "accepted_snapshot_immutable" };
+      if (!args.allowSupersedingRevision) {
+        return { ok: false, code: "accepted_snapshot_immutable" };
+      }
+      // Fall through and persist a new pending. The accepted digest stays historical.
+    } else {
+      const display: StoredDisplayReviewSnapshotAuthority = {
+        agreementId: id,
+        snapshotId: existing.snapshot.snapshot_id,
+        corpusSha256: acceptedDigest,
+        corpusLength: existing.snapshot.corpus_length,
+        status: "accepted",
+      };
+      storeVerifiedCommercialDisplayCorpus({
+        ...display,
+        corpusPlain: acceptedPlain,
+      });
+      storeAcceptedReviewSnapshotRef({
+        agreementId: id,
+        snapshotId: existing.snapshot.snapshot_id,
+        corpusSha256: acceptedDigest,
+        corpusLength: existing.snapshot.corpus_length,
+      });
+      return {
+        ok: true,
+        snapshot: existing.snapshot,
+        status: "accepted",
+        registryVersion: existing.registryVersion ?? null,
+        display,
+      };
     }
-    const display: StoredDisplayReviewSnapshotAuthority = {
-      agreementId: id,
-      snapshotId: existing.snapshot.snapshot_id,
-      corpusSha256: acceptedDigest,
-      corpusLength: existing.snapshot.corpus_length,
-      status: "accepted",
-    };
-    storeVerifiedCommercialDisplayCorpus({
-      ...display,
-      corpusPlain: acceptedPlain,
-    });
-    storeAcceptedReviewSnapshotRef({
-      agreementId: id,
-      snapshotId: existing.snapshot.snapshot_id,
-      corpusSha256: acceptedDigest,
-      corpusLength: existing.snapshot.corpus_length,
-    });
-    return {
-      ok: true,
-      snapshot: existing.snapshot,
-      status: "accepted",
-      registryVersion: existing.registryVersion ?? null,
-      display,
-    };
   }
 
   const persisted = await persistCanonicalReviewSnapshot({

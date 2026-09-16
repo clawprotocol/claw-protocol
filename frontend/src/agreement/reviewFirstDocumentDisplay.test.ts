@@ -205,4 +205,44 @@ By: __________________________`;
     expect(restored).toMatch(/CONSULTANT\s*:/i);
     expect(restored).not.toMatch(/Harbor Peak Analytics LLC\s*\(\s*"CLIENT"\s*\)/);
   });
+
+  it("owner signed view restores ClearSpring LLC stripped from the opening", () => {
+    const stone = "Stonebridge Wellness LLC";
+    const nova = "NovaPath Learning Inc.";
+    const clear = "ClearSpring Distribution LLC";
+    const accepted = [
+      `INTELLECTUAL PROPERTY LICENSE AND ROYALTY AGREEMENT`,
+      "",
+      `This Services Agreement (the "Agreement") is entered into as of the Effective Date by and among ${stone} ("Content Owner / Licensor"), ${nova} ("Platform Adapter / Host"), and ${clear} ("Distributor") (each a "Party" and collectively, the "Parties").`,
+      "",
+      "1. PARTIES AND ROLES",
+      `${stone}'s authorized signer is Sandra Wells. ${nova}'s authorized signer is Caleb Price. ${clear}'s authorized signer is Maya Coleman.`,
+      "",
+      "3. FEES AND PAYMENT",
+      `Subscription revenue is split 45% to ${stone}, 35% to ${nova}, and 20% to ${clear}.`,
+      "",
+      `If to ${clear}:`,
+      clear,
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      clear,
+      "By: Maya Coleman",
+      ...Array.from({ length: 20 }, () => "Operative commercial paragraph for length."),
+    ].join("\n");
+    const stripped = accepted
+      .replace(`${clear} ("Distributor")`, `ClearSpring Distribution ("Distributor")`)
+      .replace(`${clear}'s authorized signer`, `ClearSpring Distribution 's authorized signer`)
+      .replace(`20% to ${clear}.`, `20% to ClearSpring Distribution .`);
+    const html = buildReviewFirstDocumentDisplayHtml({
+      serverHtml: "",
+      corpusText: stripped,
+      partyNames: [stone, nova, clear],
+      surface: "owner_done",
+    });
+    const visible = extractVisiblePlainFromReviewHtml(html);
+    expect(visible).toContain(`${clear} ("Distributor")`);
+    expect(visible).toContain(`${clear}'s authorized signer`);
+    expect(visible).toContain(`20% to ${clear}.`);
+    expect(visible).not.toMatch(/ClearSpring Distribution \("Distributor"\)/);
+  });
 });

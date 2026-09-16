@@ -31,12 +31,41 @@ export function logPaidProProtectedEntityRepair(payload: {
  * Upgrade truncated party names to full intake-authoritative legal entities in opening + operative text.
  * Example: Harbor Peak Automation ("Service Provider") → Harbor Peak Automation LLC ("Service Provider")
  */
+function preferSuffixedPartyLegalNames(
+  resolved: readonly string[],
+  partyNames: readonly string[] | null | undefined,
+): string[] {
+  const args = (partyNames || [])
+    .map((name) => String(name || "").replace(/\s+/g, " ").trim())
+    .filter((name) => name.length >= 4 && ENTITY_SUFFIX.test(name));
+  if (!args.length) return [...resolved];
+  const upgraded = resolved.map((name) => {
+    const trimmed = String(name || "").replace(/\s+/g, " ").trim();
+    const hit = args.find(
+      (full) =>
+        full === trimmed ||
+        stripEntitySuffix(full) === trimmed ||
+        full.toLowerCase().startsWith(`${trimmed.toLowerCase()} `),
+    );
+    return hit || trimmed;
+  });
+  for (const full of args) {
+    if (!upgraded.some((name) => name === full || stripEntitySuffix(name) === stripEntitySuffix(full))) {
+      upgraded.push(full);
+    }
+  }
+  return upgraded;
+}
+
 export function repairProtectedLegalEntitySuffixes(
   text: string,
   partyNames: readonly string[] | null | undefined,
   intakeRaw?: string | null,
 ): { text: string; repairs: number } {
-  const fullNames = resolveFullLegalPartiesFromIntake(partyNames, intakeRaw);
+  const fullNames = preferSuffixedPartyLegalNames(
+    resolveFullLegalPartiesFromIntake(partyNames, intakeRaw),
+    partyNames,
+  );
   if (!text?.trim() || fullNames.length < 2) return { text, repairs: 0 };
 
   const witnessIdx = text.search(WITNESS_RE);
@@ -50,7 +79,6 @@ export function repairProtectedLegalEntitySuffixes(
     if (!ENTITY_SUFFIX.test(trimmedFull)) continue;
     const short = stripEntitySuffix(trimmedFull);
     if (!short || short.length < 4 || short === trimmedFull) continue;
-    if (head.includes(trimmedFull)) continue;
 
     const definedNameNeedle = `${short} ("`;
     const definedNameCurly = `${short} (“`;
@@ -64,11 +92,26 @@ export function repairProtectedLegalEntitySuffixes(
 
     const suffixToken = trimmedFull.slice(short.length).trim();
     const suffixAlt = escapeRe(suffixToken).replace(/\./g, "\\.?");
+    const shortRe = escapeRe(short);
+
+    const collapsedPossessive = new RegExp(`\\b${shortRe}\\s+'s\\b`, "gi");
+    if (collapsedPossessive.test(head)) {
+      collapsedPossessive.lastIndex = 0;
+      head = head.replace(collapsedPossessive, `${trimmedFull}'s`);
+      repairs += 1;
+    }
+    const collapsedPeriod = new RegExp(`\\b${shortRe}\\s+\\.`, "gi");
+    if (collapsedPeriod.test(head)) {
+      collapsedPeriod.lastIndex = 0;
+      head = head.replace(collapsedPeriod, `${trimmedFull}.`);
+      repairs += 1;
+    }
 
     const patterns: RegExp[] = [
-      new RegExp(`\\b${escapeRe(short)}\\b(?!\\s+${suffixAlt})(\\s*\\([“"'])`, "gi"),
-      new RegExp(`\\b${escapeRe(short)}\\b(?!\\s+${suffixAlt})(\\s*,)`, "gi"),
-      new RegExp(`\\b${escapeRe(short)}\\b(?!\\s+${suffixAlt})(\\s+and\\s+)`, "gi"),
+      new RegExp(`\\b${shortRe}\\b(?!\\s+${suffixAlt})(\\s*\\([“"'])`, "gi"),
+      new RegExp(`\\b${shortRe}\\b(?!\\s+${suffixAlt})(\\s+will\\b)`, "gi"),
+      new RegExp(`\\b${shortRe}\\b(?!\\s+${suffixAlt})(\\s*,)`, "gi"),
+      new RegExp(`\\b${shortRe}\\b(?!\\s+${suffixAlt})(\\s+and\\s+)`, "gi"),
     ];
 
     for (const re of patterns) {
