@@ -7,6 +7,7 @@ import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenera
 import type { AuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
+import { isAgreementSectionHeadingPartyName } from "./paidProPartyNamePreserve";
 import { partyIdFromStableKey } from "./canonicalPartyIdentityModel";
 import { readStarterToPaidPartyHandoff } from "./starterToPaidPartyHandoff";
 import {
@@ -295,7 +296,10 @@ export function buildFrozenSigningAuthoritySnapshotV1(
   const executionRecords = readSignerExecutionAuthority(args.intakeText)?.records ?? [];
 
   const parties: FrozenSigningAuthorityPartyV1[] = manifest.parties
-    .filter((p) => String(p.partyName ?? "").trim().length >= 2)
+    .filter((p) => {
+      const legalEntityName = String(p.partyName ?? "").trim();
+      return legalEntityName.length >= 2 && !isAgreementSectionHeadingPartyName(legalEntityName);
+    })
     .map((p) => {
       const legalEntityName = String(p.partyName ?? "").trim();
       const handoffParty =

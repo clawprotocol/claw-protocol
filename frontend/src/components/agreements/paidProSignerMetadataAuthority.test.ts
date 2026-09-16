@@ -64,6 +64,46 @@ describe("paidProSignerMetadataAuthority", () => {
     vi.unstubAllGlobals();
   });
 
+  it("does not let PARTIES AND ROLES steal Lumen's signer contact", () => {
+    const lumen = "Lumen Bioinformatics Inc.";
+    const thalassa = "Thalassa Data Systems LLC";
+    const coastal = "Coastal Meridian Analytics LLC";
+    const vanguard = "Vanguard Regulatory Sciences Ltd.";
+    const authority = buildLivePaidProSignerMetadataAuthority(
+      {
+        partyCount: 4,
+        recipient1Name: "PARTIES AND ROLES",
+        recipient2Name: lumen,
+        recipient1Email: "elena.vasquez@lumenbio.com",
+        recipient2Email: "marcus.webb@thalassadata.com",
+        extraPartyLegalNames: [coastal, vanguard],
+        extraPartyReviewEmails: ["priya.nair@coastalmeridian.com", "james.osullivan@vanguardregulatory.co"],
+        partySignerNames: ["Dr. Elena Vasquez", "Marcus Webb", "Priya Nair", "James O'Sullivan"],
+        partySignerTitles: ["Chief Science Officer", "President", "Vice President of Operations", "Managing Director"],
+        partyAddresses: ["", "", "", ""],
+      },
+      "live_ui",
+      {
+        preferCompleteUiLegalEntityAuthority: true,
+        draftPartyNames: [lumen, thalassa, coastal, vanguard],
+      },
+    );
+    expect(authority.parties.map((party) => party.partyLegalName)).toEqual([
+      lumen,
+      thalassa,
+      coastal,
+      vanguard,
+    ]);
+    expect(authority.parties[0]).toMatchObject({
+      signerName: "Dr. Elena Vasquez",
+      signerEmail: "elena.vasquez@lumenbio.com",
+    });
+    expect(authority.parties[1]).toMatchObject({
+      signerName: "Marcus Webb",
+      signerEmail: "marcus.webb@thalassadata.com",
+    });
+  });
+
   it("keeps an added individual draft party when UI slots duplicate Ironvale", () => {
     const harbor = "Harbor Peak Analytics LLC";
     const ironvale = "Ironvale Manufacturing Inc.";

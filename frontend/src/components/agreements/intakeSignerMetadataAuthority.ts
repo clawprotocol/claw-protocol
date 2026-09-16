@@ -13,7 +13,9 @@ import { entitiesMatchForSignerMetadata } from "./universalSignerMetadataAuthori
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
 import {
   hasPartyMetadataLabelContamination,
+  isAgreementSectionHeadingPartyName,
   isAuthoritativeLegalEntityName,
+  isDisallowedPartyPhrase,
   isOccupationalOrJobTitlePartyName,
   isTitleCaseNonPersonMention,
   stripTrailingPartyMetadataLabel,
@@ -263,6 +265,7 @@ export function resolveAuthorityPartyLegalNameField(
 ): string {
   const t = value.replace(/\s+/g, " ").trim();
   if (!t) return fallback;
+  if (isAgreementSectionHeadingPartyName(t) || isDisallowedPartyPhrase(t)) return fallback;
   if (looksLikeAuthorizedSignersBulletLine(t)) {
     return parseAuthorizedSignersBulletLine(t)?.legalEntity ?? fallback;
   }

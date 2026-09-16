@@ -14,6 +14,10 @@ import {
 describe("paidProPartyNamePreserve", () => {
   it("rejects operative section headings as legal-entity authority", () => {
     expect(isAgreementSectionHeadingPartyName("SCOPE OF SERVICES")).toBe(true);
+    expect(isAgreementSectionHeadingPartyName("PARTIES AND ROLES")).toBe(true);
+    expect(isAgreementSectionHeadingPartyName("1. PARTIES AND ROLES")).toBe(true);
+    expect(isAuthoritativeLegalEntityName("PARTIES AND ROLES")).toBe(false);
+    expect(isAuthoritativeLegalEntityName("1. PARTIES AND ROLES")).toBe(false);
     expect(isAgreementSectionHeadingPartyName("2. SCOPE OF SERVICES.")).toBe(true);
     expect(isAgreementSectionHeadingPartyName("LIMITATION OF LIABILITY")).toBe(true);
     expect(isAuthoritativeLegalEntityName("SCOPE OF SERVICES")).toBe(false);

@@ -594,6 +594,34 @@ describe("legal party identity clarification", () => {
     expect(savedRoles.map((party) => party.role)).toEqual(["Consultant", "Client", "Advisor"]);
   });
 
+  it("keeps heading-slot contacts on the confirmed party at that index", () => {
+    const bound = bindSignerDetailsToConfirmedParties(
+      [
+        { name: "Lumen Bioinformatics Inc.", role: "Platform Developer" },
+        { name: "Thalassa Data Systems LLC", role: "Data Infrastructure Provider", signerName: "Marcus Webb", email: "marcus.webb@thalassadata.com" },
+        { name: "Coastal Meridian Analytics LLC", role: "Analytics Integrator" },
+        { name: "Vanguard Regulatory Sciences Ltd.", role: "Regulatory Compliance Advisor" },
+      ],
+      [
+        { partyLegalName: "PARTIES AND ROLES", signerName: "Dr. Elena Vasquez", signerEmail: "elena.vasquez@lumenbio.com" },
+        { partyLegalName: "Lumen Bioinformatics Inc.", signerName: "Marcus Webb", signerEmail: "marcus.webb@thalassadata.com" },
+        { partyLegalName: "Coastal Meridian Analytics LLC", signerName: "Priya Nair", signerEmail: "priya.nair@coastalmeridian.com" },
+        { partyLegalName: "Vanguard Regulatory Sciences Ltd.", signerName: "James O'Sullivan", signerEmail: "james.osullivan@vanguardregulatory.co" },
+      ],
+    );
+    expect(bound[0]).toMatchObject({
+      name: "Lumen Bioinformatics Inc.",
+      signerName: "Dr. Elena Vasquez",
+      email: "elena.vasquez@lumenbio.com",
+    });
+    expect(bound[1]).toMatchObject({
+      name: "Thalassa Data Systems LLC",
+      signerName: "Marcus Webb",
+      email: "marcus.webb@thalassadata.com",
+    });
+    expect(bound.map((party) => party.name)).not.toContain("PARTIES AND ROLES");
+  });
+
   it("binds signer details to the confirmed party by legal name, not CLIENT-first slot order", () => {
     const bound = bindSignerDetailsToConfirmedParties(
       [

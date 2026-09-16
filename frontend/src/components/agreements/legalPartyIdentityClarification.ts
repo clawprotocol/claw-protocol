@@ -680,10 +680,14 @@ export function bindSignerDetailsToConfirmedParties<T extends BindableParty>(
     email?: string;
   }[],
 ): T[] {
-  return parties.map((party) => {
-    const slot = slots.find((row) =>
-      partyLegalNamesMatch(String(row.partyLegalName || row.name || ""), String(party.name || "")),
-    );
+  return parties.map((party, index) => {
+    const sameIndex = slots[index];
+    const sameIndexLabel = String(sameIndex?.partyLegalName || sameIndex?.name || "").trim();
+    const slot = isAgreementSectionHeadingPartyName(sameIndexLabel)
+      ? sameIndex
+      : slots.find((row) =>
+          partyLegalNamesMatch(String(row.partyLegalName || row.name || ""), String(party.name || "")),
+        ) || sameIndex;
     if (!slot) return { ...party };
     return {
       ...party,

@@ -39,7 +39,7 @@ import {
 } from "./intakeSignerMetadataAuthority";
 import { resolveAuthoritativeLegalPartyIdentities } from "./legalPartyIdentityAuthority";
 import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
-import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { isAgreementSectionHeadingPartyName, isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
   fromRecipientMetadata,
@@ -304,11 +304,13 @@ export function partyLegalNamesMatch(a: string, b: string): boolean {
 export function uniqueNamedLegalPartyNames(names: readonly string[] | null | undefined): string[] {
   const out: string[] = [];
   for (const raw of names ?? []) {
+    const label = String(raw ?? "").trim();
+    if (isAgreementSectionHeadingPartyName(label)) continue;
     const cleaned =
-      resolveAuthorityPartyLegalNameField(String(raw ?? "").trim(), "") ||
-      sanitizeAuthorityPartyLegalName(String(raw ?? "").trim());
+      resolveAuthorityPartyLegalNameField(label, "") ||
+      sanitizeAuthorityPartyLegalName(label);
     if (cleaned.length < 2) continue;
-    if (isBoilerplateLegalPartyPhrase(cleaned)) continue;
+    if (isAgreementSectionHeadingPartyName(cleaned) || isBoilerplateLegalPartyPhrase(cleaned)) continue;
     if (out.some((existing) => partyLegalNamesMatch(existing, cleaned))) continue;
     out.push(cleaned);
   }
@@ -320,6 +322,14 @@ function resolveUiSlotIndexForLegalEntity(
   legalName: string,
   fallbackIndex: number,
 ): number {
+  const fallbackUiLegal = partyLegalNameForIndex(ui, fallbackIndex);
+  if (
+    isAgreementSectionHeadingPartyName(fallbackUiLegal) ||
+    !resolveAuthorityPartyLegalNameField(fallbackUiLegal, "")
+  ) {
+    // Heading/empty legal-entity slot at this index still holds that party's signer contact.
+    return fallbackIndex;
+  }
   const legal = resolveAuthorityPartyLegalNameField(legalName.trim(), "");
   if (!legal) return fallbackIndex;
   const max = Math.max(ui.partyCount, 2);
@@ -600,6 +610,9 @@ export function buildPaidProSignerMetadataParties(
     uniqueUiLegalNames.length === completeUiLegalEntities.length &&
     completeUiLegalEntities.every((name) => {
       if (name.length < 2) return false;
+      if (isAgreementSectionHeadingPartyName(name) || !resolveAuthorityPartyLegalNameField(name, "")) {
+        return false;
+      }
       const key = normalizedLegalNameKey(name);
       if (!signerContactKeys.has(key)) return true;
       return uniqueDraftLegalNames.some((draftName) => partyLegalNamesMatch(draftName, name));
