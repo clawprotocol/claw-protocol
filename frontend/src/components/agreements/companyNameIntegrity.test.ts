@@ -131,6 +131,7 @@ describe("company-name integrity — review and final render", () => {
     expect(first.text).toContain(`${harbor} ("Vendor")`);
     expect(first.text).toContain(`${north} ("Integrator")`);
     expect(first.text).toContain(`${silver} ("Analyst")`);
+    expect(first.text, "Silver Mesa Analytics LP LP must fail identity").not.toMatch(/Silver Mesa Analytics LP\s+LP\b/);
     expect(first.text).toContain("Sponsor shall fund the rollout.");
     expect(lineStarting(first.text, `If to ${harbor}`)).toBe(`If to ${harbor}: maya.bennett@harborlinedata.com`);
     expect(first.text).toMatch(/^Harborline Data Solutions Inc\.$/m);

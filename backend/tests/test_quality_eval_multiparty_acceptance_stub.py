@@ -143,3 +143,81 @@ def test_four_party_parse_and_one_pager_are_not_drafting_json() -> None:
     assert not one_pager.lstrip().startswith("{")
     assert "does not name a milestone payer" in one_pager
     assert one_pager.count("This operational paragraph") < 4
+
+
+SILVER_MESA_FOUR_INTAKE = """
+Need an agreement among Ironclad Systems Group LLC (Sponsor), Harborline Data Solutions Inc. (Vendor), Northwind Automation Partners LLC (Integrator), and Silver Mesa Analytics LP (Analyst) for a joint AI software and infrastructure rollout project.
+Ethan Cole, Maya Bennett, Lucas Reed, Olivia Hart.
+olivia.hart@silvermesaanalytics.com
+Ironclad Systems Group LLC pays the $187,500 contract value over 6 milestone payments.
+Texas law. 24 months. 3 Ironclad Way, Austin, TX 78701.
+""".strip()
+
+
+def test_four_party_silver_mesa_stub_is_not_lumen_or_five_party() -> None:
+    raw = stub_legal_llm_completion(
+        [{"role": "user", "content": SILVER_MESA_FOUR_INTAKE}],
+        call_purpose="agreement_drafting",
+    )
+    body = json.loads(raw)
+    doc = str(body.get("document_text") or "")
+    assert "Ironclad Systems Group LLC" in doc
+    assert 'Ironclad Systems Group LLC ("Sponsor")' in doc
+    assert 'Harborline Data Solutions Inc. ("Vendor")' in doc
+    assert 'Northwind Automation Partners LLC ("Integrator")' in doc
+    assert 'Silver Mesa Analytics LP ("Analyst")' in doc
+    assert "Silver Mesa Analytics LP LP" not in doc
+    assert "VertexGrid" not in doc
+    assert "Lumen Bioinformatics Inc." not in doc
+    assert "olivia.hart@silvermesaanalytics.com" in doc
+    assert "If to Silver Mesa Analytics LP:" in doc
+    assert "3 Ironclad Way, Austin, TX 78701" in doc
+    assert "$187,500" in doc
+    assert "Texas" in doc
+    assert "Ethan Cole" in doc
+    assert "Olivia Hart" in doc
+    assert body["missing_material_info"] == []
+    ok, reasons = premium_full_draft_body_meets_substance_floor(
+        doc,
+        intake=SILVER_MESA_FOUR_INTAKE,
+        context={"parties": body["parties"]},
+    )
+    assert ok, reasons
+
+
+def test_five_party_ironclad_intake_is_not_silver_mesa_four_party_paper() -> None:
+    intake = SILVER_MESA_FOUR_INTAKE + "\nVertexGrid Technologies LLC is also a party."
+    raw = stub_legal_llm_completion(
+        [{"role": "user", "content": intake}],
+        call_purpose="agreement_drafting",
+    )
+    body = json.loads(raw)
+    doc = str(body.get("document_text") or "")
+    assert "JOINT AI SOFTWARE AND INFRASTRUCTURE ROLLOUT AGREEMENT" not in doc
+
+
+def test_four_party_silver_mesa_revision_retains_accepted_notice_email() -> None:
+    current = (
+        'This Agreement is among Ironclad Systems Group LLC ("Sponsor"), '
+        'Harborline Data Solutions Inc. ("Vendor"), Northwind Automation Partners LLC ("Integrator"), '
+        'and Silver Mesa Analytics LP ("Analyst").\n'
+        "If to Silver Mesa Analytics LP: notices@silvermesaanalytics.com"
+    )
+    raw = stub_legal_llm_completion(
+        [
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "intake_text": SILVER_MESA_FOUR_INTAKE,
+                        "current_document_text": current,
+                    }
+                ),
+            }
+        ],
+        call_purpose="explicit_revision",
+    )
+    body = json.loads(raw)
+    assert body["document_text"] == current
+    assert "notices@silvermesaanalytics.com" in body["document_text"]
+    assert "olivia.hart@silvermesaanalytics.com" not in body["document_text"]

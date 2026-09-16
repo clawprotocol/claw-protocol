@@ -21,6 +21,11 @@ LUMEN = "Lumen Bioinformatics Inc."
 THALASSA = "Thalassa Data Systems LLC"
 COASTAL = "Coastal Meridian Analytics LLC"
 VANGUARD = "Vanguard Regulatory Sciences Ltd."
+IRONCLAD = "Ironclad Systems Group LLC"
+HARBORLINE = "Harborline Data Solutions Inc."
+NORTHWIND_AUTO = "Northwind Automation Partners LLC"
+SILVER_MESA = "Silver Mesa Analytics LP"
+VERTEXGRID = "VertexGrid Technologies LLC"
 STONEBRIDGE = "Stonebridge Wellness LLC"
 NOVAPATH = "NovaPath Learning Inc."
 CLEARSPRING = "ClearSpring Distribution LLC"
@@ -32,6 +37,12 @@ LUMEN_SIGNER = "Dr. Elena Vasquez"
 THALASSA_SIGNER = "Marcus Webb"
 COASTAL_SIGNER = "Priya Nair"
 VANGUARD_SIGNER = "James O'Sullivan"
+IRONCLAD_SIGNER = "Ethan Cole"
+HARBORLINE_SIGNER = "Maya Bennett"
+NORTHWIND_AUTO_SIGNER = "Lucas Reed"
+SILVER_MESA_SIGNER = "Olivia Hart"
+SILVER_MESA_NOTICE = "olivia.hart@silvermesaanalytics.com"
+FOUR_PARTY_SILVER_MESA_LAW = "Texas"
 STONEBRIDGE_SIGNER = "Sandra Wells"
 NOVAPATH_SIGNER = "Caleb Price"
 CLEARSPRING_SIGNER = "Maya Coleman"
@@ -94,6 +105,16 @@ def _is_hosted_saas(text: str) -> bool:
 
 def _is_four_party_precision(text: str) -> bool:
     return LUMEN in text and THALASSA in text and COASTAL in text and VANGUARD in text
+
+
+def _is_four_party_silver_mesa(text: str) -> bool:
+    return (
+        IRONCLAD in text
+        and HARBORLINE in text
+        and NORTHWIND_AUTO in text
+        and SILVER_MESA in text
+        and VERTEXGRID not in text
+    )
 
 
 def _is_three_party_ip_license(text: str) -> bool:
@@ -463,6 +484,110 @@ def _four_party_draft_response() -> str:
     )
 
 
+def _four_party_silver_mesa_parse_response() -> str:
+    return json.dumps(
+        {
+            "title": "Joint AI Software and Infrastructure Rollout Agreement",
+            "jurisdiction": FOUR_PARTY_SILVER_MESA_LAW,
+            "parties": [
+                {"name": IRONCLAD, "role": "Sponsor"},
+                {"name": HARBORLINE, "role": "Vendor"},
+                {"name": NORTHWIND_AUTO, "role": "Integrator"},
+                {"name": SILVER_MESA, "role": "Analyst"},
+            ],
+            "purpose": "joint AI software and infrastructure rollout",
+            "payment_terms": "$187,500 over 6 milestone payments",
+            "duration": "24 months",
+            "due_date": None,
+            "effective_date": None,
+        }
+    )
+
+
+def _four_party_silver_mesa_corpus(*, expand: bool = True) -> str:
+    parties = [IRONCLAD, HARBORLINE, NORTHWIND_AUTO, SILVER_MESA]
+    sections = [
+        "JOINT AI SOFTWARE AND INFRASTRUCTURE ROLLOUT AGREEMENT",
+        f'This Agreement is among {IRONCLAD} ("Sponsor"), {HARBORLINE} ("Vendor"), '
+        f'{NORTHWIND_AUTO} ("Integrator"), and {SILVER_MESA} ("Analyst").',
+        "1. PARTIES AND ROLES. Each company is an independent contractor. "
+        f"{IRONCLAD}'s authorized representative is {IRONCLAD_SIGNER}, CEO. "
+        f"{HARBORLINE}'s authorized representative is {HARBORLINE_SIGNER}, CTO. "
+        f"{NORTHWIND_AUTO}'s authorized representative is {NORTHWIND_AUTO_SIGNER}, Managing Partner. "
+        f"{SILVER_MESA}'s authorized representative is {SILVER_MESA_SIGNER}, Ops Director. "
+        "Nothing in this Agreement creates a partnership, joint venture, or employment relationship.",
+        f"2. SCOPE OF SERVICES. The parties will jointly perform a white-label AI workflow software "
+        f"and infrastructure rollout. {IRONCLAD} is the Sponsor and shall fund the rollout. "
+        f"{HARBORLINE} is the Vendor and shall deliver the white-label platform. "
+        f"{NORTHWIND_AUTO} is the Integrator and shall perform API integrations, onboarding, and "
+        f"migration help. {SILVER_MESA} is the Analyst and shall deliver analytics dashboards and monitoring.",
+        f"3. FEES AND PAYMENT. {IRONCLAD} pays the $187,500 contract value over 6 milestone payments "
+        "tied to deployment stages and launch targets. Invoices are due net thirty (30) days.",
+        "4. TERM AND DURATION. The initial term is 24 months with automatic yearly renewal unless a "
+        "party gives 45 days written notice.",
+        "5. INTELLECTUAL PROPERTY. Foreground IP developed solely by a party remains that party's "
+        "property. Jointly developed foreground IP is owned equally unless otherwise agreed in writing. "
+        "Each party keeps its pre-existing intellectual property.",
+        "6. CONFIDENTIALITY. Each party will protect the other parties' confidential information for "
+        "five years using at least reasonable care.",
+        "7. LIMITATION OF LIABILITY. Except for confidentiality breaches, indemnification obligations, "
+        "or willful misconduct, no party's aggregate liability exceeds fees paid in the twelve months "
+        "preceding the claim.",
+        f"8. GOVERNING LAW. This Agreement is governed by the laws of the State of {FOUR_PARTY_SILVER_MESA_LAW}, "
+        "without regard to conflict-of-law rules.",
+        "9. NOTICES. Formal notices must be delivered to each party's distinct notice address. "
+        f"Sponsor address: 3 Ironclad Way, Austin, TX 78701. "
+        f"If to {IRONCLAD}: ethan.cole@ironcladsg.com. "
+        f"If to {HARBORLINE}: maya.bennett@harborlinedata.com. "
+        f"If to {NORTHWIND_AUTO}: lucas.reed@northwindap.io. "
+        f"If to {SILVER_MESA}: {SILVER_MESA_NOTICE}.",
+        "10. TERMINATION. A party may terminate for material breach after written notice and a "
+        "fifteen-business-day opportunity to cure.",
+        "11. ENTIRE AGREEMENT. This Agreement is the entire agreement. Electronic signatures and "
+        "counterparts are valid.",
+        "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+        f"{IRONCLAD}   By: {IRONCLAD_SIGNER}   Title: CEO   Date: ________",
+        f"{HARBORLINE}   By: {HARBORLINE_SIGNER}   Title: CTO   Date: ________",
+        f"{NORTHWIND_AUTO}   By: {NORTHWIND_AUTO_SIGNER}   Title: Managing Partner   Date: ________",
+        f"{SILVER_MESA}   By: {SILVER_MESA_SIGNER}   Title: Ops Director   Date: ________",
+    ]
+    if expand:
+        sections.append(_unique_operative_expansion(parties, start_section=12, min_chars=7200))
+    return "\n\n".join(sections)
+
+
+def _four_party_silver_mesa_draft_response() -> str:
+    doc = _four_party_silver_mesa_corpus()
+    return json.dumps(
+        {
+            "title": "Joint AI Software and Infrastructure Rollout Agreement",
+            "agreement_family": "services_agreement",
+            "document_text": doc,
+            "key_terms_found": [
+                IRONCLAD,
+                HARBORLINE,
+                NORTHWIND_AUTO,
+                SILVER_MESA,
+                FOUR_PARTY_SILVER_MESA_LAW,
+                "$187,500",
+                "24 months",
+                SILVER_MESA_NOTICE,
+            ],
+            "missing_material_info": [],
+            "parties": [
+                {"name": IRONCLAD, "role": "Sponsor"},
+                {"name": HARBORLINE, "role": "Vendor"},
+                {"name": NORTHWIND_AUTO, "role": "Integrator"},
+                {"name": SILVER_MESA, "role": "Analyst"},
+            ],
+            "purpose": "joint AI software and infrastructure rollout",
+            "payment_terms": "$187,500 over 6 milestone payments",
+            "jurisdiction": FOUR_PARTY_SILVER_MESA_LAW,
+            "updated_document_text": doc,
+        }
+    )
+
+
 def _three_party_draft_response() -> str:
     doc = _three_party_corpus()
     return json.dumps(
@@ -542,6 +667,21 @@ def stub_legal_llm_completion(
         if purpose == "free_one_pager":
             return _four_party_corpus(expand=False)
         return _four_party_draft_response()
+    if _is_four_party_silver_mesa(text):
+        if purpose in {"explicit_revision", "conditional_repair"}:
+            current = str(payload.get("current_document_text") or payload.get("document_text") or "")
+            retained = _retain_current_if_parties(
+                current,
+                (IRONCLAD, HARBORLINE, NORTHWIND_AUTO, SILVER_MESA),
+                "four-party-silver-mesa",
+            )
+            if retained:
+                return retained
+        if purpose in {"structured_extraction", "missing_facts"}:
+            return _four_party_silver_mesa_parse_response()
+        if purpose == "free_one_pager":
+            return _four_party_silver_mesa_corpus(expand=False)
+        return _four_party_silver_mesa_draft_response()
     if _is_three_party_ip_license(text):
         if purpose in {"explicit_revision", "conditional_repair"}:
             current = str(payload.get("current_document_text") or payload.get("document_text") or "")

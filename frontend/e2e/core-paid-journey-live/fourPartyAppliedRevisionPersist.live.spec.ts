@@ -14,14 +14,18 @@ import {
   seedCorePaidJourneyOwner,
   type RecipientTokenEvent,
 } from "./corePaidJourneyLiveAuth";
+import { IRONCLAD_FOUR_PARTY_SILVER_MESA_INTAKE } from "../../src/components/agreements/ironcladJointRolloutFixtures";
 import {
   articleText,
   assertFourPartyCustomerMeaning,
+  captureServerAgreementIds,
   configuredLiveApiBase,
   fetchOwnerCanonicalSnapshot,
   fourPartyPaperReady as fourPartyPaperReadyCheck,
   installQualityEvalPageGuards,
   QUALITY_EVAL_ALL_CASES,
+  submitIntake,
+  waitForServerAgreementId,
 } from "./qualityEvalJourney";
 
 const enabled = Boolean(process.env.CORE_PAID_JOURNEY_LIVE_API && process.env.CORE_PAID_JOURNEY_LIVE_ORIGIN);
@@ -426,4 +430,339 @@ test("four-party saved revision continues through local review recipients", asyn
     await expect(confirmation.first(), `${party.legalEntity} approval must persist`).toBeVisible({ timeout: 20_000 });
     await recipient.context().close();
   }
+});
+
+const SILVER_MESA = "Silver Mesa Analytics LP";
+const ORIGINAL_SILVER_NOTICE = "olivia.hart@silvermesaanalytics.com";
+const PROPOSED_SILVER_NOTICE = "notices@silvermesaanalytics.com";
+
+const SILVER_MESA_FOUR_PARTY = [
+  {
+    legalEntity: "Ironclad Systems Group LLC",
+    role: "Sponsor",
+    signerName: "Ethan Cole",
+    email: "ethan.cole@ironcladsg.com",
+  },
+  {
+    legalEntity: "Harborline Data Solutions Inc.",
+    role: "Vendor",
+    signerName: "Maya Bennett",
+    email: "maya.bennett@harborlinedata.com",
+  },
+  {
+    legalEntity: "Northwind Automation Partners LLC",
+    role: "Integrator",
+    signerName: "Lucas Reed",
+    email: "lucas.reed@northwindap.io",
+  },
+  {
+    legalEntity: SILVER_MESA,
+    role: "Analyst",
+    signerName: "Olivia Hart",
+    email: ORIGINAL_SILVER_NOTICE,
+  },
+] as const;
+
+const SILVER_MESA_SIGNER_FIELDS = SILVER_MESA_FOUR_PARTY.map((party, idx) => ({
+  party,
+  nameField: idx === 0 ? "r1-name" : idx === 1 ? "r2-name" : `party-${idx}-legal-name`,
+  signerField: idx === 0 ? "r1-signer-name" : idx === 1 ? "r2-signer-name" : `party-${idx}-signer-name`,
+  emailField: idx === 0 ? "r1-email" : idx === 1 ? "r2-email" : idx === 2 ? "r3-email" : "r4-email",
+}));
+
+function silverMesaNoticeAddress(text: string): string {
+  const match = text.match(/If to Silver Mesa Analytics LP:\s*(\S+)/i);
+  return match ? match[1].replace(/[.,;]+$/, "") : "";
+}
+
+function assertSilverMesaFourPartyPaper(text: string, label: string): void {
+  expect(text.length, `${label} must be operative paper`).toBeGreaterThan(400);
+  expect(text, `${label}: Silver Mesa Analytics LP LP must fail identity`).not.toMatch(
+    /Silver Mesa Analytics LP\s+LP\b/,
+  );
+  expect(text, `${label} must not add VertexGrid`).not.toMatch(/VertexGrid/);
+  for (const party of SILVER_MESA_FOUR_PARTY) {
+    expect(text, `${label} missing ${party.legalEntity}`).toContain(party.legalEntity);
+    expect(
+      text,
+      `${label} must keep ${party.legalEntity} as ${party.role}`,
+    ).toMatch(new RegExp(`${party.legalEntity.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\s\\S]{0,160}\\("${party.role}"\\)`));
+  }
+  expect(text, `${label} Ethan Cole`).toContain("Ethan Cole");
+  expect(text, `${label} Maya Bennett`).toContain("Maya Bennett");
+  expect(text, `${label} Lucas Reed`).toContain("Lucas Reed");
+  expect(text, `${label} Olivia Hart`).toContain("Olivia Hart");
+  expect(text, `${label} Ironclad postal`).toContain("3 Ironclad Way, Austin, TX 78701");
+  expect(text, `${label} payment`).toContain("$187,500");
+  expect(text, `${label} term`).toMatch(/24 months/);
+  expect(text, `${label} Texas law`).toMatch(/Texas/);
+  expect(text, `${label} ownership`).toMatch(/Foreground IP developed solely by a party remains that party's property/i);
+  expect(silverMesaNoticeAddress(text), `${label} notice must stay on Silver Mesa`).toBeTruthy();
+}
+
+type ProposalPostEvent = { ok: boolean; status: number; url: string; proposalId: string };
+
+function captureProposalPosts(page: Page): ProposalPostEvent[] {
+  const events: ProposalPostEvent[] = [];
+  page.on("response", (res) => {
+    if (res.request().method() !== "POST" || !res.url().includes("/recipient-proposal")) return;
+    void res
+      .json()
+      .then((body) => {
+        let requestId = "";
+        try {
+          const posted = res.request().postDataJSON() as { proposal_id?: string } | null;
+          requestId = String(posted?.proposal_id || "").trim();
+        } catch {
+          requestId = "";
+        }
+        const proposalId = String(
+          (body && typeof body === "object" ? (body as { proposal_id?: unknown }).proposal_id : "") || requestId,
+        ).trim();
+        events.push({ ok: res.ok(), status: res.status(), url: res.url(), proposalId });
+      })
+      .catch(() => {
+        events.push({ ok: res.ok(), status: res.status(), url: res.url(), proposalId: "" });
+      });
+  });
+  return events;
+}
+
+function captureApplyPosts(page: Page): { ok: boolean; status: number; url: string }[] {
+  const events: { ok: boolean; status: number; url: string }[] = [];
+  page.on("response", (res) => {
+    if (res.request().method() !== "POST" || !res.url().includes("/recipient-proposal")) return;
+    events.push({ ok: res.ok(), status: res.status(), url: res.url() });
+  });
+  return events;
+}
+
+async function completeSilverMesaSignerSetup(page: Page): Promise<boolean> {
+  const sendReady = page.getByTestId("simple-pro-send-for-review").or(page.getByTestId("simple-pro-send-for-signature"));
+  if (!(await sendReady.first().isVisible({ timeout: 4_000 }).catch(() => false))) {
+    const openSetup = page.getByRole("button", { name: /Complete signer details|Finalize signer details/i }).first();
+    if (await openSetup.isVisible().catch(() => false)) {
+      await openSetup.click();
+    }
+  }
+  for (const row of SILVER_MESA_SIGNER_FIELDS) {
+    await fillVisibleField(page, row.nameField, row.party.legalEntity);
+    await fillVisibleField(page, row.signerField, row.party.signerName);
+    await fillVisibleField(page, row.emailField, row.party.email);
+  }
+  const advance = page
+    .getByRole("button", {
+      name: /Finalize signer details and continue to review decision|Complete signer details|Save signer details|Continue to review/i,
+    })
+    .first();
+  if (await advance.isVisible().catch(() => false) && !(await advance.isDisabled().catch(() => true))) {
+    await advance.click();
+  }
+  return sendReady.first().isVisible({ timeout: 8_000 }).catch(() => false);
+}
+
+async function clickSilverMesaSendForReview(page: Page): Promise<boolean> {
+  const button = page.getByTestId("simple-pro-send-for-review");
+  if (!(await button.isVisible({ timeout: 8_000 }).catch(() => false))) {
+    if (!(await completeSilverMesaSignerSetup(page))) return false;
+  }
+  if (!(await button.isVisible({ timeout: 8_000 }).catch(() => false))) return false;
+  if (await button.isDisabled().catch(() => false)) return false;
+  await button.click();
+  return true;
+}
+
+test("four-party Silver Mesa notice email persists through recipient proposal, accept, and fresh reopen", async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(300_000);
+  const minted = captureRecipientMints(page);
+  const capturedIds = captureServerAgreementIds(page);
+  await seedCorePaidJourneyOwner(page);
+  await installQualityEvalPageGuards(page);
+  await page.goto("/app/create", { waitUntil: "domcontentloaded" });
+  await submitIntake(page, IRONCLAD_FOUR_PARTY_SILVER_MESA_INTAKE);
+  await expect(page.getByTestId("agreement-intake-clarification")).toHaveCount(0, { timeout: 45_000 });
+  await expect(page.getByTestId("milestone-payer-clarification-question")).toHaveCount(0, { timeout: 8_000 });
+
+  let ownerPaper = "";
+  await expect
+    .poll(
+      async () => {
+        ownerPaper = await articleText(page, SILVER_MESA);
+        return ownerPaper.includes("Ironclad Systems Group LLC") && ownerPaper.includes("Texas") ? ownerPaper.length : 0;
+      },
+      { timeout: 120_000 },
+    )
+    .toBeGreaterThan(400);
+  assertSilverMesaFourPartyPaper(ownerPaper, "author first draft");
+  expect(silverMesaNoticeAddress(ownerPaper), "author first draft notice").toBe(ORIGINAL_SILVER_NOTICE);
+
+  const agreementId = await waitForServerAgreementId(page, capturedIds);
+  expect(agreementId.length).toBeGreaterThan(8);
+  const firstSnap = await fetchOwnerCanonicalSnapshot(page, agreementId);
+  expect(firstSnap.ok, "canonical GET after create").toBeTruthy();
+  assertSilverMesaFourPartyPaper(firstSnap.corpus, "persisted first draft");
+  expect(silverMesaNoticeAddress(firstSnap.corpus)).toBe(ORIGINAL_SILVER_NOTICE);
+  expect(silverMesaNoticeAddress(firstSnap.corpus), "persisted and displayed notice must agree").toBe(
+    silverMesaNoticeAddress(ownerPaper),
+  );
+
+  const sent = await clickSilverMesaSendForReview(page);
+  expect(sent, "send-for-review must mount on the Silver Mesa four-party draft").toBeTruthy();
+  await expect
+    .poll(async () => (await fetchOwnerParties(page, agreementId)).length, { timeout: 30_000 })
+    .toBe(4);
+  const parties = await fetchOwnerParties(page, agreementId);
+  const silverRow = parties.find((candidate) => String(candidate.name || "").includes(SILVER_MESA));
+  expect(silverRow?.id, "Silver Mesa participant id").toBeTruthy();
+  const reviewMinted = await expect
+    .poll(() => mintedTokenForParticipant(minted, "review", String(silverRow?.id || "")), { timeout: 45_000 })
+    .toBeTruthy()
+    .then(() => mintedTokenForParticipant(minted, "review", String(silverRow?.id || "")));
+  const token = String((reviewMinted?.body as Record<string, unknown> | undefined)?.token || "");
+  expect(token.length, "Silver Mesa review token").toBeGreaterThan(12);
+
+  const recipient = await openRecipientHref(
+    browser,
+    `/agreements/${agreementId}/review?t=${encodeURIComponent(token)}`,
+  );
+  const recipientShell = recipient.getByTestId("recipient-document-shell");
+  await expect(recipientShell).toBeVisible({ timeout: 45_000 });
+  await expect(recipientShell).toContainText(SILVER_MESA, { timeout: 30_000 });
+  const recipientPaper = await recipientShell.innerText();
+  assertSilverMesaFourPartyPaper(recipientPaper, "recipient review before proposal");
+  expect(silverMesaNoticeAddress(recipientPaper)).toBe(ORIGINAL_SILVER_NOTICE);
+
+  const proposalEvents = captureProposalPosts(recipient);
+  const propose = recipient
+    .getByTestId("recipient-review-propose-updated-draft")
+    .or(recipient.getByRole("button", { name: /Suggest revision/i }));
+  await expect(propose.first()).toBeVisible({ timeout: 20_000 });
+  await propose.first().click();
+  const editor = recipient.getByTestId("recipient-edit-draft-textarea");
+  await expect(editor).toBeVisible({ timeout: 15_000 });
+  const proposedPaper = recipientPaper.split(ORIGINAL_SILVER_NOTICE).join(PROPOSED_SILVER_NOTICE);
+  expect(proposedPaper, "proposal must actually change the notice").toContain(PROPOSED_SILVER_NOTICE);
+  expect(proposedPaper).not.toContain(ORIGINAL_SILVER_NOTICE);
+  await editor.fill(proposedPaper);
+  expect(await editor.inputValue()).toContain(PROPOSED_SILVER_NOTICE);
+  expect(await editor.inputValue()).not.toContain(ORIGINAL_SILVER_NOTICE);
+  const compare = recipient.getByTestId("recipient-compare-versions-button");
+  if (await compare.isVisible().catch(() => false)) await compare.click();
+  const openSend = recipient
+    .getByTestId("recipient-open-send-suggested-edits-modal")
+    .or(recipient.getByRole("button", { name: /^Submit proposed update$/i }));
+  await expect(openSend.first()).toBeVisible({ timeout: 20_000 });
+  await openSend.first().click();
+  const confirm = recipient.getByTestId("recipient-send-suggested-edits-confirm");
+  await expect(confirm).toBeVisible({ timeout: 15_000 });
+  await confirm.click();
+  await expect
+    .poll(async () => /pending owner review/i.test(await recipient.locator("body").innerText()), { timeout: 20_000 })
+    .toBeTruthy();
+  await expect
+    .poll(() => proposalEvents.some((event) => event.ok && event.proposalId && event.url.endsWith("/recipient-proposal")), {
+      timeout: 15_000,
+    })
+    .toBeTruthy();
+  await recipient.context().close();
+
+  await page.goto(`/app/create?agreementId=${agreementId}`, { waitUntil: "domcontentloaded" });
+  let ownerBeforeAccept = "";
+  await expect
+    .poll(
+      async () => {
+        ownerBeforeAccept = await articleText(page, SILVER_MESA);
+        return ownerBeforeAccept.includes("Ironclad Systems Group LLC") ? ownerBeforeAccept.length : 0;
+      },
+      { timeout: 90_000 },
+    )
+    .toBeGreaterThan(400);
+  expect(silverMesaNoticeAddress(ownerBeforeAccept), "current accepted draft must keep the original notice").toBe(
+    ORIGINAL_SILVER_NOTICE,
+  );
+  expect(ownerBeforeAccept, "current accepted draft must not show the proposed notice yet").not.toContain(
+    PROPOSED_SILVER_NOTICE,
+  );
+  const pendingSnap = await fetchOwnerCanonicalSnapshot(page, agreementId);
+  expect(silverMesaNoticeAddress(pendingSnap.corpus)).toBe(ORIGINAL_SILVER_NOTICE);
+  expect(pendingSnap.corpus).not.toContain(PROPOSED_SILVER_NOTICE);
+
+  const applyEvents = captureApplyPosts(page);
+  await page.goto(`/app/review-changes/${encodeURIComponent(agreementId)}`, { waitUntil: "domcontentloaded" });
+  const loadError = page.getByTestId("owner-proposal-review-load-error");
+  expect(await loadError.isVisible({ timeout: 4_000 }).catch(() => false), "owner review must load").toBeFalsy();
+  const reviewBody = await page.locator("body").innerText();
+  expect(reviewBody, "proposal review must show the new address").toContain(PROPOSED_SILVER_NOTICE);
+  const accept = page.getByTestId("owner-proposal-review-accept");
+  await expect(accept).toBeVisible({ timeout: 20_000 });
+  await accept.scrollIntoViewIfNeeded();
+  await accept.click();
+  await expect
+    .poll(
+      () => applyEvents.some((event) => event.ok && event.url.includes("/apply")),
+      { timeout: 20_000 },
+    )
+    .toBeTruthy();
+  await expect(page.getByTestId("owner-proposal-accept-success")).toBeVisible({ timeout: 20_000 });
+
+  await page.goto(`/app/create?agreementId=${agreementId}`, { waitUntil: "domcontentloaded" });
+  let ownerAfterAccept = "";
+  await expect
+    .poll(
+      async () => {
+        ownerAfterAccept = await articleText(page, SILVER_MESA);
+        return ownerAfterAccept.includes("Ironclad Systems Group LLC") ? ownerAfterAccept.length : 0;
+      },
+      { timeout: 90_000 },
+    )
+    .toBeGreaterThan(400);
+  assertSilverMesaFourPartyPaper(ownerAfterAccept, "author after accept");
+  expect(silverMesaNoticeAddress(ownerAfterAccept)).toBe(PROPOSED_SILVER_NOTICE);
+  expect(ownerAfterAccept, "displayed paper must not restore the original notice").not.toContain(ORIGINAL_SILVER_NOTICE);
+  const acceptedSnap = await fetchOwnerCanonicalSnapshot(page, agreementId);
+  assertSilverMesaFourPartyPaper(acceptedSnap.corpus, "persisted after accept");
+  expect(silverMesaNoticeAddress(acceptedSnap.corpus)).toBe(PROPOSED_SILVER_NOTICE);
+  expect(acceptedSnap.corpus).not.toContain(ORIGINAL_SILVER_NOTICE);
+
+  const freshAuthorCtx = await browser.newContext({
+    viewport: page.viewportSize() ?? { width: 1280, height: 800 },
+  });
+  const freshAuthor = await freshAuthorCtx.newPage();
+  await seedCorePaidJourneyOwner(freshAuthor);
+  await installQualityEvalPageGuards(freshAuthor);
+  await freshAuthor.goto(`/app/create?agreementId=${agreementId}`, { waitUntil: "domcontentloaded" });
+  let reopenedAuthor = "";
+  await expect
+    .poll(
+      async () => {
+        reopenedAuthor = await articleText(freshAuthor, SILVER_MESA);
+        return reopenedAuthor.includes("Ironclad Systems Group LLC") ? reopenedAuthor.length : 0;
+      },
+      { timeout: 90_000 },
+    )
+    .toBeGreaterThan(400);
+  assertSilverMesaFourPartyPaper(reopenedAuthor, "fresh author session");
+  expect(silverMesaNoticeAddress(reopenedAuthor), "fresh author must keep accepted notice").toBe(PROPOSED_SILVER_NOTICE);
+  expect(reopenedAuthor, "fresh author must not restore original notice").not.toContain(ORIGINAL_SILVER_NOTICE);
+  const freshGet = await fetchOwnerCanonicalSnapshot(freshAuthor, agreementId);
+  expect(silverMesaNoticeAddress(freshGet.corpus)).toBe(PROPOSED_SILVER_NOTICE);
+  expect(freshGet.corpus).not.toContain(ORIGINAL_SILVER_NOTICE);
+  await freshAuthorCtx.close();
+
+  const freshRecipient = await openRecipientHref(
+    browser,
+    `/agreements/${agreementId}/review?t=${encodeURIComponent(token)}`,
+  );
+  const freshShell = freshRecipient.getByTestId("recipient-document-shell");
+  await expect(freshShell).toBeVisible({ timeout: 45_000 });
+  const reopenedRecipient = await freshShell.innerText();
+  assertSilverMesaFourPartyPaper(reopenedRecipient, "fresh recipient session");
+  expect(silverMesaNoticeAddress(reopenedRecipient), "fresh recipient must keep accepted notice").toBe(
+    PROPOSED_SILVER_NOTICE,
+  );
+  expect(reopenedRecipient, "fresh recipient must not restore original notice").not.toContain(ORIGINAL_SILVER_NOTICE);
+  await freshRecipient.context().close();
 });
