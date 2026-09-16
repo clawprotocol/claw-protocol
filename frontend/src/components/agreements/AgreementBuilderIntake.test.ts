@@ -1278,5 +1278,6 @@ describe("homepage starter_review mount (no paid Pro SoT)", () => {
   it("send-for-review prefers the bound Apply snapshot over a guided shrink", () => {
     expect(intake).toContain("preferBoundReviewRevisionOverDisplayCorpus");
     expect(intake).toContain("verified_server_canonical_review_snapshot");
+    expect(intake).toContain("partiesPayloadPreservingIds");
   });
 });

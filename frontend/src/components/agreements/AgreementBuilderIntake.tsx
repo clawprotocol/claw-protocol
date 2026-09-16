@@ -1486,6 +1486,7 @@ import {
   mergeDraftPartiesFromCanonicalIdentities,
   resolveCanonicalPartyIdentitiesFromSignerSetup,
 } from "./guidedDealCompletion/signerPartyIdentity";
+import { partiesPayloadPreservingIds } from "./preserveConfirmedPartyIds";
 import {
   GUIDED_CONTINUE_TO_FINAL_REVIEW_CTA,
   GUIDED_FINISHING_UPDATED_AGREEMENT,
@@ -18327,18 +18328,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       unresolvedSubjects: UnresolvedIdentitySubject[];
       additionalTerms?: string | null;
     }) => {
-      const nextParties = (args.parties || [])
-        .filter((party) => {
-          const name = String(party.name || "").trim();
-          return name && !/^\d+\s+/.test(name);
-        })
-        .map((party) => ({
-          name: party.name,
-          role: party.role,
-          ...(party.email ? { email: party.email } : {}),
-          ...(party.signerName ? { signerName: party.signerName } : {}),
-          ...(party.signerTitle ? { signerTitle: party.signerTitle } : {}),
-        }));
+      const nextParties = partiesPayloadPreservingIds(
+        args.parties || [],
+        draftSnapshotRef.current?.parties || [],
+      );
       await postAgreementFieldUpdate(args.agreementId, "parties", nextParties);
       await postAgreementFieldUpdate(args.agreementId, "unresolved_identity_v1", args.unresolvedSubjects);
       const nextDraft = {
