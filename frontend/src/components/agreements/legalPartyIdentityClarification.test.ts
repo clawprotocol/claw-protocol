@@ -14,6 +14,7 @@ import {
   IDENTITY_RESOLUTION_MARKER,
   isIdentityClarificationQuestion,
   mergeUnresolvedIdentityIntoText,
+  paperNamesPersonAsLegalParty,
   persistableIdentityResolution,
 } from "./legalPartyIdentityClarification";
 import { bindRepresentativesToLegalParties } from "./legalPartyRepresentativeBind";
@@ -583,6 +584,8 @@ describe("legal party identity clarification", () => {
     expect(after).toMatch(/ADVISOR:\s*\nAlex Rivera/);
     expect(after).not.toMatch(/SERVICE PROVIDER:\s*\nIronvale Manufacturing Inc/);
     expect(after).not.toMatch(/Advisor shall/);
+    expect(paperNamesPersonAsLegalParty(before, "Alex Rivera")).toBe(false);
+    expect(paperNamesPersonAsLegalParty(after, "Alex Rivera")).toBe(true);
     const savedRoles = applyOpeningPaperRolesToParties(
       [
         { name: HARBOR, role: "Client" },

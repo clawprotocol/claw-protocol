@@ -82,6 +82,23 @@ function escapeRe(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** True only when the name is a contracting party, not a notice Attn or signer line. */
+export function paperNamesPersonAsLegalParty(documentText: string, name: string): boolean {
+  const doc = (documentText || "").replace(/\r\n/g, "\n");
+  const trimmed = String(name || "").replace(/\.$/, "").trim();
+  if (!trimmed || trimmed.length < 2) return false;
+  const n = escapeRe(trimmed);
+  const openingCut = doc.search(/\n\s*(?:\d+\.\s+)?(?:PARTIES AND ROLES|NOTICES|IN WITNESS)\b/i);
+  const opening = openingCut >= 0 ? doc.slice(0, openingCut) : doc.slice(0, 700);
+  const openingParty = new RegExp(`entered into by and between[\\s\\S]*\\b${n}\\b`, "i");
+  const roleAppositive = new RegExp(`\\b${n}\\s*\\(\\s*["“][^"”]+["”]\\s*\\)`, "i");
+  const execHeading = new RegExp(
+    `(?:^|\\n)\\s*(?:ADVISOR|CONSULTANT|CLIENT|PARTY(?:\\s+\\d+)?)\\s*:\\s*\\n\\s*${n}\\b`,
+    "i",
+  );
+  return openingParty.test(opening) || roleAppositive.test(opening) || execHeading.test(doc);
+}
+
 export function isIdentityClarificationQuestion(question: string): boolean {
   return IDENTITY_SIGNING_OR_PARTY_QUESTION_RE.test((question || "").trim());
 }
@@ -904,7 +921,7 @@ export function applyIdentityResolutionToAuthorizedPaper(
   }
   for (const person of individuals) {
     const role = displayRoleForParty(person, doc);
-    if (!new RegExp(`\\b${escapeRe(person.name)}\\b`, "i").test(doc)) {
+    if (!paperNamesPersonAsLegalParty(doc, person.name)) {
       doc = doc.replace(
         /(entered into by and between\s+)([\s\S]*?)(\.\s+(?:Consultant|Client|The |This |[A-Z][a-z]+ and ))/,
         (full, prefix: string, middle: string, end: string) =>

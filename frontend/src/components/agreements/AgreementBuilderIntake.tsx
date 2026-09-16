@@ -1166,6 +1166,7 @@ import {
   applyIdentityClarificationAnswers,
   applyIdentityResolutionToAuthorizedPaper,
   applyOpeningPaperRolesToParties,
+  paperNamesPersonAsLegalParty,
   bindSignerDetailsToConfirmedParties,
   classifyUnresolvedIdentitySubjects,
   customerMentionedUnresolvedFromIntake,
@@ -18398,9 +18399,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ).trim();
         const paperHasConfirmedParties = nextParties.every((party) => {
           const name = String(party.name || "").replace(/\.$/, "").trim();
-          return name.length >= 2 && editable.toLowerCase().includes(name.toLowerCase());
+          return name.length >= 2 && paperNamesPersonAsLegalParty(editable, name);
         });
-        if (editable.length >= PAID_PRO_AUTHORITY_MIN_LEN && paperHasConfirmedParties) {
+        const missingPartyOnPaper = nextParties.some((party) => {
+          const name = String(party.name || "").replace(/\.$/, "").trim();
+          return name.length >= 2 && !paperNamesPersonAsLegalParty(editable, name);
+        });
+        if (editable.length >= PAID_PRO_AUTHORITY_MIN_LEN && (paperHasConfirmedParties || missingPartyOnPaper)) {
           const patched = applyIdentityResolutionToAuthorizedPaper(editable, nextParties).trim();
           if (patched.length >= PAID_PRO_AUTHORITY_MIN_LEN && patched !== editable) {
             await commitPaidProUserApprovedRevision(patched, "confirmed_signer_details_revision");
@@ -18572,13 +18577,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         agreementDocumentTextRef.current ||
         ""
       ).trim();
-      const persistIdentityAndClose = async (revisionId: string) => {
+      const persistIdentityAndClose = async (revisionId: string, paintedCorpus?: string) => {
         await persistConfirmedIdentityIntoLiveDraft({
           agreementId: captured.agreementId,
           parties: nextStructured.parties || [],
           unresolvedSubjects: identityApplied.unresolvedSubjects,
           additionalTerms: nextStructured.additional_terms,
         });
+        let committedPlain = (paintedCorpus || "").trim();
+        if (committedPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+          const latest = await fetchCanonicalReviewSnapshot({ agreementId: captured.agreementId });
+          if (latest.ok) committedPlain = String(latest.snapshot.corpus_plain || "").trim();
+        }
+        if (committedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          setAgreementDocumentText(committedPlain);
+          acceptedReviewCorpusRef.current = committedPlain;
+          lastKnownGoodAuthoritativeDraftRef.current = committedPlain;
+          setReviewDocRefreshTick((n) => n + 1);
+        }
         markPaymentClarificationApplied(
           {
             userId: captured.userId,
@@ -18648,12 +18664,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               },
             });
             const newRevision = authorizedPaidProRevisionId(outcome.corpus) || hashPaidProCorpus(outcome.corpus);
-            await persistIdentityAndClose(newRevision);
+            await persistIdentityAndClose(newRevision, outcome.corpus);
             return;
           }
           if (identityLines.length) {
             setAgreementDocumentText(patched);
-            await persistIdentityAndClose(captured.revisionId);
+            await persistIdentityAndClose(captured.revisionId, patched);
             return;
           }
           throw new Error("payment_clarification_apply_unavailable");

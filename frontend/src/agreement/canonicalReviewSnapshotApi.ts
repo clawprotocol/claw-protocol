@@ -597,15 +597,15 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
   // authority. The prior accepted digest stays historical (superseded, not rewritten).
   if (
     args.allowSupersedingRevision &&
-    priorAcceptedId &&
+    persisted.snapshot.snapshot_id &&
     persisted.snapshot.snapshot_id !== priorAcceptedId
   ) {
     const accepted = await acceptCanonicalReviewSnapshot({
       agreementId: id,
       snapshotId: persisted.snapshot.snapshot_id,
       expectedDigest: persisted.snapshot.corpus_sha256,
-      expectedAcceptedSnapshotId: priorAcceptedId,
-      allowRevision: true,
+      expectedAcceptedSnapshotId: priorAcceptedId || undefined,
+      allowRevision: Boolean(priorAcceptedId),
       displaySnapshotId: persisted.snapshot.snapshot_id,
       displayDigest: persisted.snapshot.corpus_sha256,
       displayLength: persisted.snapshot.corpus_length,
