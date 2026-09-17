@@ -16,6 +16,10 @@ import {
   type AgreementTitleScopeDecision,
 } from "./paidProAgreementTitleScope";
 import { repairPaidProDocumentTitleOpening } from "./paidProDocumentTitleOpeningRepair";
+import {
+  declaredRoleParentheticalForEntity,
+  overlayDeclaredOpeningRoleParentheticals,
+} from "./paidProOpeningRoleLabelConsistency";
 
 export const PAID_PRO_MUTUAL_CONSULTING_TITLE = "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT";
 export const PAID_PRO_CONSULTING_TITLE = "CONSULTING AND IMPLEMENTATION AGREEMENT";
@@ -578,8 +582,19 @@ export function detectPaidProMalformedMultiPartyOpening(
   const amongCount = (openingScan.match(/\bby\s+and\s+among\b/gi) ?? []).length;
   const betweenCount = (openingScan.match(/\bby\s+and\s+between\b/gi) ?? []).length;
   if (enteredCount > 1 || (amongCount > 0 && betweenCount > 0)) return true;
-  if (records.some((r) => !openingScan.includes(r.fullLegalName.trim()))) return true;
+  const openingScanIdentity = openingScan.replace(/,/g, "");
+  if (
+    records.some((r) => {
+      const name = r.fullLegalName.trim();
+      if (!name) return true;
+      if (openingScan.includes(name)) return false;
+      return !openingScanIdentity.includes(name.replace(/,/g, ""));
+    })
+  ) {
+    return true;
+  }
   const roleMarks = records.filter((r) => {
+    if (declaredRoleParentheticalForEntity(openingScan, r.fullLegalName)) return true;
     const role = r.roleLabel.trim();
     if (!role || role.toLowerCase() === r.fullLegalName.trim().toLowerCase()) return false;
     return new RegExp(`\\(\\s*["']?${role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*\\)`, "i").test(
@@ -630,15 +645,16 @@ export function repairPaidProMultiPartyAgreementOpening(
     body = titleRepair.text;
     repairs.push(...titleRepair.repairs);
   }
-  const adjacent = repairAdjacentDuplicatePartyNamesInOpening(body, records);
+  const boundRecords = overlayDeclaredOpeningRoleParentheticals(records, body);
+  const adjacent = repairAdjacentDuplicatePartyNamesInOpening(body, boundRecords);
   body = adjacent.text;
   repairs.push(...adjacent.repairs);
 
-  if (!detectPaidProMalformedMultiPartyOpening(body, records)) {
+  if (!detectPaidProMalformedMultiPartyOpening(body, boundRecords)) {
     return { text: body, repairs };
   }
 
-  const legalNames = new Set(records.map((r) => r.fullLegalName.trim().toLowerCase()).filter(Boolean));
+  const legalNames = new Set(boundRecords.map((r) => r.fullLegalName.trim().toLowerCase()).filter(Boolean));
   const stripped = stripLeadingStandalonePartyLines(body, legalNames);
   if (stripped.stripped > 0) {
     body = stripped.text;
@@ -656,7 +672,7 @@ export function repairPaidProMultiPartyAgreementOpening(
     ? `${remainderBody}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trim()
     : remainderBody;
   const preservedTitle = readCorpusDocumentTitleUpper(body);
-  const opening = buildCanonicalPaidProMultiPartyOpeningRecital(records, intakeText, preservedTitle);
+  const opening = buildCanonicalPaidProMultiPartyOpeningRecital(boundRecords, intakeText, preservedTitle);
   repairs.push("opening:prepend_canonical_multiparty_recital");
   if (preservedPrefix) repairs.push("opening:preserve_pre_section_one_operative_blocks");
   return { text: `${opening}${remainder}`, repairs };
@@ -668,10 +684,11 @@ export function ensurePaidProMultiPartyAgreementOpening(
   intakeText?: string | null,
 ): { text: string; repairs: string[] } {
   if (records.length < 3) return { text, repairs: [] };
-  if (!detectPaidProMalformedMultiPartyOpening(text, records)) {
+  const boundRecords = overlayDeclaredOpeningRoleParentheticals(records, text);
+  if (!detectPaidProMalformedMultiPartyOpening(text, boundRecords)) {
     return { text, repairs: [] };
   }
-  return repairPaidProMultiPartyAgreementOpening(text, records, intakeText);
+  return repairPaidProMultiPartyAgreementOpening(text, boundRecords, intakeText);
 }
 
 /**

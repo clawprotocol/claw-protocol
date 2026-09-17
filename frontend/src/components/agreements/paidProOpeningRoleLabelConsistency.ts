@@ -5,7 +5,11 @@
 
 import type { CanonicalPartyIdentityRecord } from "./canonicalPartyIdentityResolver";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
-import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import {
+  isAuthoritativeLegalEntityName,
+  isOccupationalOrJobTitlePartyName,
+  isPartyMetadataRoleLabel,
+} from "./paidProPartyNamePreserve";
 
 const OPENING_ROLE_SCAN_MAX = 12_000;
 const WITNESS_RE = /\bIN WITNESS WHEREOF\b/i;
@@ -74,6 +78,35 @@ function isSlotTemplateRole(role: string): boolean {
   return /^party\s+\d+$/i.test(role);
 }
 
+/** Manifest/contact label that must not replace a contractual parenthetical already on paper. */
+export function roleLabelIsNonContractualIdentity(roleLabel: string, legalName: string): boolean {
+  const role = String(roleLabel || "").replace(/\s+/g, " ").trim();
+  const name = String(legalName || "").replace(/\s+/g, " ").trim();
+  if (!role) return true;
+  if (isSlotTemplateRole(role)) return true;
+  if (isPartyMetadataRoleLabel(role)) return true;
+  if (isOccupationalOrJobTitlePartyName(role)) return true;
+  const roleKey = role.replace(/[.,]+$/g, "").toLowerCase();
+  const nameKey = name.replace(/[.,]+$/g, "").toLowerCase();
+  if (roleKey === nameKey) return true;
+  if (nameKey.startsWith(`${roleKey} `)) return true;
+  if (isAuthoritativeLegalEntityName(role) && roleKey.length >= 8) return true;
+  return false;
+}
+
+/** Prefer `Entity ("Role")` already on the paper when the slot label is identity/contact metadata. */
+export function overlayDeclaredOpeningRoleParentheticals<T extends { fullLegalName: string; roleLabel: string }>(
+  records: readonly T[],
+  corpus: string,
+): T[] {
+  return records.map((rec) => {
+    const declared = declaredRoleParentheticalForEntity(corpus, rec.fullLegalName);
+    if (!declared) return rec;
+    if (!roleLabelIsNonContractualIdentity(rec.roleLabel, rec.fullLegalName)) return rec;
+    return { ...rec, roleLabel: declared };
+  });
+}
+
 function repairEntityRoleParentheticalsInSlice(
   slice: string,
   legalName: string,
@@ -92,6 +125,9 @@ function repairEntityRoleParentheticalsInSlice(
     const foundLooksLikeNameShort =
       legalName.toLowerCase().startsWith(found.toLowerCase()) ||
       legalName.toLowerCase().includes(` ${found.toLowerCase()}`);
+    if (roleLabelIsNonContractualIdentity(canonicalRoleLabel, legalName) && !foundLooksLikeNameShort) {
+      return full;
+    }
     if (
       isSlotTemplateRole(canonicalRoleLabel) &&
       found.length >= 2 &&

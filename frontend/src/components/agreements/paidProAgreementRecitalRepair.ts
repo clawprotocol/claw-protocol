@@ -13,7 +13,10 @@ import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthorit
 import { authorityPartiesToCanonicalPartyIdentities } from "./paidProSignerMetadataAuthority";
 import { overlayCorpusDeclaredRoleLabels } from "./paidProAcceptedCorpusPartyRoles";
 import { ensurePaidProMultiPartyAgreementOpening, ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
-import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
+import {
+  overlayDeclaredOpeningRoleParentheticals,
+  repairOpeningRecitalRoleLabelsFromManifest,
+} from "./paidProOpeningRoleLabelConsistency";
 import {
   corpusDeclaresConsultantClientOpening,
   restoreDeclaredConsultantClientPaper,
@@ -35,8 +38,11 @@ export function repairMalformedPaidProAgreementRecital(
   repairs.push(...phrases.repairs);
 
   const records = parties?.length
-    ? overlayCorpusDeclaredRoleLabels(
-        canonicalPartyRecordsFromSignerIdentities(authorityPartiesToCanonicalPartyIdentities(parties)),
+    ? overlayDeclaredOpeningRoleParentheticals(
+        overlayCorpusDeclaredRoleLabels(
+          canonicalPartyRecordsFromSignerIdentities(authorityPartiesToCanonicalPartyIdentities(parties)),
+          out,
+        ),
         out,
       )
     : undefined;
