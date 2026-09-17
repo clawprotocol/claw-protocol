@@ -4,6 +4,8 @@
  * the live local API. Generation intercept is not a substitute for persist.
  */
 import { createHash } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, test, type APIRequestContext, type Browser, type Page } from "@playwright/test";
 import { TEST487_FOUR_PARTY } from "../../src/components/agreements/paidProTest487ProductionValidationFixtures";
 import { RELEASE_SCOPE_FOUR_PARTY_FIRST_DRAFT_SANITIZED } from "../../src/launch/fixtures/releaseScopeMultiparty.sanitized";
@@ -607,41 +609,150 @@ async function readSilverMesaCompanyEmailAssignments(
   return rows;
 }
 
+const SILVER_MESA_REVIEW_FIRST_CONSOLE =
+  /\[review-first-|\[send-flow-|\[guided-review-|\[review-email-party-roles|\[review-link-|\[review-first-persist/;
+
+type SilverMesaNetworkEvent = {
+  kind: "request" | "requestfailed" | "response";
+  at: number;
+  method: string;
+  path: string;
+  status?: number;
+  ok?: boolean;
+  failure?: string;
+  partyId?: string;
+  email?: string;
+  mode?: string;
+  revisionHint?: string;
+};
+
+type SilverMesaConsoleEvent = { at: number; type: string; text: string };
+
 type SilverMesaHandoffTrace = {
   mint: Array<{ status: number; ok: boolean; partyId: string; email: string; mode: string }>;
   saves: Array<{ status: number; ok: boolean; method: string; path: string }>;
+  network: SilverMesaNetworkEvent[];
+  console: SilverMesaConsoleEvent[];
+  pageErrors: Array<{ at: number; message: string }>;
 };
 
+function silverMesaPathname(url: string): string {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return url.replace(/\?.*$/, "");
+  }
+}
+
+function redactSilverMesaTraceText(text: string): string {
+  return text
+    .replace(/([?&]t=)[^&\s"'\\]+/gi, "$1[redacted]")
+    .replace(/("token"\s*:\s*")[^"]+/gi, "$1[redacted]")
+    .replace(/(Bearer\s+)\S+/gi, "$1[redacted]");
+}
+
+function sanitizeSilverMesaPostData(raw: string | null): {
+  partyId: string;
+  email: string;
+  mode: string;
+  revisionHint: string;
+} {
+  let req: Record<string, unknown> = {};
+  if (raw) {
+    try {
+      req = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      req = {};
+    }
+  }
+  const partyId = String(req.recipient_party_id || req.party_id || "").trim();
+  const revisionHint = String(
+    req.revision_id || req.snapshot_id || req.canonical_hash || req.claimed_digest || "",
+  )
+    .trim()
+    .slice(0, 16);
+  return {
+    partyId,
+    email: String(req.email || req.recipient_email || "").trim(),
+    mode: String(req.mode || "").trim() || (String(req.recipient_party_id || "").trim() ? "review" : ""),
+    revisionHint,
+  };
+}
+
+function isSilverMesaHandoffNetwork(url: string, method: string): boolean {
+  if (url.includes("/recipient-access-token") && method === "POST") return true;
+  if (!/\/api\/agreements\//.test(url)) return false;
+  if (method !== "POST" && method !== "PUT" && method !== "PATCH") return false;
+  if (url.includes("/recipient-proposal")) return false;
+  return true;
+}
+
 function captureSilverMesaHandoffTrace(page: Page): SilverMesaHandoffTrace {
-  const trace: SilverMesaHandoffTrace = { mint: [], saves: [] };
+  const trace: SilverMesaHandoffTrace = { mint: [], saves: [], network: [], console: [], pageErrors: [] };
+  page.on("console", (msg) => {
+    const text = redactSilverMesaTraceText(msg.text());
+    if (!SILVER_MESA_REVIEW_FIRST_CONSOLE.test(text) && !/handoff_exception|create_links/.test(text)) return;
+    trace.console.push({ at: Date.now(), type: msg.type(), text: text.slice(0, 1200) });
+  });
+  page.on("pageerror", (err) => {
+    trace.pageErrors.push({
+      at: Date.now(),
+      message: redactSilverMesaTraceText(String(err?.message || err)).slice(0, 400),
+    });
+  });
+  page.on("request", (req) => {
+    const url = req.url();
+    const method = req.method();
+    if (!isSilverMesaHandoffNetwork(url, method)) return;
+    const sanitized = sanitizeSilverMesaPostData(req.postData());
+    trace.network.push({
+      kind: "request",
+      at: Date.now(),
+      method,
+      path: silverMesaPathname(url),
+      ...sanitized,
+    });
+  });
+  page.on("requestfailed", (req) => {
+    const url = req.url();
+    const method = req.method();
+    if (!isSilverMesaHandoffNetwork(url, method)) return;
+    const sanitized = sanitizeSilverMesaPostData(req.postData());
+    trace.network.push({
+      kind: "requestfailed",
+      at: Date.now(),
+      method,
+      path: silverMesaPathname(url),
+      failure: req.failure()?.errorText || "requestfailed",
+      ...sanitized,
+    });
+  });
   page.on("response", (res) => {
     const url = res.url();
     const method = res.request().method();
+    if (!isSilverMesaHandoffNetwork(url, method)) return;
+    const sanitized = sanitizeSilverMesaPostData(res.request().postData());
+    const path = silverMesaPathname(url);
+    trace.network.push({
+      kind: "response",
+      at: Date.now(),
+      method,
+      path,
+      status: res.status(),
+      ok: res.ok(),
+      ...sanitized,
+    });
     if (url.includes("/recipient-access-token") && method === "POST") {
-      let req: Record<string, unknown> = {};
-      try {
-        req = (res.request().postDataJSON() as Record<string, unknown>) || {};
-      } catch {
-        req = {};
-      }
       trace.mint.push({
         status: res.status(),
         ok: res.ok(),
-        partyId: String(req.recipient_party_id || req.party_id || "").trim(),
-        email: String(req.email || req.recipient_email || "").trim(),
-        mode: String(req.mode || "").trim() || "review",
+        partyId: sanitized.partyId,
+        email: sanitized.email,
+        mode: sanitized.mode || "review",
       });
       return;
     }
-    if (!/\/api\/agreements\//.test(url)) return;
-    if (method !== "POST" && method !== "PUT" && method !== "PATCH") return;
-    if (url.includes("/recipient-access-token") || url.includes("/recipient-proposal")) return;
-    let path = url;
-    try {
-      path = new URL(url).pathname;
-    } catch {
-      path = url.replace(/\?.*$/, "");
-    }
+    if (url.includes("/recipient-access-token")) return;
     trace.saves.push({ status: res.status(), ok: res.ok(), method, path });
   });
   return trace;
@@ -657,7 +768,65 @@ function summarizeHandoffTrace(trace: SilverMesaHandoffTrace): string {
       mode: row.mode,
     })),
     saves: trace.saves,
+    network: trace.network.map((row) => ({
+      kind: row.kind,
+      method: row.method,
+      path: row.path,
+      status: row.status ?? null,
+      ok: row.ok ?? null,
+      failure: row.failure ?? null,
+      partyId: row.partyId ? `${row.partyId.slice(0, 8)}…` : "",
+      email: row.email || "",
+      mode: row.mode || "",
+      revisionHint: row.revisionHint || "",
+    })),
+    console: trace.console,
+    pageErrors: trace.pageErrors,
   });
+}
+
+function writeSilverMesaHandoffEvidence(trace: SilverMesaHandoffTrace, label: string): void {
+  const dir =
+    process.env.FOUR_PARTY_PERSIST_OUTPUT ||
+    join("evals/commercial-readiness/results/four-party-email-reopen", "local");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `silver-mesa-handoff-trace-${label}.json`), summarizeHandoffTrace(trace), "utf8");
+}
+
+function silverMesaCurrentAttemptOutcome(args: {
+  startedAt: number;
+  copyLinksVisible: boolean;
+  creatingVisible: boolean;
+  failedVisible: boolean;
+  console: SilverMesaConsoleEvent[];
+  network: SilverMesaNetworkEvent[];
+  pageErrors: Array<{ at: number; message: string }>;
+}): "pending" | "links" | "failed" {
+  const after = {
+    console: args.console.filter((row) => row.at >= args.startedAt),
+    network: args.network.filter((row) => row.at >= args.startedAt),
+    pageErrors: args.pageErrors.filter((row) => row.at >= args.startedAt),
+  };
+  const handoffStart = after.console.some((row) => row.text.includes("[review-first-handoff-start]"));
+  const mintStart = after.console.some((row) => row.text.includes("[review-first-mint-start]"));
+  const mintSuccess = after.console.some(
+    (row) => row.text.includes("[review-first-mint-success]") || row.text.includes("[review-first-link-created]"),
+  );
+  const handoffFailure = after.console.some(
+    (row) =>
+      row.text.includes("[review-first-error]") ||
+      row.text.includes("[review-first-mint-error]") ||
+      row.text.includes("[review-first-inline-error-rendered]"),
+  );
+  const mintRequestFailed = after.network.some(
+    (row) => row.kind === "requestfailed" && row.path.includes("recipient-access-token"),
+  );
+  if (args.copyLinksVisible || mintSuccess) return "links";
+  if (args.creatingVisible) return "pending";
+  const attemptStarted = handoffStart || mintStart;
+  if (attemptStarted && (handoffFailure || mintRequestFailed || after.pageErrors.length > 0)) return "failed";
+  if (attemptStarted && args.failedVisible && !args.creatingVisible) return "failed";
+  return "pending";
 }
 
 function silverMesaSendForReviewControl(page: Page) {
@@ -682,6 +851,14 @@ function silverMesaLinksFailedBanner(page: Page) {
   return page.getByText(/Links were not created|Review links were not created/i).first();
 }
 
+function silverMesaCreatingLinksBanner(page: Page) {
+  return page
+    .getByTestId("journey-action-banner")
+    .filter({ has: page.locator('[data-journey-action-kind="working"][data-journey-action-id="create_links"]') })
+    .or(page.getByText(/^Creating links$/i))
+    .first();
+}
+
 async function waitForSilverMesaReviewOutcome(
   page: Page,
 ): Promise<"setup" | "links" | "failed" | "none"> {
@@ -689,13 +866,16 @@ async function waitForSilverMesaReviewOutcome(
   await expect
     .poll(
       async () => {
+        if (await silverMesaCopyReviewLinkControl(page).isVisible().catch(() => false)) {
+          outcome = "links";
+          return "links";
+        }
         if (await readVisibleField(page, SILVER_MESA_SIGNER_FIELDS[0]!.emailFields)) {
           outcome = "setup";
           return "setup";
         }
-        if (await silverMesaCopyReviewLinkControl(page).isVisible().catch(() => false)) {
-          outcome = "links";
-          return "links";
+        if (await silverMesaCreatingLinksBanner(page).isVisible().catch(() => false)) {
+          return "pending";
         }
         if (await silverMesaLinksFailedBanner(page).isVisible().catch(() => false)) {
           outcome = "failed";
@@ -707,6 +887,40 @@ async function waitForSilverMesaReviewOutcome(
         ) {
           outcome = "setup";
           return "setup";
+        }
+        return "pending";
+      },
+      { timeout: 20_000 },
+    )
+    .not.toBe("pending")
+    .catch(() => undefined);
+  return outcome;
+}
+
+async function waitForCurrentSilverMesaReviewAttempt(
+  page: Page,
+  trace: SilverMesaHandoffTrace,
+  startedAt: number,
+): Promise<"links" | "failed" | "timeout"> {
+  let outcome: "links" | "failed" | "timeout" = "timeout";
+  await expect
+    .poll(
+      async () => {
+        const copyLinksVisible = await silverMesaCopyReviewLinkControl(page).isVisible().catch(() => false);
+        const creatingVisible = await silverMesaCreatingLinksBanner(page).isVisible().catch(() => false);
+        const failedVisible = await silverMesaLinksFailedBanner(page).isVisible().catch(() => false);
+        const next = silverMesaCurrentAttemptOutcome({
+          startedAt,
+          copyLinksVisible,
+          creatingVisible,
+          failedVisible,
+          console: trace.console,
+          network: trace.network,
+          pageErrors: trace.pageErrors,
+        });
+        if (next !== "pending") {
+          outcome = next;
+          return next;
         }
         return "pending";
       },
@@ -754,8 +968,11 @@ async function completeSilverMesaReviewerSetup(page: Page): Promise<"setup" | "h
     await sendForReview.click();
     const outcome = await waitForSilverMesaReviewOutcome(page);
     if (outcome === "links") return "handoff";
-    if (outcome === "failed") return "handoff";
-    if (outcome !== "setup") return "missing";
+    if (outcome === "failed") {
+      if (!(await readVisibleField(page, SILVER_MESA_SIGNER_FIELDS[0]!.emailFields))) return "handoff";
+    } else if (outcome !== "setup") {
+      return "missing";
+    }
     const setupRoot = page.locator("[data-claw-recipient-setup]").first();
     if (await setupRoot.isVisible({ timeout: 2_000 }).catch(() => false)) {
       await setupRoot.scrollIntoViewIfNeeded();
@@ -789,55 +1006,75 @@ async function completeSilverMesaReviewerSetup(page: Page): Promise<"setup" | "h
   return "setup";
 }
 
+async function throwSilverMesaLinksNotCreated(page: Page, trace: SilverMesaHandoffTrace, label: string): Promise<never> {
+  writeSilverMesaHandoffEvidence(trace, label);
+  const visiblePairs = await readSilverMesaCompanyEmailAssignments(page).catch(() => []);
+  throw new Error(
+    `review_links_not_created label=${label} visible=${JSON.stringify(visiblePairs)} ${summarizeHandoffTrace(trace)}`,
+  );
+}
+
+async function clickSilverMesaCreateOrRetry(page: Page): Promise<boolean> {
+  const createLinks = silverMesaCreateReviewLinksControl(page);
+  if ((await createLinks.isVisible().catch(() => false)) && !(await createLinks.isDisabled().catch(() => true))) {
+    await createLinks.click();
+    return true;
+  }
+  const screenRetry = page
+    .getByTestId("simple-pro-review-first-retry")
+    .or(page.getByRole("button", { name: /^Retry$/i }))
+    .first();
+  if ((await screenRetry.isVisible().catch(() => false)) && !(await screenRetry.isDisabled().catch(() => true))) {
+    await screenRetry.click();
+    return true;
+  }
+  const bannerRetry = page.getByTestId("journey-action-remedy").first();
+  if ((await bannerRetry.isVisible().catch(() => false)) && !(await bannerRetry.isDisabled().catch(() => true))) {
+    await bannerRetry.click();
+    return true;
+  }
+  return false;
+}
+
 async function clickSilverMesaSendForReview(page: Page, trace: SilverMesaHandoffTrace): Promise<boolean> {
   const setupState = await completeSilverMesaReviewerSetup(page);
   if (setupState === "missing") return false;
-  const createLinks = silverMesaCreateReviewLinksControl(page);
+  if (setupState === "handoff" && (await silverMesaCopyReviewLinkControl(page).isVisible().catch(() => false))) {
+    writeSilverMesaHandoffEvidence(trace, "already-ready");
+    return true;
+  }
   const sendForReview = silverMesaSendForReviewControl(page);
-  if ((await createLinks.isVisible().catch(() => false)) && !(await createLinks.isDisabled().catch(() => true))) {
-    await createLinks.click();
-  } else if (
+  const startedAt = Date.now();
+  const createClicked = await clickSilverMesaCreateOrRetry(page);
+  if (
+    !createClicked &&
     setupState === "setup" &&
     (await sendForReview.isVisible().catch(() => false)) &&
     !(await sendForReview.isDisabled().catch(() => true))
   ) {
     await sendForReview.click();
   }
-  const failed = silverMesaLinksFailedBanner(page);
-  if (await failed.isVisible({ timeout: 12_000 }).catch(() => false)) {
-    const retry = page.getByRole("button", { name: /^Try again$/i }).first();
-    if (await retry.isVisible().catch(() => false) && !(await retry.isDisabled().catch(() => true))) {
-      await retry.click();
-    } else if (
-      (await createLinks.isVisible().catch(() => false)) &&
-      !(await createLinks.isDisabled().catch(() => true))
-    ) {
-      await createLinks.click();
-    }
-    if (await failed.isVisible({ timeout: 12_000 }).catch(() => false)) {
-      const visiblePairs = await readSilverMesaCompanyEmailAssignments(page);
-      throw new Error(
-        `review_links_not_created visible=${JSON.stringify(visiblePairs)} ${summarizeHandoffTrace(trace)}`,
+  let outcome = await waitForCurrentSilverMesaReviewAttempt(page, trace, startedAt);
+  if (outcome === "links") {
+    writeSilverMesaHandoffEvidence(trace, "first-attempt-links");
+    return true;
+  }
+  if (outcome === "failed" || outcome === "timeout") {
+    const retryStartedAt = Date.now();
+    const retried = await clickSilverMesaCreateOrRetry(page);
+    if (!retried) {
+      await throwSilverMesaLinksNotCreated(
+        page,
+        trace,
+        outcome === "timeout" ? "first-attempt-no-completion" : "first-attempt-failed-no-retry",
       );
     }
-  }
-  await expect
-    .poll(
-      async () => {
-        if (await silverMesaCopyReviewLinkControl(page).isVisible().catch(() => false)) return "links";
-        if (trace.mint.some((row) => row.ok && row.mode === "review")) return "minted";
-        if (await silverMesaLinksFailedBanner(page).isVisible().catch(() => false)) return "failed";
-        return "pending";
-      },
-      { timeout: 20_000 },
-    )
-    .not.toBe("pending")
-    .catch(() => undefined);
-  if (await silverMesaLinksFailedBanner(page).isVisible().catch(() => false)) {
-    const visiblePairs = await readSilverMesaCompanyEmailAssignments(page);
-    throw new Error(
-      `review_links_not_created visible=${JSON.stringify(visiblePairs)} ${summarizeHandoffTrace(trace)}`,
-    );
+    outcome = await waitForCurrentSilverMesaReviewAttempt(page, trace, retryStartedAt);
+    if (outcome === "links") {
+      writeSilverMesaHandoffEvidence(trace, "retry-links");
+      return true;
+    }
+    await throwSilverMesaLinksNotCreated(page, trace, outcome === "timeout" ? "retry-no-completion" : "retry-failed");
   }
   return true;
 }
@@ -882,6 +1119,10 @@ test("four-party Silver Mesa notice email persists through recipient proposal, a
 
   const sent = await clickSilverMesaSendForReview(page, handoffTrace);
   expect(sent, "send-for-review must mount on the Silver Mesa four-party draft").toBeTruthy();
+  const copyReviewLinks = page.getByRole("button", { name: /Copy review link/i });
+  if ((await copyReviewLinks.count()) > 0) {
+    await expect(copyReviewLinks, "success chrome must show four usable review links").toHaveCount(4);
+  }
   await expect
     .poll(async () => (await fetchOwnerParties(page, agreementId)).length, { timeout: 30_000 })
     .toBe(4);
