@@ -717,6 +717,16 @@ async function waitForSilverMesaReviewOutcome(
   return outcome;
 }
 
+function legalNamesAlreadyConfirmed(current: string, expected: string): boolean {
+  const normalize = (value: string) =>
+    value
+      .replace(/[.,]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  return Boolean(current) && normalize(current) === normalize(expected);
+}
+
 function assertSilverMesaInitialAssignments(initial: Array<{ company: string; email: string }>): void {
   expect(
     initial.map((row) => row.company),
@@ -761,7 +771,7 @@ async function completeSilverMesaReviewerSetup(page: Page): Promise<"setup" | "h
       if (!currentName) {
         await nameInput.fill(row.party.legalEntity);
         if ((await nameInput.inputValue()).trim() !== row.party.legalEntity) return "missing";
-      } else if (currentName !== row.party.legalEntity) {
+      } else if (!legalNamesAlreadyConfirmed(currentName, row.party.legalEntity)) {
         throw new Error(
           `Refusing to overwrite ${row.nameField} prefill ${JSON.stringify(currentName)} with ${JSON.stringify(row.party.legalEntity)}`,
         );
