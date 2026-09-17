@@ -1214,7 +1214,15 @@ test("four-party Silver Mesa notice email persists through recipient proposal, a
     await expect(copyReviewLinks, "success chrome must show four usable review links").toHaveCount(4);
   }
   await expect
-    .poll(async () => (await fetchOwnerParties(page, agreementId)).length, { timeout: 30_000 })
+    .poll(async () => {
+      const rows = await fetchOwnerParties(page, agreementId);
+      return SILVER_MESA_FOUR_PARTY.every((expected) => {
+        const row = rows.find((candidate) => String(candidate.name || "").includes(expected.legalEntity));
+        return Boolean(row?.id) && String(row?.email || "").toLowerCase() === expected.email.toLowerCase();
+      })
+        ? rows.length
+        : 0;
+    }, { timeout: 45_000 })
     .toBe(4);
   const parties = await fetchOwnerParties(page, agreementId);
   for (const expected of SILVER_MESA_FOUR_PARTY) {
