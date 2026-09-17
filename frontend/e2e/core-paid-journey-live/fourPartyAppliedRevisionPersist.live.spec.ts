@@ -594,17 +594,165 @@ async function assertSilverMesaRecipientEmails(page: Page, label: string): Promi
   }
 }
 
-async function completeSilverMesaSignerSetup(page: Page): Promise<boolean> {
-  const openSetup = page.getByRole("button", { name: /Complete signer details|Finalize signer details/i }).first();
-  if (await openSetup.isVisible().catch(() => false)) {
-    await openSetup.click();
+async function readSilverMesaCompanyEmailAssignments(
+  page: Page,
+): Promise<Array<{ company: string; email: string }>> {
+  const rows: Array<{ company: string; email: string }> = [];
+  for (const row of SILVER_MESA_SIGNER_FIELDS) {
+    rows.push({
+      company: row.party.legalEntity,
+      email: (await readVisibleField(page, row.emailFields))?.value ?? "",
+    });
   }
-  const setupRoot = page.locator("[data-claw-recipient-setup]").first();
-  if (await setupRoot.isVisible().catch(() => false)) {
-    await setupRoot.scrollIntoViewIfNeeded();
+  return rows;
+}
+
+type SilverMesaHandoffTrace = {
+  mint: Array<{ status: number; ok: boolean; partyId: string; email: string; mode: string }>;
+  saves: Array<{ status: number; ok: boolean; method: string; path: string }>;
+};
+
+function captureSilverMesaHandoffTrace(page: Page): SilverMesaHandoffTrace {
+  const trace: SilverMesaHandoffTrace = { mint: [], saves: [] };
+  page.on("response", (res) => {
+    const url = res.url();
+    const method = res.request().method();
+    if (url.includes("/recipient-access-token") && method === "POST") {
+      let req: Record<string, unknown> = {};
+      try {
+        req = (res.request().postDataJSON() as Record<string, unknown>) || {};
+      } catch {
+        req = {};
+      }
+      trace.mint.push({
+        status: res.status(),
+        ok: res.ok(),
+        partyId: String(req.recipient_party_id || req.party_id || "").trim(),
+        email: String(req.email || req.recipient_email || "").trim(),
+        mode: String(req.mode || "").trim() || "review",
+      });
+      return;
+    }
+    if (!/\/api\/agreements\//.test(url)) return;
+    if (method !== "POST" && method !== "PUT" && method !== "PATCH") return;
+    if (url.includes("/recipient-access-token") || url.includes("/recipient-proposal")) return;
+    let path = url;
+    try {
+      path = new URL(url).pathname;
+    } catch {
+      path = url.replace(/\?.*$/, "");
+    }
+    trace.saves.push({ status: res.status(), ok: res.ok(), method, path });
+  });
+  return trace;
+}
+
+function summarizeHandoffTrace(trace: SilverMesaHandoffTrace): string {
+  return JSON.stringify({
+    mint: trace.mint.map((row) => ({
+      status: row.status,
+      ok: row.ok,
+      partyId: row.partyId ? `${row.partyId.slice(0, 8)}…` : "",
+      email: row.email,
+      mode: row.mode,
+    })),
+    saves: trace.saves,
+  });
+}
+
+function silverMesaSendForReviewControl(page: Page) {
+  return page
+    .getByTestId("paid-pro-forced-share-for-review")
+    .or(page.getByRole("button", { name: /^Send for review$/i }))
+    .or(page.getByTestId("simple-pro-send-for-review"))
+    .first();
+}
+
+function silverMesaCreateReviewLinksControl(page: Page) {
+  return page
+    .getByRole("button", { name: /Create review links?|Continue to review links?/i })
+    .first();
+}
+
+function silverMesaCopyReviewLinkControl(page: Page) {
+  return page.getByRole("button", { name: /Copy review link/i }).first();
+}
+
+function silverMesaLinksFailedBanner(page: Page) {
+  return page.getByText(/Links were not created|Review links were not created/i).first();
+}
+
+async function waitForSilverMesaReviewOutcome(
+  page: Page,
+): Promise<"setup" | "links" | "failed" | "none"> {
+  let outcome: "setup" | "links" | "failed" | "none" = "none";
+  await expect
+    .poll(
+      async () => {
+        if (await readVisibleField(page, SILVER_MESA_SIGNER_FIELDS[0]!.emailFields)) {
+          outcome = "setup";
+          return "setup";
+        }
+        if (await silverMesaCopyReviewLinkControl(page).isVisible().catch(() => false)) {
+          outcome = "links";
+          return "links";
+        }
+        if (await silverMesaLinksFailedBanner(page).isVisible().catch(() => false)) {
+          outcome = "failed";
+          return "failed";
+        }
+        if (
+          (await silverMesaCreateReviewLinksControl(page).isVisible().catch(() => false)) &&
+          !(await silverMesaCreateReviewLinksControl(page).isDisabled().catch(() => true))
+        ) {
+          outcome = "setup";
+          return "setup";
+        }
+        return "pending";
+      },
+      { timeout: 20_000 },
+    )
+    .not.toBe("pending")
+    .catch(() => undefined);
+  return outcome;
+}
+
+function assertSilverMesaInitialAssignments(initial: Array<{ company: string; email: string }>): void {
+  expect(
+    initial.map((row) => row.company),
+    "visible recipient companies before confirmation fills",
+  ).toEqual(SILVER_MESA_FOUR_PARTY.map((party) => party.legalEntity));
+  expect(initial[0]?.email, "Ironclad must not start on Northwind's reviewer email").not.toBe(
+    "lucas.reed@northwindap.io",
+  );
+  for (const [idx, row] of initial.entries()) {
+    const expected = SILVER_MESA_FOUR_PARTY[idx]!.email;
+    if (!row.email) continue;
+    expect(row.email, `${row.company} prefill before confirmation`).toBe(expected);
   }
-  const firstEmail = await readVisibleField(page, SILVER_MESA_SIGNER_FIELDS[0]!.emailFields);
-  if (!firstEmail) return false;
+}
+
+async function completeSilverMesaReviewerSetup(page: Page): Promise<"setup" | "handoff" | "missing"> {
+  if (await silverMesaCopyReviewLinkControl(page).isVisible().catch(() => false)) return "handoff";
+  if (await readVisibleField(page, SILVER_MESA_SIGNER_FIELDS[0]!.emailFields)) {
+    const initial = await readSilverMesaCompanyEmailAssignments(page);
+    assertSilverMesaInitialAssignments(initial);
+  } else {
+    const sendForReview = silverMesaSendForReviewControl(page);
+    if (!(await sendForReview.isVisible({ timeout: 12_000 }).catch(() => false))) return "missing";
+    if (await sendForReview.isDisabled().catch(() => false)) return "missing";
+    await sendForReview.click();
+    const outcome = await waitForSilverMesaReviewOutcome(page);
+    if (outcome === "links") return "handoff";
+    if (outcome === "failed") return "handoff";
+    if (outcome !== "setup") return "missing";
+    const setupRoot = page.locator("[data-claw-recipient-setup]").first();
+    if (await setupRoot.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await setupRoot.scrollIntoViewIfNeeded();
+    }
+    const initial = await readSilverMesaCompanyEmailAssignments(page);
+    assertSilverMesaInitialAssignments(initial);
+  }
   for (const row of SILVER_MESA_SIGNER_FIELDS) {
     const nameInput = page.locator(`[data-claw-recipient-field="${row.nameField}"]`).first();
     if (await nameInput.isVisible().catch(() => false)) {
@@ -612,55 +760,74 @@ async function completeSilverMesaSignerSetup(page: Page): Promise<boolean> {
       const currentName = (await nameInput.inputValue()).trim();
       if (!currentName) {
         await nameInput.fill(row.party.legalEntity);
-        if ((await nameInput.inputValue()).trim() !== row.party.legalEntity) return false;
+        if ((await nameInput.inputValue()).trim() !== row.party.legalEntity) return "missing";
       } else if (currentName !== row.party.legalEntity) {
         throw new Error(
           `Refusing to overwrite ${row.nameField} prefill ${JSON.stringify(currentName)} with ${JSON.stringify(row.party.legalEntity)}`,
         );
       }
     }
-    await fillVisibleField(page, row.signerField, row.party.signerName);
-    const emailInput = page.locator(
-      row.emailFields.map((field) => `[data-claw-recipient-field="${field}"]`).join(", "),
-    ).first();
+    const emailInput = page
+      .locator(row.emailFields.map((field) => `[data-claw-recipient-field="${field}"]`).join(", "))
+      .first();
     if (await emailInput.isVisible().catch(() => false)) {
       await emailInput.scrollIntoViewIfNeeded();
     }
     await fillEmptyRecipientField(page, row.emailFields, row.party.email);
   }
   await assertSilverMesaRecipientEmails(page, "after completing visible recipient setup");
-  return true;
+  return "setup";
 }
 
-async function clickSilverMesaSendForReview(page: Page): Promise<boolean> {
-  if (!(await completeSilverMesaSignerSetup(page))) return false;
-  const createLinks = page.getByRole("button", { name: /Create review links/i }).first();
-  const sendButton = page.getByTestId("simple-pro-send-for-review");
+async function clickSilverMesaSendForReview(page: Page, trace: SilverMesaHandoffTrace): Promise<boolean> {
+  const setupState = await completeSilverMesaReviewerSetup(page);
+  if (setupState === "missing") return false;
+  const createLinks = silverMesaCreateReviewLinksControl(page);
+  const sendForReview = silverMesaSendForReviewControl(page);
+  if ((await createLinks.isVisible().catch(() => false)) && !(await createLinks.isDisabled().catch(() => true))) {
+    await createLinks.click();
+  } else if (
+    setupState === "setup" &&
+    (await sendForReview.isVisible().catch(() => false)) &&
+    !(await sendForReview.isDisabled().catch(() => true))
+  ) {
+    await sendForReview.click();
+  }
+  const failed = silverMesaLinksFailedBanner(page);
+  if (await failed.isVisible({ timeout: 12_000 }).catch(() => false)) {
+    const retry = page.getByRole("button", { name: /^Try again$/i }).first();
+    if (await retry.isVisible().catch(() => false) && !(await retry.isDisabled().catch(() => true))) {
+      await retry.click();
+    } else if (
+      (await createLinks.isVisible().catch(() => false)) &&
+      !(await createLinks.isDisabled().catch(() => true))
+    ) {
+      await createLinks.click();
+    }
+    if (await failed.isVisible({ timeout: 12_000 }).catch(() => false)) {
+      const visiblePairs = await readSilverMesaCompanyEmailAssignments(page);
+      throw new Error(
+        `review_links_not_created visible=${JSON.stringify(visiblePairs)} ${summarizeHandoffTrace(trace)}`,
+      );
+    }
+  }
   await expect
     .poll(
       async () => {
-        const createReady =
-          (await createLinks.isVisible().catch(() => false)) && !(await createLinks.isDisabled().catch(() => true));
-        const sendReady =
-          (await sendButton.isVisible().catch(() => false)) && !(await sendButton.isDisabled().catch(() => true));
-        return createReady || sendReady;
+        if (await silverMesaCopyReviewLinkControl(page).isVisible().catch(() => false)) return "links";
+        if (trace.mint.some((row) => row.ok && row.mode === "review")) return "minted";
+        if (await silverMesaLinksFailedBanner(page).isVisible().catch(() => false)) return "failed";
+        return "pending";
       },
-      { timeout: 15_000 },
+      { timeout: 20_000 },
     )
-    .toBeTruthy();
-  if ((await createLinks.isVisible().catch(() => false)) && !(await createLinks.isDisabled().catch(() => true))) {
-    await createLinks.click();
-  } else {
-    await sendButton.click();
-  }
-  const failed = page.getByText(/Links were not created|Review links were not created/i).first();
-  if (await failed.isVisible({ timeout: 4_000 }).catch(() => false)) {
-    const retry = page.getByRole("button", { name: /^Try again$/i }).first();
-    if (!(await completeSilverMesaSignerSetup(page))) return false;
-    if (await retry.isVisible().catch(() => false) && !(await retry.isDisabled().catch(() => true))) {
-      await retry.click();
-    }
-    if (await failed.isVisible().catch(() => false)) return false;
+    .not.toBe("pending")
+    .catch(() => undefined);
+  if (await silverMesaLinksFailedBanner(page).isVisible().catch(() => false)) {
+    const visiblePairs = await readSilverMesaCompanyEmailAssignments(page);
+    throw new Error(
+      `review_links_not_created visible=${JSON.stringify(visiblePairs)} ${summarizeHandoffTrace(trace)}`,
+    );
   }
   return true;
 }
@@ -671,6 +838,7 @@ test("four-party Silver Mesa notice email persists through recipient proposal, a
 }) => {
   test.setTimeout(300_000);
   const minted = captureRecipientMints(page);
+  const handoffTrace = captureSilverMesaHandoffTrace(page);
   const capturedIds = captureServerAgreementIds(page);
   await seedCorePaidJourneyOwner(page);
   await installQualityEvalPageGuards(page);
@@ -702,7 +870,7 @@ test("four-party Silver Mesa notice email persists through recipient proposal, a
     silverMesaNoticeAddress(ownerPaper),
   );
 
-  const sent = await clickSilverMesaSendForReview(page);
+  const sent = await clickSilverMesaSendForReview(page, handoffTrace);
   expect(sent, "send-for-review must mount on the Silver Mesa four-party draft").toBeTruthy();
   await expect
     .poll(async () => (await fetchOwnerParties(page, agreementId)).length, { timeout: 30_000 })
