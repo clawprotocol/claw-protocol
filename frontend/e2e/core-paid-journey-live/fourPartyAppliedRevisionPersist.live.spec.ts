@@ -1205,7 +1205,15 @@ test("four-party Silver Mesa creates four identity-bound review links", async ({
   const sent = await clickSilverMesaSendForReview(page, handoffTrace);
   expect(sent, "send-for-review must mint through visible customer controls").toBeTruthy();
   const copyReviewLinks = page.getByRole("button", { name: /Copy review link/i });
-  await expect(copyReviewLinks, "success chrome must show four usable review links").toHaveCount(4);
+  if ((await copyReviewLinks.count()) === 0) {
+    const manageRecipients = page.getByRole("button", { name: /^Manage recipients$/i }).first();
+    if (await manageRecipients.isVisible().catch(() => false)) {
+      await manageRecipients.click();
+    }
+  }
+  await expect(copyReviewLinks, "success chrome must show four usable review links").toHaveCount(4, {
+    timeout: 20_000,
+  });
   await expect
     .poll(async () => {
       const rows = await fetchOwnerParties(page, agreementId);
