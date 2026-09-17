@@ -975,10 +975,11 @@ test("four-party Silver Mesa notice email persists through recipient proposal, a
   await page.goto(`/app/review-changes/${encodeURIComponent(agreementId)}`, { waitUntil: "domcontentloaded" });
   const loadError = page.getByTestId("owner-proposal-review-load-error");
   expect(await loadError.isVisible({ timeout: 4_000 }).catch(() => false), "owner review must load").toBeFalsy();
-  const reviewBody = await page.locator("body").innerText();
-  expect(reviewBody, "proposal review must show the new address").toContain(PROPOSED_SILVER_NOTICE);
   const accept = page.getByTestId("owner-proposal-review-accept");
   await expect(accept).toBeVisible({ timeout: 20_000 });
+  await expect
+    .poll(async () => (await page.locator("body").innerText()).includes(PROPOSED_SILVER_NOTICE), { timeout: 20_000 })
+    .toBeTruthy();
   await accept.scrollIntoViewIfNeeded();
   await accept.click();
   await expect
