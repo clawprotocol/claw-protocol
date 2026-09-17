@@ -34790,7 +34790,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     if (acceptedPaidProAuthorityActive || paidProAuthoritative) {
       enterFinalReviewRecipientSetup("review_only");
-      if (looksLikeEmail(recipient1Email) && looksLikeEmail(recipient2Email)) {
+      const transition = assertGuidedTransitionReady("review_only");
+      if (
+        transition.ok &&
+        looksLikeEmail(recipient1Email) &&
+        looksLikeEmail(recipient2Email)
+      ) {
         void completeGuidedPaidProReviewFirstHandoff("simple_pro_send_for_review");
       }
       return;
@@ -34844,6 +34849,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     enterFinalReviewRecipientSetup,
     recipient1Email,
     recipient2Email,
+    assertGuidedTransitionReady,
   ]);
 
   const handleFinalizeRoutePrimaryAction = React.useCallback(
@@ -36007,6 +36013,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         rawOverride: notes,
         handoffSource: "failed_create_retry",
       });
+      return;
+    }
+    if (
+      journeyActionFeedback.actionId === "create_links" &&
+      journeyActionFeedback.kind === "failed"
+    ) {
+      void completeGuidedPaidProReviewFirstHandoff("simple_pro_review_first_retry");
       return;
     }
     const sel = journeyActionFeedback.focusSelector;

@@ -55,6 +55,10 @@ describe("Test274 review-link persist blocker", () => {
   it("retry re-invokes completeGuidedPaidProReviewFirstHandoff with same handoff entry", () => {
     expect(intake).toContain('"simple_pro_review_first_retry"');
     expect(intake).toContain("setReviewLinkPersistFailureDiagnostics(null)");
+    const remedyIdx = intake.indexOf("const handleJourneyActionRemedy = () => {");
+    const remedyBlock = intake.slice(remedyIdx, remedyIdx + 900);
+    expect(remedyBlock).toContain('actionId === "create_links"');
+    expect(remedyBlock).toContain('completeGuidedPaidProReviewFirstHandoff("simple_pro_review_first_retry")');
   });
 
   it("successful review handoff routes via paid Pro post-recipient owner path", () => {
