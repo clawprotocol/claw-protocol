@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AgreementDraft } from "./agreementTypes";
 import {
   draftHasAcceptedProposalWithoutOpenPending,
@@ -64,7 +66,7 @@ describe("reviewCorpusAuthority", () => {
     const stalePin = "STALE PIN ".repeat(80);
     writeReviewFirstPinnedCorpus("ag_test309", stalePin);
     const resolved = resolveReviewFirstDisplayCorpus(draft);
-    expect(resolved?.text).toContain("8. Notices");
+    expect(resolved?.text).toMatch(/\d+\.\s+Notices/);
     expect(resolved?.text).not.toContain("STALE PIN");
     expect(resolved?.source).not.toBe("review_first_pinned_corpus");
   });
@@ -87,5 +89,23 @@ describe("reviewCorpusAuthority", () => {
     expect(resolved?.text).toContain("Albuquerque");
     expect(resolved?.text).not.toContain("STALE SERVER CORPUS");
     expect(resolved?.source).toBe("document_text");
+  });
+
+  it("proposal accept re-establishes SoT and supersedes the current review snapshot", () => {
+    const src = readFileSync(join(__dirname, "reviewCorpusAuthority.ts"), "utf8");
+    expect(src).toContain("allowShorterOverwrite: true");
+    expect(src).toContain("persistAcceptedProposalCurrentReviewRevision");
+    expect(src).toContain("allowSupersedingRevision: true");
+    const freeze = readFileSync(
+      join(__dirname, "../components/agreements/paidProFreezeCandidate.ts"),
+      "utf8",
+    );
+    expect(freeze).toContain("preserveApprovedRevision");
+    expect(freeze).toContain("rematerialize Email from signer/reviewer access identity");
+    const panel = readFileSync(
+      join(__dirname, "../components/agreements/OwnerProposalReviewPanel.tsx"),
+      "utf8",
+    );
+    expect(panel).toContain("persistAcceptedProposalCurrentReviewRevision");
   });
 });

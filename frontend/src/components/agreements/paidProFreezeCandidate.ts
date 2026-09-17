@@ -988,6 +988,11 @@ function repairPaidProCanonicalNoticeAuthorityAtFreeze(
   args: PreparePaidProFreezeCandidateArgs,
   surface: string,
 ): string {
+  // User-approved Apply/accept already chose the operative notice bytes. Do not
+  // rematerialize Email from signer/reviewer access identity (Silver Mesa notices@).
+  if (args.preserveApprovedRevision) {
+    return repairFusedNoticesHeadingToPriorClause(safeForCommit).text;
+  }
   const noticeFinalize = finalizePaidProCanonicalNoticeAuthorityForFreeze(safeForCommit, {
     reviewParties: prep.reviewParties,
     draft: args.draft ?? null,

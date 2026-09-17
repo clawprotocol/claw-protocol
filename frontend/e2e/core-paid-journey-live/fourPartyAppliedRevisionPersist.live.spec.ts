@@ -1237,7 +1237,9 @@ test("four-party Silver Mesa notice email persists through recipient proposal, a
     .poll(
       async () => {
         ownerAfterAccept = await articleText(page, SILVER_MESA);
-        return ownerAfterAccept.includes("Ironclad Systems Group LLC") ? ownerAfterAccept.length : 0;
+        if (!ownerAfterAccept.includes("Ironclad Systems Group LLC")) return 0;
+        if (silverMesaNoticeAddress(ownerAfterAccept) !== PROPOSED_SILVER_NOTICE) return 0;
+        return ownerAfterAccept.length;
       },
       { timeout: 90_000 },
     )

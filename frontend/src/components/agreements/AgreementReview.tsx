@@ -38,6 +38,7 @@ import { OwnerProposalReviewQaPanel } from "./OwnerProposalReviewQaPanel";
 import {
   acceptedProposalCorpusText,
   logReviewStatusTransition,
+  persistAcceptedProposalCurrentReviewRevision,
   promoteAcceptedReviewCorpus,
 } from "../../agreement/reviewCorpusAuthority";
 import { normalizeJurisdictionDisplay } from "../../agreement/jurisdictionNormalize";
@@ -1688,6 +1689,10 @@ const AgreementReview: React.FC<Props> = ({
           source: "review_first_final_corpus",
           surface: "proposal_accept",
           draft: (r.draft as AgreementDraft | undefined) ?? null,
+        });
+        await persistAcceptedProposalCurrentReviewRevision({
+          agreementId,
+          corpusPlain: acceptedPlain,
         });
       }
       const proposerId = String(openRecipientProposal.proposer_id || "").trim();

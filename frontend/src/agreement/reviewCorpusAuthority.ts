@@ -18,6 +18,7 @@ import {
   hasPaidProSourceOfTruth,
 } from "../components/agreements/paidProSourceOfTruth";
 import { resolveReviewFirstDisplayCorpus } from "../launch/simpleProduct/reviewFirstDisplayCorpus";
+import { prepareCommercialReviewSnapshotAuthority } from "./canonicalReviewSnapshotApi";
 
 export type ReviewCorpusAuthoritySurface =
   | "reviewer_view"
@@ -311,6 +312,7 @@ export function commitAcceptedReviewCorpusPromotion(args: {
           typeof args.draft?.purpose === "string" && args.draft.purpose.trim().length > 20
             ? args.draft.purpose
             : "consulting agreement",
+        allowShorterOverwrite: true,
       });
     } catch {
       // Soft: promotion still commits snapshot/pin even if freeze re-establish is blocked.
@@ -320,8 +322,10 @@ export function commitAcceptedReviewCorpusPromotion(args: {
   let afterAcceptHash = acceptedProposalHash;
   let reviewSnapshotHash: string | null = snapshotHashBefore;
 
-  if (isPaidProPostFinalizeHydratedCorpusLocked() && hasAuthoritativeSigningSnapshot()) {
-    const saved = commitPaidProPostFinalizeClauseEditRevision({ editedPlain: text });
+  if (hasAuthoritativeSigningSnapshot()) {
+    const saved = isPaidProPostFinalizeHydratedCorpusLocked()
+      ? commitPaidProPostFinalizeClauseEditRevision({ editedPlain: text })
+      : { ok: false as const };
     if (saved.ok) {
       afterAcceptHash = saved.corpusHash;
       reviewSnapshotHash = saved.corpusHash;
@@ -410,6 +414,28 @@ export function promoteAcceptedReviewCorpus(args: {
   acceptedTextMarker?: string;
 }): AcceptedReviewCorpusPromotionResult {
   return commitAcceptedReviewCorpusPromotion(args);
+}
+
+/**
+ * Advance the current review snapshot to the accepted proposal without rewriting
+ * the prior accepted digest. Historical snapshots stay intact.
+ */
+export async function persistAcceptedProposalCurrentReviewRevision(args: {
+  agreementId: string;
+  corpusPlain: string;
+}): Promise<{ ok: true; snapshotId: string; digest: string } | { ok: false; code: string }> {
+  const prepared = await prepareCommercialReviewSnapshotAuthority({
+    agreementId: args.agreementId,
+    corpusPlain: args.corpusPlain,
+    allowSupersedingRevision: true,
+    acceptIfNoPriorAccepted: true,
+  });
+  if (!prepared.ok) return { ok: false, code: prepared.code };
+  return {
+    ok: true,
+    snapshotId: prepared.snapshot.snapshot_id,
+    digest: prepared.snapshot.corpus_sha256,
+  };
 }
 
 export function acceptedProposalCorpusText(proposalDraft: Record<string, unknown> | undefined): string {
