@@ -21,6 +21,7 @@ import {
   articleText,
   assertFourPartyCustomerMeaning,
   captureServerAgreementIds,
+  completeSignerDetailsThroughVisibleCustomerUi,
   configuredLiveApiBase,
   fetchOwnerCanonicalSnapshot,
   fourPartyPaperReady as fourPartyPaperReadyCheck,
@@ -209,14 +210,100 @@ function mintedTokenForParticipant(
 async function fetchOwnerParties(
   page: Page,
   agreementId: string,
-): Promise<Array<{ id?: string; name?: string; email?: string }>> {
+): Promise<Array<{ id?: string; name?: string; email?: string; signer_name?: string; signerName?: string }>> {
   const api = configuredLiveApiBase();
   const res = await page.request.get(`${api}/api/agreements/${encodeURIComponent(agreementId)}`, {
     headers: ownerHeaders(),
   });
   expect(res.ok(), `owner GET failed ${res.status()}`).toBeTruthy();
-  const body = (await res.json()) as { draft?: { parties?: Array<{ id?: string; name?: string; email?: string }> } };
+  const body = (await res.json()) as {
+    draft?: { parties?: Array<{ id?: string; name?: string; email?: string; signer_name?: string; signerName?: string }> };
+  };
   return Array.isArray(body.draft?.parties) ? body.draft.parties : [];
+}
+
+async function fetchOwnerSigningHandoff(
+  page: Page,
+  agreementId: string,
+): Promise<{
+  acceptedSnapshotId: string;
+  acceptedDigest: string;
+  lockSnapshotId: string;
+  lockDigest: string;
+  packetSnapshotId: string;
+  packetDigest: string;
+  packetCorpus: string;
+  packetRoles: Array<{ entityName?: string; signerName?: string; signerEmail?: string }>;
+}> {
+  const api = configuredLiveApiBase();
+  const res = await page.request.get(`${api}/api/agreements/${encodeURIComponent(agreementId)}`, {
+    headers: ownerHeaders(),
+  });
+  expect(res.ok(), `owner GET for signing handoff failed ${res.status()}`).toBeTruthy();
+  const body = (await res.json()) as {
+    draft?: {
+      accepted_review_snapshot_v1?: { snapshotId?: string; corpusSha256?: string; corpusPlain?: string };
+      vs01_signing_packet_v1?: {
+        accepted_review_snapshot_id?: string;
+        accepted_review_snapshot_digest?: string;
+        frozen_corpus_hash?: string;
+        portable?: {
+          seed?: { corpusPlain?: string; corpusHash?: string };
+          roles?: Array<{ entityName?: string; partyName?: string; signerName?: string; signerEmail?: string }>;
+          envelopeProvenance?: { acceptedSoTDigest?: string };
+        };
+      };
+    };
+    signing_lock?: { accepted_snapshot_id?: string; accepted_snapshot_digest?: string };
+  };
+  const accepted = body.draft?.accepted_review_snapshot_v1 || {};
+  const lock = body.signing_lock || {};
+  const packet = body.draft?.vs01_signing_packet_v1 || {};
+  const portable = packet.portable || {};
+  const seed = portable.seed || {};
+  const roles = Array.isArray(portable.roles) ? portable.roles : [];
+  return {
+    acceptedSnapshotId: String(accepted.snapshotId || "").trim(),
+    acceptedDigest: String(accepted.corpusSha256 || "").trim().toLowerCase(),
+    lockSnapshotId: String(lock.accepted_snapshot_id || "").trim(),
+    lockDigest: String(lock.accepted_snapshot_digest || "").trim().toLowerCase(),
+    packetSnapshotId: String(packet.accepted_review_snapshot_id || "").trim(),
+    packetDigest: String(
+      packet.accepted_review_snapshot_digest ||
+        portable.envelopeProvenance?.acceptedSoTDigest ||
+        seed.corpusHash ||
+        "",
+    )
+      .trim()
+      .toLowerCase(),
+    packetCorpus: String(seed.corpusPlain || accepted.corpusPlain || ""),
+    packetRoles: roles.map((role) => ({
+      entityName: String(role.entityName || role.partyName || "").trim(),
+      signerName: String(role.signerName || "").trim(),
+      signerEmail: String(role.signerEmail || "").trim(),
+    })),
+  };
+}
+
+async function silverMesaSigningViewText(page: Page): Promise<string> {
+  const canonical = page.getByTestId("vs01-recipient-canonical-render");
+  if (await canonical.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await expect(canonical).toContainText(SILVER_MESA, { timeout: 30_000 });
+    return canonical.innerText();
+  }
+  const signRoute = page.getByTestId("recipient-public-sign-route");
+  if (await signRoute.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    const shell = page.getByTestId("recipient-document-shell");
+    if (await shell.isVisible({ timeout: 8_000 }).catch(() => false)) {
+      await expect(shell).toContainText(SILVER_MESA, { timeout: 30_000 });
+      return shell.innerText();
+    }
+    return signRoute.innerText();
+  }
+  const shell = page.getByTestId("recipient-document-shell");
+  await expect(shell).toBeVisible({ timeout: 45_000 });
+  await expect(shell).toContainText(SILVER_MESA, { timeout: 30_000 });
+  return shell.innerText();
 }
 
 async function recipientPaperText(page: Page): Promise<string> {
@@ -514,6 +601,9 @@ function assertSilverMesaFourPartyPaper(text: string, label: string): void {
   expect(text, `${label} term`).toMatch(/24 months/);
   expect(text, `${label} Texas law`).toMatch(/Texas/);
   expect(text, `${label} ownership`).toMatch(/Foreground IP developed solely by a party remains that party's property/i);
+  expect(text, `${label} must not invent an Effective Date definition`).not.toMatch(
+    /The "Effective Date" is the date on which the Agreement has been fully executed/,
+  );
   expect(silverMesaNoticeAddress(text), `${label} notice must stay on Silver Mesa`).toBeTruthy();
 }
 
@@ -1083,7 +1173,7 @@ test("four-party Silver Mesa notice email persists through recipient proposal, a
   page,
   browser,
 }) => {
-  test.setTimeout(300_000);
+  test.setTimeout(360_000);
   const minted = captureRecipientMints(page);
   const handoffTrace = captureSilverMesaHandoffTrace(page);
   const capturedIds = captureServerAgreementIds(page);
@@ -1290,4 +1380,143 @@ test("four-party Silver Mesa notice email persists through recipient proposal, a
   );
   expect(reopenedRecipient, "fresh recipient must not restore original notice").not.toContain(ORIGINAL_SILVER_NOTICE);
   await freshRecipient.context().close();
+
+  const acceptedRevision = await fetchOwnerCanonicalSnapshot(page, agreementId);
+  expect(acceptedRevision.snapshotId, "accepted snapshot id after reopen").toBeTruthy();
+  expect(acceptedRevision.digest, "accepted snapshot digest after reopen").toBeTruthy();
+  expect(acceptedRevision.snapshotId).toBe(freshGet.snapshotId);
+  expect(acceptedRevision.digest).toBe(freshGet.digest);
+  expect(silverMesaNoticeAddress(acceptedRevision.corpus)).toBe(PROPOSED_SILVER_NOTICE);
+  expect(acceptedRevision.corpus).not.toContain(`Email: ${ORIGINAL_SILVER_NOTICE}`);
+
+  await page.goto(`/app/create?agreementId=${agreementId}`, { waitUntil: "domcontentloaded" });
+  await completeSignerDetailsThroughVisibleCustomerUi(
+    page,
+    agreementId,
+    SILVER_MESA_FOUR_PARTY.map((party) => ({
+      legalEntity: party.legalEntity,
+      signerName: party.signerName,
+      signerEmail: party.email,
+    })),
+  );
+  for (const row of SILVER_MESA_SIGNER_FIELDS) {
+    const company = await readVisibleField(page, [row.nameField]);
+    const person = await readVisibleField(page, [row.signerField]);
+    const email = await readVisibleField(page, row.emailFields);
+    expect(company?.value, `${row.party.legalEntity} company slot`).toContain(row.party.legalEntity);
+    expect(person?.value, `${row.party.legalEntity} signer`).toBe(row.party.signerName);
+    expect(email?.value, `${row.party.legalEntity} access email`).toBe(row.party.email);
+  }
+  expect(
+    (await readVisibleField(page, SILVER_MESA_SIGNER_FIELDS[3]!.emailFields))?.value,
+    "Olivia remains reviewer/signer email",
+  ).toBe(ORIGINAL_SILVER_NOTICE);
+
+  const sentSigning = await clickOwnerSend(page, "simple-pro-send-for-signature");
+  expect(sentSigning, "prepare-for-signing must mount after accepted notice").toBeTruthy();
+  await expect
+    .poll(async () => {
+      const partiesNow = await fetchOwnerParties(page, agreementId);
+      return SILVER_MESA_FOUR_PARTY.every((expected) => {
+        const row = partiesNow.find((candidate) => String(candidate.name || "").includes(expected.legalEntity));
+        return Boolean(row?.id && mintedTokenForParticipant(minted, "sign", String(row.id)));
+      })
+        ? 1
+        : 0;
+    }, { timeout: 45_000 })
+    .toBe(1);
+
+  const freezeSnap = await fetchOwnerCanonicalSnapshot(page, agreementId);
+  expect(freezeSnap.snapshotId, "signing freeze must keep the accepted snapshot id").toBe(acceptedRevision.snapshotId);
+  expect(freezeSnap.digest, "signing freeze must keep the accepted digest").toBe(acceptedRevision.digest);
+  expect(silverMesaNoticeAddress(freezeSnap.corpus), "signing freeze corpus notice").toBe(PROPOSED_SILVER_NOTICE);
+  expect(freezeSnap.corpus).not.toContain(`Email: ${ORIGINAL_SILVER_NOTICE}`);
+  assertSilverMesaFourPartyPaper(freezeSnap.corpus, "signing freeze snapshot");
+
+  const handoff = await fetchOwnerSigningHandoff(page, agreementId);
+  expect(handoff.acceptedSnapshotId, "draft accepted snapshot id").toBe(acceptedRevision.snapshotId);
+  expect(handoff.acceptedDigest, "draft accepted digest").toBe(acceptedRevision.digest);
+  expect(handoff.lockSnapshotId, "signing lock snapshot").toBe(acceptedRevision.snapshotId);
+  expect(handoff.lockDigest, "signing lock digest").toBe(acceptedRevision.digest);
+  expect(handoff.packetSnapshotId, "packet accepted snapshot provenance").toBe(acceptedRevision.snapshotId);
+  expect(handoff.packetDigest, "packet accepted digest provenance").toBe(acceptedRevision.digest);
+  expect(handoff.packetCorpus.length, "signing packet corpus").toBeGreaterThan(400);
+  assertSilverMesaFourPartyPaper(handoff.packetCorpus, "signing packet");
+  expect(silverMesaNoticeAddress(handoff.packetCorpus)).toBe(PROPOSED_SILVER_NOTICE);
+  expect(handoff.packetCorpus).not.toContain(`Email: ${ORIGINAL_SILVER_NOTICE}`);
+  for (const expected of SILVER_MESA_FOUR_PARTY) {
+    const role = handoff.packetRoles.find((row) =>
+      String(row.entityName || "").includes(expected.legalEntity),
+    );
+    expect(role?.signerName, `${expected.legalEntity} packet signer`).toBe(expected.signerName);
+    expect(String(role?.signerEmail || "").toLowerCase(), `${expected.legalEntity} packet email`).toBe(
+      expected.email.toLowerCase(),
+    );
+  }
+
+  const persistDir =
+    process.env.FOUR_PARTY_PERSIST_OUTPUT ||
+    join("..", "evals", "commercial-readiness", "results", "four-party-applied-revision-persist", "local");
+  mkdirSync(persistDir, { recursive: true });
+  writeFileSync(
+    join(persistDir, "silver-mesa-accepted-to-signing-binding.json"),
+    JSON.stringify(
+      {
+        agreementId,
+        acceptedSnapshotId: acceptedRevision.snapshotId,
+        acceptedDigest: acceptedRevision.digest,
+        freezeSnapshotId: freezeSnap.snapshotId,
+        freezeDigest: freezeSnap.digest,
+        lockSnapshotId: handoff.lockSnapshotId,
+        lockDigest: handoff.lockDigest,
+        packetSnapshotId: handoff.packetSnapshotId,
+        packetDigest: handoff.packetDigest,
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  const partiesForSign = await fetchOwnerParties(page, agreementId);
+  const silverSignRow = partiesForSign.find((candidate) => String(candidate.name || "").includes(SILVER_MESA));
+  expect(silverSignRow?.id, "Silver Mesa sign participant").toBeTruthy();
+  expect(String(silverSignRow?.email || "").toLowerCase()).toBe(ORIGINAL_SILVER_NOTICE);
+  const signMinted = mintedTokenForParticipant(minted, "sign", String(silverSignRow?.id || ""));
+  const signToken = String((signMinted?.body as Record<string, unknown> | undefined)?.token || "");
+  expect(signToken.length, "Silver Mesa signing token").toBeGreaterThan(12);
+
+  const signerSession = await openRecipientHref(
+    browser,
+    `/agreements/${agreementId}/sign?t=${encodeURIComponent(signToken)}`,
+  );
+  const identity = signerSession
+    .locator(".vs01-recipient-signing-name, .vs01-recipient-signing-email, [data-testid='recipient-public-sign-route']")
+    .first();
+  await expect(identity).toBeVisible({ timeout: 30_000 }).catch(() => undefined);
+  const chrome = await signerSession.locator("body").innerText();
+  expect(chrome, "fresh signer chrome must identify Olivia").toMatch(/Olivia Hart/i);
+  expect(chrome, "fresh signer chrome must keep Olivia access email").toContain(ORIGINAL_SILVER_NOTICE);
+  expect(chrome, "fresh signer chrome must identify Silver Mesa").toContain(SILVER_MESA);
+
+  let signerPaper = "";
+  await expect
+    .poll(
+      async () => {
+        signerPaper = await silverMesaSigningViewText(signerSession);
+        if (!signerPaper.includes(SILVER_MESA)) return 0;
+        if (silverMesaNoticeAddress(signerPaper) !== PROPOSED_SILVER_NOTICE) return 0;
+        return signerPaper.length;
+      },
+      { timeout: 90_000 },
+    )
+    .toBeGreaterThan(400);
+  assertSilverMesaFourPartyPaper(signerPaper, "fresh Silver Mesa signer session");
+  expect(silverMesaNoticeAddress(signerPaper), "signer view must keep accepted notice").toBe(PROPOSED_SILVER_NOTICE);
+  expect(signerPaper, "signer view must not restore original notice as Email line").not.toContain(
+    `Email: ${ORIGINAL_SILVER_NOTICE}`,
+  );
+  expect(signerPaper).toContain("Olivia Hart");
+  expect(signerPaper).toContain("Analyst");
+  await signerSession.context().close();
 });
