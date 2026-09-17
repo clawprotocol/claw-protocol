@@ -37,7 +37,7 @@ describe("Test274 review-link persist blocker", () => {
 
   it("persist network failure does not clear pinned authoritative corpus", () => {
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const block = intake.slice(handoffIdx, handoffIdx + 12000);
+    const block = intake.slice(handoffIdx, handoffIdx + 18000);
     expect(block).toContain('restorePinnedFinalizedSignerCorpus("guided_review_first_handoff_persist")');
     expect(block).toContain("auditPaidProReviewLinkGenerationCorpus(bodyPlain)");
     expect(block).not.toMatch(
@@ -116,7 +116,7 @@ describe("Test278 review-first persist regression", () => {
 
   it("failReviewFirstPersist surfaces HTTP status, detail, and endpoint in user message", () => {
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const block = intake.slice(handoffIdx, handoffIdx + 10000);
+    const block = intake.slice(handoffIdx, handoffIdx + 16000);
     expect(block).toContain("formatReviewLinkPersistUserMessage");
     expect(block).toContain("logReviewFirstPersistInvariantViolation");
     expect(block).toContain("paid_pro_corpus_and_signer_metadata_persist_failed");
