@@ -193,6 +193,27 @@ describe("bindRepresentativesToLegalParties", () => {
     expect(result.parties.map((p) => p.email)).toEqual(TEST487_FOUR_PARTY.map((p) => p.email));
     expect(result.unresolvedExtractionRows).toEqual([]);
   });
+
+  it("preserves confirmed party ids through bind and reorder", () => {
+    const ironclad = "ab711e81-5c07-4dc4-8d4a-9b5fb993eb30";
+    const harborline = "f40374c7-5b28-4407-8505-9b6e2fee132d";
+    const northwind = "1e5d5900-43a3-4dca-9011-20bef603cf12";
+    const silver = "ae79040c-1957-4a2d-b529-024728dd5573";
+    const result = bindRepresentativesToLegalParties(
+      [
+        { id: silver, name: "Silver Mesa Analytics LP", role: "party" },
+        { id: northwind, name: "Northwind Automation Partners LLC", role: "party" },
+        { id: harborline, name: "Harborline Data Solutions Inc.", role: "party" },
+        { id: ironclad, name: "Ironclad Systems Group LLC", role: "party" },
+      ],
+      "The parties are Ironclad Systems Group LLC, Harborline Data Solutions Inc., Northwind Automation Partners LLC, and Silver Mesa Analytics LP.",
+    );
+    const byName = Object.fromEntries(result.parties.map((p) => [p.name, p.id]));
+    expect(byName["Ironclad Systems Group LLC"]).toBe(ironclad);
+    expect(byName["Harborline Data Solutions Inc."]).toBe(harborline);
+    expect(byName["Northwind Automation Partners LLC"]).toBe(northwind);
+    expect(byName["Silver Mesa Analytics LP"]).toBe(silver);
+  });
 });
 
 describe("applyExplicitIntakeRolesToParties", () => {

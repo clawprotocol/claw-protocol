@@ -772,6 +772,7 @@ function sanitizeSilverMesaPostData(raw: string | null): {
 function isSilverMesaHandoffNetwork(url: string, method: string): boolean {
   if (url.includes("/recipient-access-token") && method === "POST") return true;
   if (!/\/api\/agreements\//.test(url)) return false;
+  if (method === "GET" && /\/api\/agreements\/[0-9a-f-]{36}\/?$/i.test(silverMesaPathname(url))) return true;
   if (method !== "POST" && method !== "PUT" && method !== "PATCH") return false;
   if (url.includes("/recipient-proposal")) return false;
   return true;
@@ -1168,6 +1169,99 @@ async function clickSilverMesaSendForReview(page: Page, trace: SilverMesaHandoff
   }
   return true;
 }
+
+test("four-party Silver Mesa creates four identity-bound review links", async ({ page, browser }) => {
+  test.setTimeout(240_000);
+  const minted = captureRecipientMints(page);
+  const handoffTrace = captureSilverMesaHandoffTrace(page);
+  const capturedIds = captureServerAgreementIds(page);
+  await seedCorePaidJourneyOwner(page);
+  await installQualityEvalPageGuards(page);
+  await page.goto("/app/create", { waitUntil: "domcontentloaded" });
+  await submitIntake(page, IRONCLAD_FOUR_PARTY_SILVER_MESA_INTAKE);
+  await expect(page.getByTestId("agreement-intake-clarification")).toHaveCount(0, { timeout: 45_000 });
+  await expect(page.getByTestId("milestone-payer-clarification-question")).toHaveCount(0, { timeout: 8_000 });
+
+  let ownerPaper = "";
+  await expect
+    .poll(
+      async () => {
+        ownerPaper = await articleText(page, SILVER_MESA);
+        return ownerPaper.includes("Ironclad Systems Group LLC") && ownerPaper.includes("Texas") ? ownerPaper.length : 0;
+      },
+      { timeout: 120_000 },
+    )
+    .toBeGreaterThan(400);
+  assertSilverMesaFourPartyPaper(ownerPaper, "author first draft");
+  expect(silverMesaNoticeAddress(ownerPaper), "author first draft notice").toBe(ORIGINAL_SILVER_NOTICE);
+
+  const agreementId = await waitForServerAgreementId(page, capturedIds);
+  expect(agreementId.length).toBeGreaterThan(8);
+  const firstSnap = await fetchOwnerCanonicalSnapshot(page, agreementId);
+  expect(firstSnap.ok, "canonical GET after create").toBeTruthy();
+  assertSilverMesaFourPartyPaper(firstSnap.corpus, "persisted first draft");
+  expect(silverMesaNoticeAddress(firstSnap.corpus)).toBe(ORIGINAL_SILVER_NOTICE);
+
+  const sent = await clickSilverMesaSendForReview(page, handoffTrace);
+  expect(sent, "send-for-review must mint through visible customer controls").toBeTruthy();
+  const copyReviewLinks = page.getByRole("button", { name: /Copy review link/i });
+  await expect(copyReviewLinks, "success chrome must show four usable review links").toHaveCount(4);
+  await expect
+    .poll(async () => {
+      const rows = await fetchOwnerParties(page, agreementId);
+      return SILVER_MESA_FOUR_PARTY.every((expected) => {
+        const row = rows.find((candidate) => String(candidate.name || "").includes(expected.legalEntity));
+        return Boolean(row?.id) && String(row?.email || "").toLowerCase() === expected.email.toLowerCase();
+      })
+        ? rows.length
+        : 0;
+    }, { timeout: 45_000 })
+    .toBe(4);
+  const parties = await fetchOwnerParties(page, agreementId);
+  for (const expected of SILVER_MESA_FOUR_PARTY) {
+    const row = parties.find((candidate) => String(candidate.name || "").includes(expected.legalEntity));
+    expect(row?.id, `${expected.legalEntity} participant id`).toBeTruthy();
+    expect(String(row?.email || "").toLowerCase(), `${expected.legalEntity} review email`).toBe(
+      expected.email.toLowerCase(),
+    );
+    const partyMinted = await expect
+      .poll(() => mintedTokenForParticipant(minted, "review", String(row?.id || "")), { timeout: 45_000 })
+      .toBeTruthy()
+      .then(() => mintedTokenForParticipant(minted, "review", String(row?.id || "")));
+    const partyToken = String((partyMinted?.body as Record<string, unknown> | undefined)?.token || "");
+    expect(partyToken.length, `${expected.legalEntity} identity-bound review token`).toBeGreaterThan(12);
+    expect(String((partyMinted?.request as { recipient_party_id?: string } | undefined)?.recipient_party_id || "")).toBe(
+      String(row?.id || ""),
+    );
+  }
+  const authorityGets = handoffTrace.network.filter(
+    (row) => row.method === "GET" && /\/api\/agreements\/[0-9a-f-]{36}$/i.test(row.path),
+  );
+  expect(authorityGets.some((row) => row.kind === "response" && row.ok === true), "authority GET must be an HTTP success").toBe(
+    true,
+  );
+  expect(
+    handoffTrace.console.some((row) => row.text.includes("abortKind: local_validation")),
+    "mint must not abort on synthesized recipient_party_id_required",
+  ).toBe(false);
+  const silverRow = parties.find((candidate) => String(candidate.name || "").includes(SILVER_MESA));
+  expect(silverRow?.id, "Silver Mesa participant id").toBeTruthy();
+  const reviewMinted = mintedTokenForParticipant(minted, "review", String(silverRow?.id || ""));
+  const token = String((reviewMinted?.body as Record<string, unknown> | undefined)?.token || "");
+  expect(token.length, "Silver Mesa review token").toBeGreaterThan(12);
+
+  const recipient = await openRecipientHref(
+    browser,
+    `/agreements/${agreementId}/review?t=${encodeURIComponent(token)}`,
+  );
+  const recipientShell = recipient.getByTestId("recipient-document-shell");
+  await expect(recipientShell).toBeVisible({ timeout: 45_000 });
+  await expect(recipientShell).toContainText(SILVER_MESA, { timeout: 30_000 });
+  const recipientPaper = await recipientShell.innerText();
+  assertSilverMesaFourPartyPaper(recipientPaper, "recipient review after handoff");
+  expect(silverMesaNoticeAddress(recipientPaper)).toBe(ORIGINAL_SILVER_NOTICE);
+  await recipient.context().close();
+});
 
 test("four-party Silver Mesa notice email persists through recipient proposal, accept, and fresh reopen", async ({
   page,

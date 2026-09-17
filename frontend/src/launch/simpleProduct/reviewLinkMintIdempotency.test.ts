@@ -7,6 +7,7 @@ import {
   existingReviewLinkRowForParty,
   hydrateReviewPartyIdsFromAuthority,
   mergeReviewLinkRowsByPartyId,
+  normalizeReviewPartyNameKey,
   RECIPIENT_LINK_INVALID_OR_EXPIRED_MESSAGE as IDEMPOTENCY_INVALID_MESSAGE,
   REVIEW_LINKS_ALREADY_READY_MESSAGE,
   stableReviewRecipientPartyId,
@@ -81,6 +82,107 @@ describe("review-link mint idempotency", () => {
     expect(stableReviewRecipientPartyId(hydrated[0]?.id)).toBe(GAMMA);
     expect(stableReviewRecipientPartyId(hydrated[1]?.id)).toBe(ALPHA);
     expect(stableReviewRecipientPartyId(hydrated[2]?.id)).toBe(BETA);
+  });
+
+  it("recovers Silver Mesa Harborline id when Inc. punctuation diverges", () => {
+    const harborline = "f40374c7-5b28-4407-8505-9b6e2fee132d";
+    const silver = "ae79040c-1957-4a2d-b529-024728dd5573";
+    const ironclad = "ab711e81-5c07-4dc4-8d4a-9b5fb993eb30";
+    const northwind = "1e5d5900-43a3-4dca-9011-20bef603cf12";
+    expect(normalizeReviewPartyNameKey("Harborline Data Solutions Inc.")).toBe(
+      normalizeReviewPartyNameKey("Harborline Data Solutions Inc"),
+    );
+    const hydrated = hydrateReviewPartyIdsFromAuthority(
+      [
+        { name: "Ironclad Systems Group LLC", role: "party", email: "ethan.cole@ironcladsg.com" },
+        { name: "Harborline Data Solutions Inc", role: "party", email: "maya.bennett@harborlinedata.com" },
+        { name: "Northwind Automation Partners LLC", role: "party", email: "lucas.reed@northwindap.io" },
+        { name: "Silver Mesa Analytics LP", role: "party", email: "olivia.hart@silvermesaanalytics.com" },
+      ],
+      [
+        { id: ironclad, name: "Ironclad Systems Group LLC", role: "party" },
+        { id: harborline, name: "Harborline Data Solutions Inc.", role: "party" },
+        { id: northwind, name: "Northwind Automation Partners LLC", role: "party" },
+        { id: silver, name: "Silver Mesa Analytics LP", role: "party" },
+      ],
+    );
+    expect(hydrated.map((p) => stableReviewRecipientPartyId(p.id))).toEqual([
+      ironclad,
+      harborline,
+      northwind,
+      silver,
+    ]);
+  });
+
+  it("does not recover an id when two authority names collapse to the same key", () => {
+    const hydrated = hydrateReviewPartyIdsFromAuthority(
+      [{ name: "Harborline Data Solutions Inc", role: "party" }],
+      [
+        { id: BETA, name: "Harborline Data Solutions Inc.", role: "party" },
+        { id: GAMMA, name: "Harborline Data Solutions Inc", role: "party" },
+      ],
+    );
+    expect(stableReviewRecipientPartyId(hydrated[0]?.id)).toBe("");
+  });
+
+  it("keeps an existing client id even when the authority name key matches another party", () => {
+    const hydrated = hydrateReviewPartyIdsFromAuthority(
+      [{ id: ALPHA, name: "Harborline Data Solutions Inc", role: "party" }],
+      [{ id: BETA, name: "Harborline Data Solutions Inc.", role: "party" }],
+    );
+    expect(stableReviewRecipientPartyId(hydrated[0]?.id)).toBe(ALPHA);
+  });
+
+  it("mints four Silver Mesa counterparties after unique-name recovery, without a token POST when ids are missing locally", async () => {
+    const ironclad = "ab711e81-5c07-4dc4-8d4a-9b5fb993eb30";
+    const harborline = "f40374c7-5b28-4407-8505-9b6e2fee132d";
+    const northwind = "1e5d5900-43a3-4dca-9011-20bef603cf12";
+    const silver = "ae79040c-1957-4a2d-b529-024728dd5573";
+    const mintedIds: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("/recipient-access-token")) {
+          const body = JSON.parse(String(init?.body ?? "{}"));
+          mintedIds.push(String(body.recipient_party_id ?? ""));
+          return {
+            ok: true,
+            json: async () => ({ token: `tok_${body.recipient_party_id}`, expires_in_seconds: 60, locked_version_id: "lv" }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            draft: {
+              parties: [
+                { id: ironclad, name: "Ironclad Systems Group LLC", role: "party" },
+                { id: harborline, name: "Harborline Data Solutions Inc.", role: "party" },
+                { id: northwind, name: "Northwind Automation Partners LLC", role: "party" },
+                { id: silver, name: "Silver Mesa Analytics LP", role: "party" },
+              ],
+            },
+          }),
+        };
+      }) as unknown as typeof fetch,
+    );
+    const result = await mintSimpleDoneReviewRecipientLinkRows({
+      agreementId: "ag_silver",
+      draft: {
+        id: "ag_silver",
+        parties: [
+          { name: "Ironclad Systems Group LLC", role: "party", email: "ethan.cole@ironcladsg.com" },
+          { name: "Harborline Data Solutions Inc", role: "party", email: "maya.bennett@harborlinedata.com" },
+          { name: "Northwind Automation Partners LLC", role: "party", email: "lucas.reed@northwindap.io" },
+          { name: "Silver Mesa Analytics LP", role: "party", email: "olivia.hart@silvermesaanalytics.com" },
+        ],
+      } as AgreementDraft,
+      includeOwnerWithReadyReviewEmail: true,
+    });
+    expect(result.lastMintErrorCode).toBeUndefined();
+    expect(result.attemptedMintCount).toBe(4);
+    expect(mintedIds).toEqual([ironclad, harborline, northwind, silver]);
+    expect(result.rows.map((r) => r.recipientPartyId)).toEqual([ironclad, harborline, northwind, silver]);
   });
 
   it("complete three-party remint creates zero new tokens", async () => {

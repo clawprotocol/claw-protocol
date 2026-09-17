@@ -14,6 +14,7 @@ import { extractBetweenPartySegmentRoleHints, isPreservableIntakeRole } from "./
 import { normalizeAgreementPartyName } from "./partySlotIdentityNormalize";
 
 export type BindableParty = {
+  id?: string;
   name: string;
   role: string;
   email?: string;
@@ -213,6 +214,7 @@ export function bindRepresentativesToLegalParties(
 ): RepresentativeBindResult {
   const intake = String(rawIntake || "");
   const rows = (parties || []).map((p) => ({
+    id: String(p.id || "").trim() || undefined,
     name: String(p.name || "").replace(/\s+/g, " ").trim(),
     role: String(p.role || "").trim(),
     email: String(p.email || "").trim(),
@@ -249,6 +251,7 @@ export function bindRepresentativesToLegalParties(
   for (const entity of entities) {
     const row = rows.find((r) => partyLegalNamesMatch(r.name, entity));
     slots.set(normKey(entity), {
+      ...(row?.id ? { id: row.id } : {}),
       name: row?.name || entity,
       role: row?.role && !isRepresentativeRole(row.role) ? row.role : titleCaseRole(hints[normKey(entity)] || "") || "party",
       email: row?.email && looksLikeEmail(row.email) ? row.email : "",
