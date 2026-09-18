@@ -86,7 +86,12 @@ import {
   isAgreementMarkedSignedInAudit,
   isParticipantSignatureComplete,
   pendingSignatureCount,
+  signatureCompletedParticipantIds,
 } from "./pendingSignatureDerive";
+import {
+  evaluateAcceptedSignatureAttempt,
+  requiredCompletionParticipants,
+} from "../launch/simpleProduct/acceptedSigningCompletionAuthority";
 import { normalizeAgreementDraftFromApi } from "./agreementDraftNormalize";
 import { auditHasRecipientApprovalForParticipant } from "./participantModel";
 import {
@@ -4766,6 +4771,39 @@ export function AgreementRecipientReview({
       if (!draft) return;
       if (!signConsentAccepted) {
         setCeremonyError("Confirm the electronic-signature consent before selecting Agree and sign.");
+        return;
+      }
+      const acceptedSnap = draft.accepted_review_snapshot_v1;
+      const packetRec = draft.vs01_signing_packet_v1 as {
+        accepted_review_snapshot_id?: string;
+        accepted_review_snapshot_digest?: string;
+        portable?: {
+          seed?: { corpusPlain?: string };
+          envelopeProvenance?: { acceptedSoTDigest?: string };
+        };
+      } | null | undefined;
+      const lock = bundle?.signingLock as
+        | { accepted_snapshot_id?: string; accepted_snapshot_digest?: string }
+        | undefined;
+      const allowed = evaluateAcceptedSignatureAttempt({
+        tokenMode: entry.kind,
+        tokenPartyId: tokenValidatedPartyId || participantPid,
+        targetPartyId: participantPid,
+        signedParticipantIds: [...signatureCompletedParticipantIds(draft)],
+        requiredParticipantIds: requiredCompletionParticipants(draft.parties || []).map((row) => row.partyId),
+        agreementId,
+        tokenAgreementId: agreementId,
+        acceptedSnapshotId: acceptedSnap?.snapshotId,
+        acceptedDigest: acceptedSnap?.corpusSha256,
+        lockSnapshotId: lock?.accepted_snapshot_id,
+        lockDigest: lock?.accepted_snapshot_digest,
+        packetSnapshotId: packetRec?.accepted_review_snapshot_id,
+        packetDigest:
+          packetRec?.accepted_review_snapshot_digest || packetRec?.portable?.envelopeProvenance?.acceptedSoTDigest,
+        packetCorpus: packetRec?.portable?.seed?.corpusPlain || acceptedSnap?.corpusPlain,
+      });
+      if (!allowed.ok) {
+        setCeremonyError(recipientCompletionUserMessage(403, allowed.reason));
         return;
       }
       setCeremonyPhase("signing");
