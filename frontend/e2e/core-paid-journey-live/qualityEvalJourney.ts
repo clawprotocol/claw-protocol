@@ -409,6 +409,7 @@ export async function fetchOwnerCanonicalSnapshot(
   corpus: string;
   agreementId: string;
   length: number;
+  status: string;
 }> {
   const api = configuredLiveApiBase();
   const runtime = loadCorePaidJourneyRuntime();
@@ -454,6 +455,7 @@ export async function fetchOwnerCanonicalSnapshot(
     corpus: fields.corpus,
     agreementId: fields.agreementId || agreementId,
     length: fields.length,
+    status: fields.status,
   };
 }
 
@@ -1254,20 +1256,21 @@ export async function completeSignerDetailsThroughVisibleCustomerUi(
   page: Page,
   agreementId: string,
   signers: readonly { legalEntity: string; signerName: string; signerEmail?: string }[],
+  opts?: { bindSignerNamesIntoAcceptedPaper?: boolean },
 ): Promise<void> {
   const signerInputReady = page.locator('[data-claw-recipient-field="r1-signer-name"]').first();
-  if (!(await signerInputReady.isVisible({ timeout: 2_000 }).catch(() => false))) {
+  if (!(await signerInputReady.isVisible({ timeout: 8_000 }).catch(() => false))) {
     const openSetup = page
       .getByTestId("paid-pro-forced-add-signer-details")
       .or(page.getByTestId("pro-review-add-signer-details"))
       .or(
         page.getByRole("button", {
-          name: /Add signer details|Complete signer details|Finalize signer details/i,
+          name: /Add signer details|Complete signer details|Finalize signer details|Prepare for signing|Manage recipients/i,
         }),
       )
       .first();
     expect(
-      await openSetup.isVisible({ timeout: 8_000 }).catch(() => false),
+      await openSetup.isVisible({ timeout: 12_000 }).catch(() => false),
       "visible customer Add/Complete signer details CTA",
     ).toBe(true);
     await openSetup.click();
@@ -1346,7 +1349,7 @@ export async function completeSignerDetailsThroughVisibleCustomerUi(
     );
   }
   const named = signers.filter((signer) => signer.signerName.trim().length >= 2);
-  if (named.length) {
+  if (named.length && opts?.bindSignerNamesIntoAcceptedPaper !== false) {
     try {
       await expect
         .poll(async () => {

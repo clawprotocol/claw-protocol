@@ -104,7 +104,8 @@ export function assertGuidedProVs01BridgeCorpusReady(
     return { ok: false, reason: "corpus_source_not_finalized_signer_applied", diagnostics };
   }
   // Blank `By: ____` or named `By: Elena Vasquez` both count — review-first N-party
-  // paper fills the execution line from intake-supplied signer names.
+  // paper fills the execution line from intake-supplied signer names. Accepted review
+  // provenance does not skip signature or By: structure checks.
   if (!/\b(?:By|Signature)\s*:\s*(?:_{2,}|\S+)/im.test(corpusText)) {
     return { ok: false, reason: "missing_by_or_signature_lines", diagnostics };
   }

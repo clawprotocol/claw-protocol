@@ -245,4 +245,22 @@ describe("TEST496 — paid acceptance hard invariant prevents split-brain starte
       }),
     ).toBe(true);
   });
+
+  it("counts verified accepted review paper as first-review corpus without pipeline re-acceptance", () => {
+    clearPaidProSourceOfTruth();
+    const paper = `${ACCEPTED_PAID_BODY}\n${"Verified accepted snapshot. ".repeat(40)}`;
+    expect(paper.length).toBeGreaterThan(PAID_PRO_AUTHORITY_MIN_LEN);
+    const corpusLen = resolveCanonicalPaidCreateFlowReviewCorpusLen({
+      draft: test496Draft(),
+      agreementDocumentText: "",
+      verifiedReviewPaper: paper,
+    });
+    expect(corpusLen).toBe(paper.trim().length);
+    expect(
+      resolveCanonicalPaidCreateFlowReviewCorpusLen({
+        draft: test496Draft(),
+        agreementDocumentText: paper,
+      }),
+    ).not.toBe(paper.trim().length);
+  });
 });

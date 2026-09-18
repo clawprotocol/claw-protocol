@@ -460,10 +460,17 @@ export function resolveCanonicalPaidCreateFlowReviewCorpusLen(args: {
   premiumPostCheckoutPhase?: string | null;
   pipelineWinningBody?: string | null;
   hydratedPremiumBody?: string | null;
+  agreementId?: string | null;
+  verifiedReviewPaper?: string | null;
 }): number {
   if (hasPaidProSourceOfTruth()) {
-    return getPaidProSourceOfTruthText().trim().length;
+    const sotLen = getPaidProSourceOfTruthText().trim().length;
+    if (sotLen >= PAID_PRO_AUTHORITY_MIN_LEN) return sotLen;
   }
+  const verifiedPaper = String(
+    args.verifiedReviewPaper || selectVerifiedPaidReviewPaper({ agreementId: args.agreementId })?.plain || "",
+  ).trim();
+  if (verifiedPaper.length >= PAID_PRO_AUTHORITY_MIN_LEN) return verifiedPaper.length;
   const createFlowPlain = resolveCreateFlowAuthoritativeReviewPlain({
     agreementDocumentText: args.agreementDocumentText,
     draft: args.draft ?? null,
@@ -505,6 +512,8 @@ export function isCanonicalPaidCreateFlowFirstReviewActive(input: {
   premiumPostCheckoutPhase?: string | null;
   pipelineWinningBody?: string | null;
   hydratedPremiumBody?: string | null;
+  agreementId?: string | null;
+  verifiedReviewPaper?: string | null;
 }): boolean {
   const corpusLen = resolveCanonicalPaidCreateFlowReviewCorpusLen({
     draft: input.draft ?? null,
@@ -515,6 +524,8 @@ export function isCanonicalPaidCreateFlowFirstReviewActive(input: {
     premiumPostCheckoutPhase: input.premiumPostCheckoutPhase,
     pipelineWinningBody: input.pipelineWinningBody,
     hydratedPremiumBody: input.hydratedPremiumBody,
+    agreementId: input.agreementId,
+    verifiedReviewPaper: input.verifiedReviewPaper,
   });
   if (corpusLen < PAID_PRO_AUTHORITY_MIN_LEN) return false;
 

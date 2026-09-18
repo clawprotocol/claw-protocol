@@ -100,7 +100,8 @@ import {
 import { peekReviewFirstHandoffSource } from "./reviewFirstSendSurface";
 import { logReviewFirstLegacySendBlocked } from "../../components/agreements/guidedDealCompletion/guidedFinalReviewToSigning";
 import { shouldSuppressReviewPipelineTelemetry } from "../../vs01/vs01SignatureDashboardFlow";
-import { getOrgId, bootstrapWorkspaceOrg } from "../orgContext";
+import { getOrgId, bootstrapWorkspaceOrg, subscribeToOrgContextChanges } from "../orgContext";
+import { shouldRedirectCreateForStaleOrg } from "./acceptedCreateResumeWorkspace";
 import { ensureAffiliateAttributionForOrg } from "../affiliate/affiliateAttributionContext";
 import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import {
@@ -127,7 +128,15 @@ export function SimpleCreatePage() {
   const showFirstHints = useFirstSessionHint("create");
   const firstSessionLive = useMemo(() => isFirstLawdogSession(), []);
   const [workspaceOrgId, setWorkspaceOrgId] = useState(() => getOrgId());
+  const [workspaceBindTerminal, setWorkspaceBindTerminal] = useState<string | null>(null);
   const hasColdReferralInSearch = Boolean(referralCodeFromCreateSearch(search));
+
+  useEffect(() => {
+    setWorkspaceOrgId(getOrgId());
+    return subscribeToOrgContextChanges((orgId) => {
+      setWorkspaceOrgId(orgId);
+    });
+  }, []);
 
   // Cold GTM referral links must not run entitlement probes (mock-auth 401).
   // Capture ?ref= then send signed-out visitors to sign-in with return destination.
@@ -180,6 +189,7 @@ export function SimpleCreatePage() {
     if (!isReallyAuthenticated || !authUser) return;
     if (isUserWorkspaceOrgId(getOrgId())) {
       setWorkspaceOrgId(getOrgId());
+      setWorkspaceBindTerminal(null);
       return;
     }
     let cancelled = false;
@@ -193,25 +203,41 @@ export function SimpleCreatePage() {
       .then((bind) => {
         if (cancelled) return;
         setWorkspaceOrgId(bind.org_id || getOrgId());
+        setWorkspaceBindTerminal(null);
       })
-      .catch(() => {
-        if (!cancelled) setWorkspaceOrgId(getOrgId());
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setWorkspaceOrgId(getOrgId());
+        setWorkspaceBindTerminal(
+          error instanceof Error ? error.message : "Could not bind workspace.",
+        );
       });
     return () => {
       cancelled = true;
     };
   }, [isReallyAuthenticated, authUser, authSession?.access_token]);
 
-  // If bind cannot settle, leave create rather than probing anon-* forever.
+  // Fresh create may leave if bind cannot settle. Accepted resume stays on this URL.
   useEffect(() => {
     if (probeReadiness.ready || probeReadiness.reason !== "awaiting_user_org") return;
+    const resumeId = parseCreateAgreementIdFromSearch(
+      typeof window !== "undefined" ? window.location.search : search,
+    );
+    if (
+      !shouldRedirectCreateForStaleOrg({
+        urlAgreementId: resumeId,
+        probeReason: probeReadiness.reason,
+      })
+    ) {
+      return;
+    }
     const timer = window.setTimeout(() => {
       if (!isUserWorkspaceOrgId(getOrgId())) {
         navigate("/app");
       }
     }, 8000);
     return () => window.clearTimeout(timer);
-  }, [probeReadiness, navigate]);
+  }, [probeReadiness, navigate, search]);
   const [starterSeed, setStarterSeed] = useState<string | undefined>(undefined);
   const [otherWaysOpen, setOtherWaysOpen] = useState(false);
   const [heroHandoff] = useState(() => readHeroIntakeHandoffForCreate());
@@ -690,6 +716,23 @@ export function SimpleCreatePage() {
   }
 
   if (awaitingAuthWorkspace) {
+    const resumeAgreementId = parseCreateAgreementIdFromSearch(
+      typeof window !== "undefined" ? window.location.search : search,
+    );
+    if (workspaceBindTerminal && resumeAgreementId) {
+      return (
+        <SimpleFlowShell
+          title="Could not open this agreement"
+          subtitle="Your signed-in workspace could not be restored for this agreement."
+          logoHomeHref="/app"
+          hideAffiliateNav
+        >
+          <p className="text-sm text-slate-400" data-testid="create-auth-workspace-bind-failed">
+            {workspaceBindTerminal}
+          </p>
+        </SimpleFlowShell>
+      );
+    }
     // Already-signed-in create/resume must not flash OAuth "Finishing sign-in".
     // When signer-setup resume is armed, keep that chrome so the settle does not
     // look like a create-prompt hop before the agreement preview mounts.

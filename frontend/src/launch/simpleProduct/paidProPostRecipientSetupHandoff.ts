@@ -26,6 +26,10 @@ import {
 } from "./premiumSendIntent";
 import { resolvePremiumSenderFirstSigningPath } from "./premiumSenderFirstSigningRoute";
 import { lockAuthoritativeVersionAndMintSigningInvites } from "./paidProDirectSigningLockAndInvite";
+import {
+  persistAcceptedSigningPacket,
+  shouldOpenSenderFirstProfessionalSign,
+} from "./persistAcceptedSigningPacket";
 import { mintRecipientAccessTokenResult } from "../../agreement/recipientAccessApi";
 import {
   mintSimpleDoneReviewRecipientLinkRows,
@@ -535,7 +539,36 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
       };
     }
   }
-  if (!mintAllRequiredSignTokens && professional?.path) {
+  const acceptedPacket = await persistAcceptedSigningPacket({ agreementId: id });
+  if (acceptedPacket.ok) {
+    markSimpleFlowSent(id);
+    emitActionCompleted("send", { agreementId: id });
+    return { ok: true, destination: "vs01", ownerRoutePath: "" };
+  }
+  if (
+    acceptedPacket.reason !== "accepted_get_missing" &&
+    acceptedPacket.reason !== "status_not_accepted" &&
+    acceptedPacket.reason !== "rejected_pending"
+  ) {
+    return {
+      ok: false,
+      failure: {
+        agreementId: id,
+        reason: "vs01_seed",
+        userMessage:
+          "We could not bind the accepted revision into a signing packet. Reload the agreement and try again.",
+        premiumSendIntent: options.premiumSendIntent,
+      },
+    };
+  }
+
+  if (
+    shouldOpenSenderFirstProfessionalSign({
+      mintAllRequiredSignTokens,
+      persistedParties: lockedInvite.draft.parties || [],
+    }) &&
+    professional?.path
+  ) {
     markSimpleFlowSent(id);
     emitActionCompleted("send", { agreementId: id });
     void options.navigate(professional.path);

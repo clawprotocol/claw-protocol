@@ -11,6 +11,11 @@ import { mintRecipientAccessTokenResult, putSigningLock } from "../../agreement/
 import { persistOwnerDeliveryTrack } from "../../components/agreements/paidProOwnerDeliveryTrack";
 import { persistReviewEmailPartyRolesOnServer } from "./reviewEmailPartyRoles";
 import type { RecipientSetupEmailInput } from "./agreementToVs01SigningBridge";
+import {
+  evaluateAcceptedSigningPreparation,
+  type AcceptedSigningSnapshot,
+} from "./acceptedSigningPreparationAuthority";
+import { fetchCanonicalReviewSnapshot } from "../../agreement/canonicalReviewSnapshotApi";
 
 function ownerSigningPartyId(draft: AgreementDraft | null | undefined): string | null {
   const parties = Array.isArray(draft?.parties) ? draft.parties : [];
@@ -31,8 +36,7 @@ function signingPartyDraftScore(draft: AgreementDraft): number {
   // Two-party Harbor drafts often arrive as Client / Service Provider. After
   // review-email persist they carry owner/reviewer. Prefer the owner-normalized
   // sibling on an equal named-legal count so lock does not fail missing_owner.
-  const ownerBonus =
-    named < 3 && isDurableSigningParticipantId(ownerSigningPartyId(draft)) ? 5 : 0;
+  const ownerBonus = isDurableSigningParticipantId(ownerSigningPartyId(draft)) ? 5 : 0;
   return required * 10 + named + ownerBonus;
 }
 
@@ -45,11 +49,14 @@ export function richerSigningPartyDraft(
   return signingPartyDraftScore(right) > signingPartyDraftScore(left) ? right : left;
 }
 
-/** Three- and four-party deals have no workspace-owner legal-party role; every named party signs. */
+/** Mint every persisted required signer when there is no single workspace-owner party. */
 export function shouldMintSignTokenForEveryRequiredParticipant(
   draft: AgreementDraft | null | undefined,
 ): boolean {
-  return namedLegalSigningPartyCount(draft) >= 3;
+  return (
+    requiredDirectSigningParticipantIds(draft).length > 0 &&
+    !isDurableSigningParticipantId(ownerSigningPartyId(draft))
+  );
 }
 
 const SYNTHETIC_PARTY_ID = /^party_\d+$/i;
@@ -124,29 +131,32 @@ export async function lockAuthoritativeVersionAndMintSigningInvites(options: {
   const id = String(options.agreementId || "").trim();
   if (!id) return { ok: false, reason: "missing_agreement" };
 
+  const existingLock = await fetchAgreementDraftWithSigningLock(id);
   const trackOk = await persistOwnerDeliveryTrack(id, "signature");
-  if (!trackOk) return { ok: false, reason: "delivery_track_persist_failed" };
+  if (!trackOk && !String(existingLock.lockedVersionId || "").trim()) {
+    return { ok: false, reason: "delivery_track_persist_failed" };
+  }
 
   const roles = await persistReviewEmailPartyRolesOnServer(id, options.draft, options.recipientSetup);
   const workingDraft = roles.draft;
 
-  const server = await fetchAgreementDraftWithSigningLock(id);
+  const server = existingLock.ok
+    ? existingLock
+    : await fetchAgreementDraftWithSigningLock(id);
   const serverDraft = server.ok && server.draft ? server.draft : null;
   let authoritative =
     richerSigningPartyDraft(
       richerSigningPartyDraft(options.draft, workingDraft),
       serverDraft,
     ) ?? workingDraft;
-  let namedLegal = namedLegalSigningPartyCount(authoritative);
-  let mintAllRequiredSignTokens = namedLegal >= 3;
+  let mintAllRequiredSignTokens = shouldMintSignTokenForEveryRequiredParticipant(authoritative);
   let ownerPartyId = ownerSigningPartyId(authoritative);
   if (!mintAllRequiredSignTokens && !isDurableSigningParticipantId(ownerPartyId)) {
     const roleNormalized =
       richerSigningPartyDraft(workingDraft, serverDraft) ?? workingDraft;
     if (isDurableSigningParticipantId(ownerSigningPartyId(roleNormalized))) {
       authoritative = roleNormalized;
-      namedLegal = namedLegalSigningPartyCount(authoritative);
-      mintAllRequiredSignTokens = namedLegal >= 3;
+      mintAllRequiredSignTokens = shouldMintSignTokenForEveryRequiredParticipant(authoritative);
       ownerPartyId = ownerSigningPartyId(authoritative);
     }
   }
@@ -155,15 +165,16 @@ export async function lockAuthoritativeVersionAndMintSigningInvites(options: {
   }
 
   const participantIds = requiredDirectSigningParticipantIds(authoritative);
-  if (!mintAllRequiredSignTokens) {
-    if (!ownerPartyId || !participantIds.includes(ownerPartyId)) {
-      return { ok: false, reason: "owner_not_in_required_signers" };
-    }
-    if (participantIds.length < 2) {
-      return { ok: false, reason: "missing_counterparty_participant" };
-    }
-  } else if (participantIds.length < 3) {
-    return { ok: false, reason: "missing_counterparty_participant" };
+  if (participantIds.length < 2) {
+    return {
+      ok: false,
+      reason: isDurableSigningParticipantId(ownerPartyId)
+        ? "missing_counterparty_participant"
+        : "missing_owner_participant",
+    };
+  }
+  if (!mintAllRequiredSignTokens && ownerPartyId && !participantIds.includes(ownerPartyId)) {
+    return { ok: false, reason: "owner_not_in_required_signers" };
   }
 
   let lockedVersionId = String(server.lockedVersionId || "").trim();
@@ -215,6 +226,7 @@ function recipientLinkMintKey(): string {
 export async function lockAndMintSigningInvitesFromPersistedDraft(options: {
   agreementId: string;
   draft?: AgreementDraft | null;
+  acceptedGet?: AcceptedSigningSnapshot | null;
 }): Promise<
   | (Extract<DirectSigningLockAndInviteResult, { ok: true }> & { mintedParticipantIds: string[] })
   | { ok: false; reason: string }
@@ -228,6 +240,29 @@ export async function lockAndMintSigningInvitesFromPersistedDraft(options: {
       server.ok && server.draft ? server.draft : null,
     ) ?? options.draft ?? null;
   if (!authoritative) return { ok: false, reason: "missing_draft" };
+
+  let acceptedGet = options.acceptedGet;
+  if (acceptedGet === undefined) {
+    const fetched = await fetchCanonicalReviewSnapshot({ agreementId: id });
+    acceptedGet = fetched.ok
+      ? {
+          agreement_id: String(fetched.snapshot.agreement_id || id).trim(),
+          snapshot_id: String(fetched.snapshot.snapshot_id || "").trim(),
+          corpus_sha256: String(fetched.snapshot.corpus_sha256 || "").trim(),
+          corpus_plain: String(fetched.snapshot.corpus_plain || ""),
+          corpus_length: Number(fetched.snapshot.corpus_length || String(fetched.snapshot.corpus_plain || "").trim().length),
+          status: String(fetched.status || fetched.snapshot.status || ""),
+        }
+      : null;
+  }
+  if (acceptedGet) {
+    const prepared = evaluateAcceptedSigningPreparation({
+      requestedAgreementId: id,
+      persistedParties: authoritative.parties || [],
+      acceptedGet,
+    });
+    if (!prepared.ok) return { ok: false, reason: prepared.reason };
+  }
 
   const locked = await lockAuthoritativeVersionAndMintSigningInvites({
     agreementId: id,

@@ -3,7 +3,11 @@
  * Chosen before signer setup; survives dashboard resume. Not browser-only authority.
  */
 
-import { patchAgreementField } from "../../agreement/agreementWorkspaceApi";
+import {
+  fetchAgreementDraft,
+  fetchAgreementDraftWithSigningLock,
+  patchAgreementField,
+} from "../../agreement/agreementWorkspaceApi";
 
 export type OwnerDeliveryTrack = "review" | "signature";
 
@@ -55,5 +59,11 @@ export async function persistOwnerDeliveryTrack(
   const normalized = normalizeOwnerDeliveryTrack(track);
   if (!id || !normalized) return false;
   rememberOwnerDeliveryTrack(id, normalized);
-  return patchAgreementField(id, "owner_delivery_track", normalized);
+  if (await patchAgreementField(id, "owner_delivery_track", normalized)) return true;
+  const existing = await fetchAgreementDraft(id);
+  if (normalizeOwnerDeliveryTrack(existing.draft?.owner_delivery_track) === normalized) {
+    return true;
+  }
+  const locked = await fetchAgreementDraftWithSigningLock(id);
+  return Boolean(String(locked.lockedVersionId || "").trim());
 }

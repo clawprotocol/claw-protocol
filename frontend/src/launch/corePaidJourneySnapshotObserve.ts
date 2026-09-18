@@ -99,6 +99,7 @@ export function snapshotFieldsFromObservedPayload(value: unknown): {
   digest: string;
   corpus: string;
   length: number;
+  status: string;
 } {
   const root = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   const nested = root.snapshot && typeof root.snapshot === "object" ? (root.snapshot as Record<string, unknown>) : {};
@@ -109,7 +110,8 @@ export function snapshotFieldsFromObservedPayload(value: unknown): {
     .toLowerCase();
   const corpus = String(nested.corpus_plain || root.corpus_plain || "").trim();
   const length = Number(nested.corpus_length || root.corpus_length || corpus.length) || corpus.length;
-  return { agreementId, snapshotId, digest, corpus, length };
+  const status = String(nested.status || root.status || "").trim().toLowerCase();
+  return { agreementId, snapshotId, digest, corpus, length, status };
 }
 
 /** Alert absence is a success path. Do not wait on a missing node. */

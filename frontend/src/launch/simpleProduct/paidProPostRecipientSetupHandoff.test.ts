@@ -31,6 +31,8 @@ describe("paidProPostRecipientSetupHandoff", () => {
     expect(s).toContain("lockAuthoritativeVersionAndMintSigningInvites");
     expect(s).toContain("mintedInvitesPreserved");
     expect(s).toContain("professional_sign");
+    expect(s).toContain("persistAcceptedSigningPacket");
+    expect(s).toContain("shouldOpenSenderFirstProfessionalSign");
     const mintLoop = s.indexOf("for (const participantId of lockedInvite.requiredParticipantIds)");
     const notReadyAfterMint = s.indexOf(
       "The finalized agreement is not ready for signing yet",
