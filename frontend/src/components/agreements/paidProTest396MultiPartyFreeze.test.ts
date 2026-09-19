@@ -175,9 +175,42 @@ describe("TEST396 — multi-party Pro freeze failure regression", () => {
     expect(record).toBeTruthy();
     expect(sot.length).toBeGreaterThan(500);
 
-    const structural = validateClauseFamilyStructuralIntegrity(sot, { parties });
+    const structural = validateClauseFamilyStructuralIntegrity(sot, {
+      parties,
+      intakeText: TEST396_QUAD_PARTY_INTAKE,
+    });
     expect(structural.ok).toBe(true);
+    expect(structural.violations.map((v) => v.code)).toEqual([]);
     expect(countIfToStanzas(sot)).toBe(4);
+    expect(sot).toContain(RED);
+    expect(sot).toContain(BLUE);
+    expect(sot).toContain(HARBOR);
+    expect(sot).toContain(IRON);
+    expect(sot).toMatch(/If to Red Mesa Logistics LLC:/i);
+    expect(sot).toMatch(/If to Blue Canyon Analytics LLC:/i);
+    expect(sot).toMatch(/If to Harbor Peak Automation LLC:/i);
+    expect(sot).toMatch(/If to Iron Vale Systems Inc\.:/i);
+    expect(sot).toMatch(/Sarah Mitchell/);
+    expect(sot).toMatch(/Dana Chen/);
+    expect(sot).toMatch(/Michael Torres/);
+    expect(sot).toMatch(/Rebecca Stone/);
+    const noticesIdx = sot.search(/\bNotices\b/i);
+    const witnessIdx = sot.search(/\bIN WITNESS WHEREOF\b/i);
+    const noticeStanzas = extractOperativeIfToNoticeStanzas(
+      sot.slice(noticesIdx, witnessIdx >= 0 ? witnessIdx : sot.length),
+    );
+    expect(noticeStanzas).not.toMatch(/Oklahoma law governs/i);
+    expect(noticeStanzas).not.toMatch(/Provider fees and revenue sharing/i);
+    expect(noticeStanzas).toMatch(/100 Commerce Way/);
+
+    const second = establishPaidProSourceOfTruth({
+      text: server,
+      source: "server_full_draft",
+      draft: test396Draft(),
+      intakeText: TEST396_QUAD_PARTY_INTAKE,
+    });
+    expect(getPaidProSourceOfTruthText()).toBe(sot);
+    expect(second?.hash).toBe(record?.hash);
 
     const fatalPlaceholders = collectForbiddenTemplateFragments(sot, TEST396_QUAD_PARTY_INTAKE, {
       partyNames: [RED, BLUE, HARBOR, IRON],

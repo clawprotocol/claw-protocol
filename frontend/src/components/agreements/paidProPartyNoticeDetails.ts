@@ -750,7 +750,7 @@ const NOTICE_ADDRESS_EXECUTION_LINE_RE =
   /^(?:By|Name|Title|Date|CLIENT|SERVICE\s+PROVIDER)\s*:/i;
 
 const NOTICE_ADDRESS_INSTRUCTIONAL_LINE_RE =
-  /\b(?:each party should\b|signature block\b|in witness whereof\b|parties (?:shall )?execute\b)/i;
+  /\b(?:each party should\b|signature block\b|in witness whereof\b|parties (?:shall )?execute\b|this agreement is governed by\b|law governs\b|provider fees\b|revenue sharing among\b)/i;
 
 /** True when a line must stop multiline notice-address capture (execution, headings, prose). */
 export function isNoticeAddressCaptureBoundaryLine(line: string | null | undefined): boolean {

@@ -15,7 +15,8 @@ import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { maskEmailAddresses, unmaskEmailAddresses } from "./paidProEmailMask";
 import { US_STATE_NAMES_ENGLISH } from "./partyFormat";
 
-const IF_TO_NOTICE_HEADER_RE = /^If to\s+(.+?)\s*:\s*$/i;
+/** Header may omit the colon (`If to North Star Manufacturing LLC`). */
+const IF_TO_NOTICE_HEADER_RE = /^If to\s+(.+?)\s*:?\s*$/i;
 
 /**
  * Recognized operative-section headings. Shared with canonical party extraction so
@@ -152,9 +153,10 @@ export function collapseDuplicatedIfToHeaderLines(text: string, fullNames: reado
   let changed = false;
   const out = lines.map((line) => {
     const trimmed = line.trim();
-    const match = trimmed.match(/^If to\s+(.+?)\s*:\s*$/i);
+    const match = trimmed.match(IF_TO_NOTICE_HEADER_RE);
     if (!match?.[1]) return line;
     const entity = collapseDuplicatedLegalEntityPhrase(match[1].trim(), fullNames);
+    if (!fullNames.some((full) => partyLegalNamesMatch(entity, full))) return line;
     const normalized = `If to ${entity}:`;
     if (trimmed === normalized) return line;
     changed = true;
@@ -228,10 +230,16 @@ export function collapseDuplicateNoticeEntityLines(text: string, fullNames: read
     const ifToMatch = trimmed.match(IF_TO_NOTICE_HEADER_RE);
 
     if (ifToMatch) {
+      const candidate = collapseDuplicatedLegalEntityPhrase((ifToMatch[1] ?? "").trim(), fullNames);
+      const knownParty = fullNames.some((full) => partyLegalNamesMatch(candidate, full));
+      if (!knownParty) {
+        out.push(line);
+        continue;
+      }
       if (inNoticeBlock) flushNoticeLog();
       inNoticeBlock = true;
       sawEntityLineInBlock = false;
-      headerEntity = collapseDuplicatedLegalEntityPhrase((ifToMatch[1] ?? "").trim(), fullNames);
+      headerEntity = candidate;
       const normalizedHeader = `If to ${headerEntity}:`;
       blockRenderedLines = [normalizedHeader];
       removedDuplicateInBlock = false;
@@ -254,13 +262,13 @@ export function collapseDuplicateNoticeEntityLines(text: string, fullNames: read
         out.push(line);
         continue;
       }
-      if (/^Attn:/i.test(trimmed) || /^Email(?:\s+for\s+Notice)?\s*:/i.test(trimmed)) {
+      if (
+        /^Attn:/i.test(trimmed) ||
+        /^Email(?:\s+for\s+Notice)?\s*:/i.test(trimmed) ||
+        /^Address(?:\s+for\s+Notice)?\s*:/i.test(trimmed)
+      ) {
+        // Stay inside this party's stanza so later entity-only dupes still collapse.
         blockRenderedLines.push(trimmed);
-        flushNoticeLog();
-        inNoticeBlock = false;
-        sawEntityLineInBlock = false;
-        headerEntity = "";
-        blockRenderedLines = [];
         out.push(line);
         continue;
       }
