@@ -76,6 +76,40 @@ def _recipient_visible_approval_audit(
     return visible
 
 
+def _recipient_visible_completion_audit(draft: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Keep completion marks only: who finished signing and the fully-executed cap."""
+    visible: List[Dict[str, Any]] = []
+    for raw in draft.get("audit_log") or []:
+        event = raw if isinstance(raw, dict) else getattr(raw, "model_dump", lambda: None)()
+        if not isinstance(event, dict):
+            continue
+        et = _clean(event.get("event_type"))
+        value = event.get("value") if isinstance(event.get("value"), dict) else {}
+        if et == "signature_completed":
+            pid = _clean(value.get("participant_id"))
+            if not pid:
+                continue
+            visible.append(
+                {
+                    "event_type": et,
+                    "at": event.get("at"),
+                    "field": "signing",
+                    "value": {"participant_id": pid},
+                }
+            )
+        elif et == "signed":
+            slim = {"fully_executed": True} if value.get("fully_executed") else {}
+            visible.append(
+                {
+                    "event_type": et,
+                    "at": event.get("at"),
+                    "field": "signing",
+                    "value": slim,
+                }
+            )
+    return visible
+
+
 def project_recipient_agreement_draft(
     draft: Dict[str, Any],
     *,
@@ -110,6 +144,7 @@ def project_recipient_agreement_draft(
     out["parties"] = parties_out
 
     approval_audit = _recipient_visible_approval_audit(draft, pid)
+    completion_audit = _recipient_visible_completion_audit(draft)
 
     # Drop high-sensitivity / unrelated operational fields.
     for key in (
@@ -124,8 +159,9 @@ def project_recipient_agreement_draft(
         "vs01_signer_execution_v1",
     ):
         out.pop(key, None)
-    if approval_audit:
-        out["audit_log"] = approval_audit
+    visible_audit = [*approval_audit, *completion_audit]
+    if visible_audit:
+        out["audit_log"] = visible_audit
 
     # Portable packet: keep structure but strip other signers' emails when possible.
     pkt = out.get("vs01_signing_packet_v1")

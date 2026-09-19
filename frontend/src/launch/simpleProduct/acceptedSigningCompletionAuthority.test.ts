@@ -209,12 +209,84 @@ describe("accepted signing completion authority", () => {
 
   it("does not treat a hardcoded four-party threshold or role===signer as authority", () => {
     const source = readFileSync(join(__dirname, "acceptedSigningCompletionAuthority.ts"), "utf8");
-    expect(source).not.toMatch(/requiredCount\s*>=\s*4|===\s*4|hardcoded/);
+    expect(source).not.toMatch(/requiredCount\s*>=\s*[234]|===\s*[234]|>=\s*3|hardcoded/);
     expect(source).toContain("requiredSignersFromPersistedParties");
     const derive = readFileSync(join(__dirname, "../../agreement/pendingSignatureDerive.ts"), "utf8");
     expect(derive).toContain("requiredSignerPartiesFromDraft");
     expect(derive).toContain("const signers = requiredSignerParties(draft)");
     expect(derive).toContain("const signerParties = requiredSignerParties(args.draft)");
+    expect(derive).not.toMatch(/signers\.length\s*>=\s*3|pending\s*===\s*[234]/);
+  });
+
+  it("excludes parties marked as not requiring signature and synthetic IDs", () => {
+    const withNoticeOnly = [
+      ...twoParty(),
+      {
+        id: "notice-uuid",
+        name: "Notice Desk LLC",
+        role: "reviewer",
+        signerName: "Notice Desk",
+        email: "notices@harborpeak.test",
+        requiresSignature: false,
+      },
+      { id: "party_3", name: "Synthetic Slot", role: "Advisor", signerName: "No One", email: "none@example.test" },
+    ];
+    const required = requiredCompletionParticipants(withNoticeOnly);
+    expect(required.map((row) => row.partyId)).toEqual(["harbor-uuid", "ironvale-uuid"]);
+    expect(
+      completionProgressFromPersistedParticipants({
+        parties: withNoticeOnly,
+        signedParticipantIds: ["harbor-uuid", "ironvale-uuid", "notice-uuid"],
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        requiredCount: 2,
+        signedCount: 2,
+        complete: true,
+        signedRequiredIds: ["harbor-uuid", "ironvale-uuid"],
+      }),
+    );
+  });
+
+  it("keeps Consultant/Client and three-party order without rewriting roles", () => {
+    const two = requiredCompletionParticipants(twoParty());
+    expect(two.map((row) => ({ role: row.role, signerName: row.signerName, email: row.email }))).toEqual([
+      { role: "Consultant", signerName: "Pat Harbor", email: "pat.harbor@harbor.test" },
+      { role: "Client", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+    ]);
+    const reversed = requiredCompletionParticipants([...twoParty()].reverse());
+    expect(reversed.map((row) => row.partyId)).toEqual(["ironvale-uuid", "harbor-uuid"]);
+    expect(reversed.map((row) => row.role)).toEqual(["Client", "Consultant"]);
+    const three = requiredCompletionParticipants(threeParty());
+    expect(three.map((row) => row.role)).toEqual(["Consultant", "Client", "Advisor"]);
+    expect(three.map((row) => row.partyId)).toEqual(["harbor-uuid", "ironvale-uuid", "alex-uuid"]);
+  });
+
+  it("issues a receipt only after every persisted required party has signed", () => {
+    expect(
+      receipt({ parties: twoParty(), signedParticipantIds: ["harbor-uuid"] }).reason,
+    ).toBe("receipt_before_all_required");
+    expect(
+      receipt({
+        parties: twoParty(),
+        signedParticipantIds: ["harbor-uuid", "ironvale-uuid"],
+      }).ok,
+    ).toBe(true);
+    expect(
+      receipt({ parties: threeParty(), signedParticipantIds: ["harbor-uuid"] }).reason,
+    ).toBe("receipt_before_all_required");
+    expect(
+      receipt({
+        parties: threeParty(),
+        signedParticipantIds: ["harbor-uuid", "ironvale-uuid"],
+      }).reason,
+    ).toBe("receipt_before_all_required");
+    expect(
+      receipt({
+        parties: threeParty(),
+        signedParticipantIds: ["harbor-uuid", "ironvale-uuid", "alex-uuid"],
+      }).ok,
+    ).toBe(true);
   });
 
   it("counts commercial Silver Mesa roles on the pending/complete surfaces", () => {
@@ -283,5 +355,15 @@ describe("accepted signing completion authority", () => {
     const review = readFileSync(join(__dirname, "../../agreement/AgreementRecipientReview.tsx"), "utf8");
     expect(review).toContain("evaluateAcceptedSignatureAttempt");
     expect(review).toContain("requiredCompletionParticipants");
+  });
+
+  it("exposes Agree and sign on both desktop and mobile without a desktop-only-only path", () => {
+    const review = readFileSync(join(__dirname, "../../agreement/AgreementRecipientReview.tsx"), "utf8");
+    expect(review).toMatch(/className="hidden sm:block"[\s\S]*data-testid="recipient-sign-action"/);
+    expect(review).toMatch(/sm:hidden[\s\S]*data-testid="recipient-sign-action"/);
+    const handlers = review.match(/onClick=\{\(\) => void handleRecordSignature\(\)\}/g) || [];
+    expect(handlers.length).toBeGreaterThanOrEqual(2);
+    expect(review).not.toMatch(/data-testid="recipient-sign-action"[\s\S]{0,120}hidden md:flex/);
+    expect(review).not.toMatch(/lg:only|desktop-only-sign/);
   });
 });

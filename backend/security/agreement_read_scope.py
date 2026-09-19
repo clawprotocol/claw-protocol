@@ -368,7 +368,12 @@ def assert_agreement_recipient_write_allowed(
                 )
 
 
-def assert_agreement_full_draft_read_allowed(request: Request, agreement_id: str) -> None:
+def assert_agreement_full_draft_read_allowed(
+    request: Request,
+    agreement_id: str,
+    *,
+    allow_completed_signer_replay: bool = False,
+) -> None:
     """
     Require recipient token or owner principal before returning a full draft / render.
 
@@ -398,6 +403,7 @@ def assert_agreement_full_draft_read_allowed(request: Request, agreement_id: str
             secret_raw=secret_raw,
             consume_single_use=False,
             log_validation=False,
+            allow_completed_signer_replay=allow_completed_signer_replay,
         )
         return
 

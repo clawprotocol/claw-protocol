@@ -10353,7 +10353,9 @@ def get_public_vs01_signing_packet(
 
 @router.get("/{agreement_id}")
 def get_agreement_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
-    assert_agreement_full_draft_read_allowed(request, agreement_id)
+    assert_agreement_full_draft_read_allowed(
+        request, agreement_id, allow_completed_signer_replay=True
+    )
     draft = _load_or_404(agreement_id)
     lock = read_signing_lock(agreement_id)
     lv = str((lock or {}).get("locked_version_id") or "").strip()
@@ -10687,6 +10689,111 @@ def post_recipient_preview_export_pdf(
     )
 
 
+def _completed_signed_pdf_authority_or_403(agreement_id: str, draft: AgreementDraft) -> Dict[str, str]:
+    from backend.services.accepted_review_snapshot import get_accepted_snapshot_record, is_pure_legacy_pre_cutover
+    from backend.services.completed_signed_pdf_export import evaluate_completed_signed_pdf_export
+
+    required = _required_signing_participant_ids(draft)
+    signed = [
+        str((_audit_event_dict(e).get("value") or {}).get("participant_id") or "").strip()
+        for e in (draft.audit_log or [])
+        if str(_audit_event_dict(e).get("event_type") or "") == "signature_completed"
+    ]
+    accepted = get_accepted_snapshot_record(draft) or {}
+    lock = read_signing_lock(agreement_id) or {}
+    packet = getattr(draft, "vs01_signing_packet_v1", None) or {}
+    if not isinstance(packet, dict):
+        packet = {}
+    receipt = None
+    if _agreement_draft_fully_executed(draft):
+        receipt = _issue_or_reuse_drafted_finalized_receipt(
+            agreement_id=agreement_id,
+            draft=draft,
+            lock=lock,
+            finalized_at=_finalized_at_from_draft(draft) or _utc_now_iso(),
+        )
+    reason = evaluate_completed_signed_pdf_export(
+        args={
+            "required_participant_ids": required,
+            "signed_participant_ids": signed,
+            "receipt_bound": _receipt_view_is_bound(receipt),
+            "receipt_id": str((receipt or {}).get("receipt_id") or ""),
+            "accepted_snapshot_id": str(accepted.get("snapshotId") or ""),
+            "accepted_digest": str(accepted.get("corpusSha256") or ""),
+            "lock_snapshot_id": str(lock.get("accepted_snapshot_id") or ""),
+            "lock_digest": str(lock.get("accepted_snapshot_digest") or ""),
+            "lock_version_id": str(lock.get("locked_version_id") or ""),
+            "packet_snapshot_id": str(packet.get("accepted_review_snapshot_id") or ""),
+            "packet_digest": str(packet.get("accepted_review_snapshot_digest") or ""),
+            "unsigned_historical_paper": is_pure_legacy_pre_cutover(draft),
+        }
+    )
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+    portable = packet.get("portable") if isinstance(packet.get("portable"), dict) else {}
+    seed = portable.get("seed") if isinstance(portable.get("seed"), dict) else {}
+    return {
+        "accepted_snapshot_id": str(accepted.get("snapshotId") or ""),
+        "accepted_digest": str(accepted.get("corpusSha256") or "").strip().lower(),
+        "lock_version_id": str(lock.get("locked_version_id") or ""),
+        "receipt_id": str((receipt or {}).get("receipt_id") or ""),
+        "packet_document_id": str(
+            packet.get("document_id") or seed.get("documentId") or ""
+        ).strip(),
+    }
+
+
+def _assert_completed_signed_pdf_read_allowed(request: Request, agreement_id: str) -> None:
+    from backend.security.agreement_read_scope import (
+        recipient_access_token_from_request,
+        validate_recipient_access_token_for_agreement,
+    )
+    from backend.config.agreement_signing_token import (
+        SigningTokenSecretMissingInProductionError,
+        resolve_signing_token_secret_raw,
+    )
+
+    tok = recipient_access_token_from_request(request)
+    if not tok:
+        assert_agreement_full_draft_read_allowed(request, agreement_id)
+        return
+    try:
+        secret_raw = resolve_signing_token_secret_raw()
+    except SigningTokenSecretMissingInProductionError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "signing_token_secret_not_configured", "message": str(exc)},
+        ) from exc
+    claims = validate_recipient_access_token_for_agreement(
+        token=tok,
+        path_agreement_id=agreement_id,
+        query_agreement_id=None,
+        secret_raw=secret_raw,
+        consume_single_use=False,
+        log_validation=False,
+        allow_completed_signer_replay=True,
+    )
+    if str(claims.get("mode") or "") != "sign":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "recipient_token_mode_not_allowed",
+                "message": "Completed PDF download requires a signer link, not a review link.",
+            },
+        )
+    pid = str(claims.get("recipient_party_id") or "").strip()
+    draft = _load_or_404(agreement_id)
+    required = set(_required_signing_participant_ids(draft))
+    if not pid or pid not in required:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "recipient_party_token_mismatch",
+                "message": "This signer link is not bound to a required party on this agreement.",
+            },
+        )
+
+
 @router.post("/{agreement_id}/completed-signed-export-pdf")
 def post_completed_signed_export_pdf(
     agreement_id: str,
@@ -10698,10 +10805,11 @@ def post_completed_signed_export_pdf(
     aid = (agreement_id or "").strip()
     if not aid:
         raise HTTPException(status_code=400, detail="missing_agreement_id")
-    assert_agreement_full_draft_read_allowed(request, aid)
+    _assert_completed_signed_pdf_read_allowed(request, aid)
     draft = _load_or_404(aid)
     if not _agreement_draft_fully_executed(draft):
         raise HTTPException(status_code=403, detail="agreement_not_fully_executed")
+    authority = _completed_signed_pdf_authority_or_403(aid, draft)
 
     from backend.services.vs01_fully_executed_snapshot import ensure_fully_executed_snapshot_on_draft
 
@@ -10716,7 +10824,7 @@ def post_completed_signed_export_pdf(
         _save_draft_sync(next_draft.model_dump(), request)
         draft = next_draft
 
-    return build_completed_signed_pdf_response(agreement_id=aid, draft=draft)
+    return build_completed_signed_pdf_response(agreement_id=aid, draft=draft, authority=authority)
 
 
 @router.get("/public/{agreement_id}/completed-signed-export-pdf")
@@ -10739,7 +10847,8 @@ def get_public_completed_signed_export_pdf(agreement_id: str) -> Response:
         raise HTTPException(status_code=404, detail="not_found")
     if not _agreement_draft_fully_executed(draft):
         raise HTTPException(status_code=403, detail="agreement_not_fully_executed")
-    return build_completed_signed_pdf_response(agreement_id=aid, draft=draft)
+    authority = _completed_signed_pdf_authority_or_403(aid, draft)
+    return build_completed_signed_pdf_response(agreement_id=aid, draft=draft, authority=authority)
 
 
 @router.get("/{agreement_id}/completion-evidence")

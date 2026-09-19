@@ -92,6 +92,8 @@ import {
   evaluateAcceptedSignatureAttempt,
   requiredCompletionParticipants,
 } from "../launch/simpleProduct/acceptedSigningCompletionAuthority";
+import { downloadCompletedSignedAgreementPdf } from "./completedSignedAgreementPdfDownload";
+import { CREATOR_DOWNLOAD_PDF_LABEL } from "../launch/creatorDashboardCopy";
 import { normalizeAgreementDraftFromApi } from "./agreementDraftNormalize";
 import { auditHasRecipientApprovalForParticipant } from "./participantModel";
 import {
@@ -897,6 +899,8 @@ export function AgreementRecipientReview({
   const [proRedlineSuggestSuccess, setProRedlineSuggestSuccess] = useState(false);
   type CeremonyPhase = "idle" | "start_error" | "ready" | "signing" | "done";
   const [ceremonyPhase, setCeremonyPhase] = useState<CeremonyPhase>("idle");
+  const [completedSignedPdfBusy, setCompletedSignedPdfBusy] = useState(false);
+  const [completedSignedPdfError, setCompletedSignedPdfError] = useState<string | null>(null);
   const [ceremonyError, setCeremonyError] = useState<string | null>(null);
   const [reviewAuthorityMeta, setReviewAuthorityMeta] = useState<RecipientReviewAuthorityMeta | null>(null);
   const [boundReviewRevisionPlain, setBoundReviewRevisionPlain] = useState("");
@@ -4951,6 +4955,38 @@ export function AgreementRecipientReview({
                         All required signers have completed this agreement.
                       </p>
                       <p className="mt-2 text-xs leading-relaxed text-emerald-100/90">{RECIPIENT_SIGN_RECORD_SUBLINE}</p>
+                      <button
+                        type="button"
+                        className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                        data-testid="recipient-completed-signed-download-pdf"
+                        disabled={completedSignedPdfBusy}
+                        onClick={() => {
+                          void (async () => {
+                            setCompletedSignedPdfBusy(true);
+                            setCompletedSignedPdfError(null);
+                            try {
+                              await downloadCompletedSignedAgreementPdf({
+                                agreementId,
+                                title: draft?.title,
+                                readHeaders: recipientAgreementReadHeaders(agreementId, recipientAccessToken),
+                              });
+                            } catch (e: unknown) {
+                              setCompletedSignedPdfError(
+                                e instanceof Error ? e.message : "Could not download PDF.",
+                              );
+                            } finally {
+                              setCompletedSignedPdfBusy(false);
+                            }
+                          })();
+                        }}
+                      >
+                        {completedSignedPdfBusy ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
+                      </button>
+                      {completedSignedPdfError ? (
+                        <p className="mt-2 text-xs text-amber-100/95" role="alert">
+                          {completedSignedPdfError}
+                        </p>
+                      ) : null}
                     </>
                   ) : null}
                   {!showCelebrate && signingLine ? (

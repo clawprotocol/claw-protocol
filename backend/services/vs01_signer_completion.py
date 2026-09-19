@@ -240,7 +240,17 @@ def all_signers_signed_from_audit(draft: Dict[str, Any], audit: List[Any]) -> bo
     required_roles = required_vs01_signer_role_ids(draft)
     if required_roles:
         completed_roles = completed_vs01_signer_role_ids(audit)
-        return required_roles <= completed_roles
+        if required_roles <= completed_roles:
+            return True
+        done = signature_completed_participant_ids(audit)
+        required_parties = {
+            portable_party_id_for_signer_role(draft, rid)
+            for rid in required_roles
+        }
+        required_parties.discard("")
+        if required_parties and required_parties <= done:
+            return True
+        return False
 
     signing_parties = [p for p in parties if party_requires_signature(p)]
     if signing_parties:
