@@ -37,7 +37,7 @@ export function mergePaidProAuthoritativeDraftFieldsFromApi(
   if (dt) extras.document_text = dt;
   const rt = str("rendered_document_text");
   if (rt) extras.rendered_document_text = rt;
-  const deliveryTrack = normalizeOwnerDeliveryTrack(o.owner_delivery_track);
+  const deliveryTrack = normalizeOwnerDeliveryTrack(apiDraft.owner_delivery_track);
   if (deliveryTrack) extras.owner_delivery_track = deliveryTrack;
   const agreementId = str("id");
   if (agreementId && deliveryTrack) rememberOwnerDeliveryTrack(agreementId, deliveryTrack);

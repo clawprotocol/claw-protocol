@@ -68,7 +68,7 @@ describe("mergePaidProAuthoritativeDraftFieldsFromApi", () => {
         },
       ],
       owner_delivery_track: "signature",
-    } as AgreementDraft & { owner_delivery_track?: string };
+    } as AgreementDraft;
     const coerced: ParsedDraftShape = {
       title: "T",
       jurisdiction: "DE",
@@ -80,11 +80,32 @@ describe("mergePaidProAuthoritativeDraftFieldsFromApi", () => {
       effective_date: null,
       payment: { amount: null, cadence: null, valid: false },
     };
-    const merged = mergePaidProAuthoritativeDraftFieldsFromApi(coerced, apiDraft) as ParsedDraftShape & {
-      owner_delivery_track?: string;
-    };
+    const merged = mergePaidProAuthoritativeDraftFieldsFromApi(coerced, apiDraft);
     expect(merged.owner_delivery_track).toBe("signature");
     expect((merged.parties[0] as { signerName?: string }).signerName).toBe("Pat Harbor");
+  });
+
+  it("does not default a missing or unknown delivery track to signature", () => {
+    const coerced: ParsedDraftShape = {
+      title: "T",
+      jurisdiction: "DE",
+      parties: [{ name: "Harbor Peak Analytics LLC", role: "Consultant" }],
+      purpose: "Scope",
+      payment_terms: "",
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      payment: { amount: null, cadence: null, valid: false },
+    };
+    const missingDraft = normalizeAgreementDraftFromApi({ id: "agr-missing-track" });
+    const unknownDraft = normalizeAgreementDraftFromApi({
+      id: "agr-unknown-track",
+      owner_delivery_track: "send",
+    });
+    const missing = mergePaidProAuthoritativeDraftFieldsFromApi(coerced, missingDraft);
+    const unknown = mergePaidProAuthoritativeDraftFieldsFromApi(coerced, unknownDraft);
+    expect(missing.owner_delivery_track ?? null).toBeNull();
+    expect(unknown.owner_delivery_track ?? null).toBeNull();
   });
 
   it("copies persisted signer names onto coerced parties and keeps them after intake defaults", () => {
@@ -250,5 +271,25 @@ describe("phase4b51 GET draft normalize", () => {
     );
     expect(draft).not.toBeNull();
     expect(String(draft?.server_full_document_text || "").length).toBeGreaterThanOrEqual(500);
+  });
+
+  it("normalizes persisted owner_delivery_track and drops unknown values", () => {
+    const signed = normalizeAgreementDraftFromApi({
+      id: "ag-track-signature",
+      owner_delivery_track: "SIGNATURE",
+    });
+    expect(signed?.owner_delivery_track).toBe("signature");
+    const review = normalizeAgreementDraftFromApi({
+      id: "ag-track-review",
+      owner_delivery_track: "review",
+    });
+    expect(review?.owner_delivery_track).toBe("review");
+    const unknown = normalizeAgreementDraftFromApi({
+      id: "ag-track-unknown",
+      owner_delivery_track: "send",
+    });
+    expect(unknown?.owner_delivery_track).toBeNull();
+    const missing = normalizeAgreementDraftFromApi({ id: "ag-track-missing" });
+    expect(missing?.owner_delivery_track).toBeNull();
   });
 });

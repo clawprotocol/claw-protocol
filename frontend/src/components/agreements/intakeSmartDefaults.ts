@@ -1,3 +1,4 @@
+import type { AgreementOwnerDeliveryTrack } from "../../agreement/agreementTypes";
 import { detectAgreementFamily, isHireToDoWorkNotEmployment, type AgreementFamily } from "./agreementFamilyRouter";
 import { formatPaymentTermsLine, type IntakePaymentField } from "./intakeCurrencyParse";
 import { buildLiveDraftPreview } from "./liveDraftHeuristics";
@@ -37,7 +38,7 @@ export type ParsedDraftShape = {
   jurisdiction: string;
   parties: { id?: string; name: string; role: string; email?: string; signerName?: string; signerTitle?: string; signer_name?: string }[];
   purpose: string;
-  owner_delivery_track?: "review" | "signature" | null;
+  owner_delivery_track?: AgreementOwnerDeliveryTrack | null;
   payment_terms: string;
   duration: string | null;
   due_date: string | null;

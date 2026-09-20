@@ -2,6 +2,9 @@
 
 import type { PaymentRequestPayload } from "./paymentRequestTypes";
 
+/** Owner-chosen send track persisted on the agreement draft (`PATCH owner_delivery_track`). */
+export type AgreementOwnerDeliveryTrack = "review" | "signature";
+
 export type AgreementParty = {
   id?: string;
   name: string;
@@ -33,6 +36,11 @@ export type AgreementDraft = {
   versions: Array<{ version: number; created_at: string; note?: string | null }>;
   audit_log: Array<{ event_type: string; at: string; field?: string | null; value?: unknown }>;
   review_sent_at?: string | null;
+  /**
+   * Owner-chosen delivery track persisted on the draft. Absent/`null` is not
+   * signature. Unknown server values must be dropped at normalize.
+   */
+  owner_delivery_track?: AgreementOwnerDeliveryTrack | null;
   /** ISO timestamp when review invite emails were successfully sent (idempotency guard). */
   review_invite_emails_sent_at?: string | null;
   workspace_archived_at?: string | null;

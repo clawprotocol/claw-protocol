@@ -3,20 +3,20 @@
  * Chosen before signer setup; survives dashboard resume. Not browser-only authority.
  */
 
+import type { AgreementOwnerDeliveryTrack } from "../../agreement/agreementTypes";
+import { normalizeAgreementOwnerDeliveryTrack } from "../../agreement/agreementDraftNormalize";
 import {
   fetchAgreementDraft,
   fetchAgreementDraftWithSigningLock,
   patchAgreementField,
 } from "../../agreement/agreementWorkspaceApi";
 
-export type OwnerDeliveryTrack = "review" | "signature";
+export type OwnerDeliveryTrack = AgreementOwnerDeliveryTrack;
 
 const memoryTracks = new Map<string, OwnerDeliveryTrack>();
 
 export function normalizeOwnerDeliveryTrack(value: unknown): OwnerDeliveryTrack | null {
-  const v = String(value || "").trim().toLowerCase();
-  if (v === "review" || v === "signature") return v;
-  return null;
+  return normalizeAgreementOwnerDeliveryTrack(value);
 }
 
 export function rememberOwnerDeliveryTrack(
@@ -65,5 +65,8 @@ export async function persistOwnerDeliveryTrack(
     return true;
   }
   const locked = await fetchAgreementDraftWithSigningLock(id);
+  if (normalizeOwnerDeliveryTrack(locked.draft?.owner_delivery_track) === normalized) {
+    return true;
+  }
   return Boolean(String(locked.lockedVersionId || "").trim());
 }

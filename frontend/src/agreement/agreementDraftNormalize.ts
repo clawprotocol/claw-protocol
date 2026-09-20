@@ -1,5 +1,6 @@
 import type {
   AgreementDraft,
+  AgreementOwnerDeliveryTrack,
   AgreementParty,
   Vs01SigningPacketDraftRecordV1,
 } from "./agreementTypes";
@@ -12,6 +13,15 @@ import {
   textContainsUnresolvedIdentityPlaceholders,
 } from "./partyPlaceholderDisplay";
 import { collapseDraftPartyRows } from "../components/agreements/partySlotIdentityNormalize";
+
+/** Persist only explicit review/signature tracks. Unknown values cannot unlock a workflow. */
+export function normalizeAgreementOwnerDeliveryTrack(
+  value: unknown,
+): AgreementOwnerDeliveryTrack | null {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (v === "review" || v === "signature") return v;
+  return null;
+}
 
 function coerceStr(v: unknown): string {
   if (v == null) return "";
@@ -233,6 +243,7 @@ export function normalizeAgreementDraftFromApi(
     updated_at: coerceStr(r.updated_at) || now,
     versions: normVersions,
     audit_log: normAudit,
+    owner_delivery_track: normalizeAgreementOwnerDeliveryTrack(r.owner_delivery_track),
     review_sent_at:
       r.review_sent_at == null || r.review_sent_at === "" ? null : coerceNullStr(r.review_sent_at),
     review_invite_emails_sent_at:
