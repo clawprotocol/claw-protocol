@@ -7,6 +7,12 @@ from fastapi.testclient import TestClient
 import backend.services.agreement_draft_store as ads
 from backend.main import app
 from backend.services.agreement_pdf_story_capability import reset_agreement_pdf_story_capability_cache_for_tests
+from backend.tests.auth_fixtures import (
+    load_agreement_draft_for_tests,
+    mint_party_bound_recipient_token,
+    persist_accept_party_bound_approvals_and_lock,
+    persisted_party_id,
+)
 from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
@@ -179,25 +185,23 @@ def test_recipient_magic_link_validate_party_and_agreement_id(monkeypatch, tmp_p
         },
     )
     assert upd.status_code == 200
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_H,
-        json={
-            "mode": "review",
-            "role": "signer",
-            "recipient_party_id": "pid-signer",
-            "inviter_display_name": "Owner Co",
-        },
+    draft = load_agreement_draft_for_tests(client, aid, _ORG_H)
+    signer_id = persisted_party_id(draft, name="Alex Signer", role="signer")
+    tok = mint_party_bound_recipient_token(
+        client,
+        aid,
+        _ORG_H,
+        mode="review",
+        recipient_party_id=signer_id,
+        inviter_display_name="Owner Co",
     )
-    assert mint.status_code == 200
-    tok = mint.json()["token"]
     ok = client.get(
         f"/api/agreements/access/validate",
         params={"token": tok, "agreement_id": aid},
     )
     assert ok.status_code == 200
     payload = ok.json()
-    assert payload["recipient_party_id"] == "pid-signer"
+    assert payload["recipient_party_id"] == signer_id
     assert payload["inviter_display_name"] == "Owner Co"
     mismatch = client.get(
         "/api/agreements/access/validate",
@@ -263,60 +267,54 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
         },
     )
     assert upd.status_code == 200
-    mint_rev = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_H,
-        json={"mode": "review", "role": "signer"},
+    draft = load_agreement_draft_for_tests(client, aid, _ORG_H)
+    acme_id = persisted_party_id(draft, name="Acme Growth LLC", role="signer")
+    beta_id = persisted_party_id(draft, name="Beta LLC", role="signer")
+    persist_accept_party_bound_approvals_and_lock(
+        client,
+        aid,
+        _ORG_H,
+        locked_version_id="lv-ceremony-1",
+        signer_party_ids=[acme_id, beta_id],
     )
-    assert mint_rev.status_code == 200
-    review_tok = mint_rev.json()["token"]
-    recv_hdr = {"X-Claw-Recipient-Access-Token": review_tok}
-    for pid, label in (("p-acme", "Acme"), ("p-beta", "Beta")):
-        ap = client.post(
-            f"/api/agreements/{aid}/recipient-approve",
-            headers=recv_hdr,
-            json={
-                "participant_id": pid,
-                "participant_display_name": label,
-            },
+    owner_id = persisted_party_id(draft, name="Owner LLC", role="owner")
+    owner_hdr = {
+        "X-Claw-Recipient-Access-Token": mint_party_bound_recipient_token(
+            client, aid, _ORG_H, mode="sign", recipient_party_id=owner_id
         )
-        assert ap.status_code == 200
-    lock = client.put(
-        f"/api/agreements/{aid}/signing-lock",
-        headers=_ORG_H,
+    }
+    owner_done = client.post(
+        f"/api/agreements/{aid}/signing-ceremony/complete",
+        headers=owner_hdr,
         json={
+            "participant_id": owner_id,
+            "typed_name": "Owner LLC",
             "locked_version_id": "lv-ceremony-1",
-            "locked_at": "2026-04-01T12:00:00Z",
-            "locked_by": "owner",
+            "consent": _esign_consent(),
         },
     )
-    assert lock.status_code == 200
-    mint_acme = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_H,
-        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-acme"},
+    assert owner_done.status_code == 200, owner_done.text
+    assert owner_done.json().get("fully_executed") is False
+    acme_hdr = {
+        "X-Claw-Recipient-Access-Token": mint_party_bound_recipient_token(
+            client, aid, _ORG_H, mode="sign", recipient_party_id=acme_id
+        )
+    }
+    beta_tok = mint_party_bound_recipient_token(
+        client, aid, _ORG_H, mode="sign", recipient_party_id=beta_id
     )
-    assert mint_acme.status_code == 200
-    acme_hdr = {"X-Claw-Recipient-Access-Token": mint_acme.json()["token"]}
-    mint_beta = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_H,
-        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-beta"},
-    )
-    assert mint_beta.status_code == 200
-    beta_tok = mint_beta.json()["token"]
     beta_hdr = {"X-Claw-Recipient-Access-Token": beta_tok}
     s1 = client.post(
         f"/api/agreements/{aid}/signing-ceremony/start",
         headers=acme_hdr,
-        json={"participant_id": "p-acme"},
+        json={"participant_id": acme_id},
     )
     assert s1.status_code == 200
     c1 = client.post(
         f"/api/agreements/{aid}/signing-ceremony/complete",
         headers=acme_hdr,
         json={
-            "participant_id": "p-acme",
+            "participant_id": acme_id,
             "typed_name": "Acme Growth LLC",
             "locked_version_id": "lv-ceremony-1",
             "consent": _esign_consent(),
@@ -329,7 +327,7 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
         f"/api/agreements/{aid}/signing-ceremony/complete",
         headers=acme_hdr,
         json={
-            "participant_id": "p-acme",
+            "participant_id": acme_id,
             "typed_name": "Acme Growth LLC",
             "locked_version_id": "lv-ceremony-1",
             "consent": _esign_consent(),
@@ -345,7 +343,7 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
         f"/api/agreements/{aid}/signing-ceremony/complete",
         headers=acme_hdr,
         json={
-            "participant_id": "p-beta",
+            "participant_id": beta_id,
             "typed_name": "Beta LLC",
             "locked_version_id": "lv-ceremony-1",
             "consent": _esign_consent(),
@@ -356,7 +354,7 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
         f"/api/agreements/{aid}/signing-ceremony/complete",
         headers=beta_hdr,
         json={
-            "participant_id": "p-beta",
+            "participant_id": beta_id,
             "typed_name": "Beta LLC",
             "locked_version_id": "lv-ceremony-1",
             "consent": _esign_consent(),
@@ -364,8 +362,28 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
     )
     assert c2.status_code == 200
     assert c2.json().get("fully_executed") is True
-    audit = client.get(f"/api/agreements/{aid}", headers=_ORG_H).json()["draft"].get("audit_log", [])
+    after_final = client.get(f"/api/agreements/{aid}", headers=_ORG_H).json()
+    audit = after_final["draft"].get("audit_log", [])
     assert any(e.get("event_type") == "signed" for e in audit)
+    signed_events = [e for e in audit if e.get("event_type") == "signed"]
+    completed = [e for e in audit if e.get("event_type") == "signature_completed"]
+    lock_digest = str((after_final.get("signing_lock") or {}).get("accepted_snapshot_digest") or "")
+    dup_final = client.post(
+        f"/api/agreements/{aid}/signing-ceremony/complete",
+        headers=beta_hdr,
+        json={
+            "participant_id": beta_id,
+            "typed_name": "Beta LLC",
+            "locked_version_id": "lv-ceremony-1",
+            "consent": _esign_consent(),
+        },
+    )
+    assert dup_final.status_code in (200, 400, 403, 409), dup_final.text
+    after_dup = client.get(f"/api/agreements/{aid}", headers=_ORG_H).json()
+    dup_audit = after_dup["draft"].get("audit_log", [])
+    assert len([e for e in dup_audit if e.get("event_type") == "signed"]) == len(signed_events)
+    assert len([e for e in dup_audit if e.get("event_type") == "signature_completed"]) == len(completed)
+    assert str((after_dup.get("signing_lock") or {}).get("accepted_snapshot_digest") or "") == lock_digest
     blocked = client.post(
         f"/api/agreements/{aid}/update-field",
         headers=_ORG_H,
@@ -413,30 +431,15 @@ def test_negotiation_locked_blocks_owner_edits_unlock_restores(monkeypatch, tmp_
         },
     )
     assert upd.status_code == 200
-    mint_rev = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_H,
-        json={"mode": "review", "role": "signer"},
+    draft = load_agreement_draft_for_tests(client, aid, _ORG_H)
+    sig_id = persisted_party_id(draft, name="Signer LLC", role="signer")
+    persist_accept_party_bound_approvals_and_lock(
+        client,
+        aid,
+        _ORG_H,
+        locked_version_id="lv-guard-1",
+        signer_party_ids=[sig_id],
     )
-    assert mint_rev.status_code == 200
-    review_tok = mint_rev.json()["token"]
-    recv_hdr = {"X-Claw-Recipient-Access-Token": review_tok}
-    ap = client.post(
-        f"/api/agreements/{aid}/recipient-approve",
-        headers=recv_hdr,
-        json={"participant_id": "p-sig", "participant_display_name": "Signer"},
-    )
-    assert ap.status_code == 200
-    lock = client.put(
-        f"/api/agreements/{aid}/signing-lock",
-        headers=_ORG_H,
-        json={
-            "locked_version_id": "lv-guard-1",
-            "locked_at": "2026-04-01T12:00:00Z",
-            "locked_by": "owner",
-        },
-    )
-    assert lock.status_code == 200
     body = client.get(f"/api/agreements/{aid}", headers=_ORG_H).json()
     assert body.get("signing_lock") is not None
     assert body["signing_lock"]["locked_version_id"] == "lv-guard-1"
@@ -507,37 +510,18 @@ def test_signing_complete_rejects_stale_draft_vs_lock_hash(monkeypatch, tmp_path
         },
     )
     assert upd.status_code == 200
-    mint_rev = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_H,
-        json={"mode": "review", "role": "signer"},
+    draft = load_agreement_draft_for_tests(client, aid, _ORG_H)
+    acme_id = persisted_party_id(draft, name="Acme LLC", role="signer")
+    persist_accept_party_bound_approvals_and_lock(
+        client,
+        aid,
+        _ORG_H,
+        locked_version_id="lv-stale-1",
+        signer_party_ids=[acme_id],
     )
-    assert mint_rev.status_code == 200
-    review_tok = mint_rev.json()["token"]
-    recv_hdr = {"X-Claw-Recipient-Access-Token": review_tok}
-    ap = client.post(
-        f"/api/agreements/{aid}/recipient-approve",
-        headers=recv_hdr,
-        json={"participant_id": "p-acme", "participant_display_name": "Acme"},
+    sign_tok = mint_party_bound_recipient_token(
+        client, aid, _ORG_H, mode="sign", recipient_party_id=acme_id
     )
-    assert ap.status_code == 200
-    lock = client.put(
-        f"/api/agreements/{aid}/signing-lock",
-        headers=_ORG_H,
-        json={
-            "locked_version_id": "lv-stale-1",
-            "locked_at": "2026-04-01T12:00:00Z",
-            "locked_by": "owner",
-        },
-    )
-    assert lock.status_code == 200
-    mint_sign = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_H,
-        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-acme"},
-    )
-    assert mint_sign.status_code == 200
-    sign_tok = mint_sign.json()["token"]
     sign_hdr = {"X-Claw-Recipient-Access-Token": sign_tok}
 
     raw = load_draft(aid)
@@ -548,13 +532,155 @@ def test_signing_complete_rejects_stale_draft_vs_lock_hash(monkeypatch, tmp_path
         f"/api/agreements/{aid}/signing-ceremony/complete",
         headers=sign_hdr,
         json={
-            "participant_id": "p-acme",
+            "participant_id": acme_id,
             "typed_name": "Acme LLC",
             "locked_version_id": "lv-stale-1",
         },
     )
     assert bad.status_code == 409
     assert bad.json().get("detail") == "stale_locked_version"
+
+
+def _party_bound_n_party_completion(client: TestClient, signer_count: int) -> None:
+    owner = {"name": "Owner LLC", "role": "owner", "id": "p-owner"}
+    signers = [
+        {"name": f"Signer {idx} LLC", "role": "signer", "id": f"p-s{idx}"}
+        for idx in range(1, signer_count + 1)
+    ]
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": f"{signer_count + 1}-party bound completion",
+            "jurisdiction": "TX",
+            "parties": [owner, *signers],
+            "purpose": "Party-bound completion",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200, create_res.text
+    aid = create_res.json()["id"]
+    lv = f"lv-n{signer_count}"
+    persist_accept_party_bound_approvals_and_lock(
+        client,
+        aid,
+        _ORG_H,
+        locked_version_id=lv,
+        signer_party_ids=[row["id"] for row in signers],
+    )
+    required = [owner, *signers]
+    last_status = None
+    for idx, row in enumerate(required, start=1):
+        tok = mint_party_bound_recipient_token(
+            client, aid, _ORG_H, mode="sign", recipient_party_id=row["id"]
+        )
+        done = client.post(
+            f"/api/agreements/{aid}/signing-ceremony/complete",
+            headers={"X-Claw-Recipient-Access-Token": tok},
+            json={
+                "participant_id": row["id"],
+                "typed_name": row["name"],
+                "locked_version_id": lv,
+                "consent": _esign_consent(),
+            },
+        )
+        assert done.status_code == 200, done.text
+        last_status = done.json()
+        if idx < len(required):
+            assert last_status.get("fully_executed") is False
+    assert last_status is not None
+    assert last_status.get("fully_executed") is True
+    draft = load_agreement_draft_for_tests(client, aid, _ORG_H)
+    completed = {
+        str((e.get("value") or {}).get("participant_id") or "")
+        for e in draft.get("audit_log") or []
+        if e.get("event_type") == "signature_completed"
+    }
+    assert completed == {row["id"] for row in required}
+    assert any(e.get("event_type") == "signed" for e in draft.get("audit_log") or [])
+
+
+def test_party_bound_two_party_completion(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-two-party-bound-secret")
+    usage_economics_store_mod._store = None  # noqa: SLF001
+    client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
+    _party_bound_n_party_completion(client, 1)
+
+
+def test_party_bound_three_party_completion(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-three-party-bound-secret")
+    usage_economics_store_mod._store = None  # noqa: SLF001
+    client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
+    _party_bound_n_party_completion(client, 2)
+
+
+def test_party_bound_four_party_completion(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-four-party-bound-secret")
+    usage_economics_store_mod._store = None  # noqa: SLF001
+    client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
+    _party_bound_n_party_completion(client, 3)
+
+
+def test_review_token_cannot_complete_signing_ceremony(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-review-cannot-sign-secret")
+    usage_economics_store_mod._store = None  # noqa: SLF001
+    client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Review cannot sign",
+            "jurisdiction": "TX",
+            "parties": [
+                {"name": "Owner LLC", "role": "owner", "id": "p-owner"},
+                {"name": "Acme LLC", "role": "signer", "id": "p-acme"},
+            ],
+            "purpose": "Mode gate",
+            "payment_terms": "Net 30",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200
+    aid = create_res.json()["id"]
+    persist_accept_party_bound_approvals_and_lock(
+        client, aid, _ORG_H, locked_version_id="lv-mode-1", signer_party_ids=["p-acme"]
+    )
+    review_tok = mint_party_bound_recipient_token(
+        client, aid, _ORG_H, mode="review", recipient_party_id="p-acme"
+    )
+    done = client.post(
+        f"/api/agreements/{aid}/signing-ceremony/complete",
+        headers={"X-Claw-Recipient-Access-Token": review_tok},
+        json={
+            "participant_id": "p-acme",
+            "typed_name": "Acme LLC",
+            "locked_version_id": "lv-mode-1",
+            "consent": _esign_consent(),
+        },
+    )
+    assert done.status_code == 403
+    assert done.json()["detail"]["code"] == "recipient_token_mode_not_allowed"
 
 
 def test_public_agreement_verify_redacted(monkeypatch, tmp_path):
@@ -3009,18 +3135,16 @@ def test_recipient_preview_export_pdf_requires_recipient_token_or_org(monkeypatc
         },
     )
     assert upd.status_code == 200
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_H,
-        json={
-            "mode": "review",
-            "role": "signer",
-            "recipient_party_id": "pid-signer",
-            "inviter_display_name": "Owner Co",
-        },
+    draft = load_agreement_draft_for_tests(client, aid, _ORG_H)
+    signer_id = persisted_party_id(draft, name="Signer Co", role="signer")
+    tok = mint_party_bound_recipient_token(
+        client,
+        aid,
+        _ORG_H,
+        mode="review",
+        recipient_party_id=signer_id,
+        inviter_display_name="Owner Co",
     )
-    assert mint.status_code == 200
-    tok = mint.json()["token"]
     recv_hdr = {"X-Claw-Recipient-Access-Token": tok}
 
     denied = client.post(

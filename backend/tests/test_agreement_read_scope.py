@@ -5,6 +5,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.tests.auth_fixtures import (
+    mint_party_bound_recipient_token,
+    persist_accept_party_bound_approvals_and_lock,
+    persist_and_accept_review_snapshot,
+)
 from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
@@ -360,6 +365,23 @@ def test_recipient_writes_accept_review_token_and_reject_wrong_party(monkeypatch
     )
     assert bad_prop.status_code == 403
     assert bad_prop.json()["detail"]["code"] == "recipient_party_token_mismatch"
+    accepted = persist_and_accept_review_snapshot(
+        client,
+        aid,
+        "LawDog fixture commercial review corpus. " * 40 + "Wrong-party approval.\n",
+        headers=_ORG_A,
+    )
+    wrong_approve = client.post(
+        f"/api/agreements/{aid}/recipient-approve",
+        headers=rh,
+        json={
+            "participant_id": "p-r2",
+            "snapshot_id": accepted["snapshot_id"],
+            "expected_digest": accepted["corpus_sha256"],
+        },
+    )
+    assert wrong_approve.status_code == 403
+    assert wrong_approve.json()["detail"]["code"] == "recipient_party_token_mismatch"
 
 
 def test_recipient_revise_rejects_sign_mode_token(monkeypatch, tmp_path):
@@ -370,38 +392,20 @@ def test_recipient_revise_rejects_sign_mode_token(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-recipient-write-secret-c")
     client = TestClient(app)
     aid, _draft = _draft_with_two_signers(client, _ORG_A)
-    mint_rev = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_A,
-        json={"mode": "review", "role": "signer"},
+    persist_accept_party_bound_approvals_and_lock(
+        client,
+        aid,
+        _ORG_A,
+        locked_version_id="lv-ws-1",
+        signer_party_ids=["p-r1", "p-r2"],
     )
-    assert mint_rev.status_code == 200
-    review_tok = mint_rev.json()["token"]
-    rh = {"X-Claw-Recipient-Access-Token": review_tok}
-    for pid, label in (("p-r1", "R1"), ("p-r2", "R2")):
-        ap = client.post(
-            f"/api/agreements/{aid}/recipient-approve",
-            headers=rh,
-            json={"participant_id": pid, "participant_display_name": label},
-        )
-        assert ap.status_code == 200
-    lock = client.put(
-        f"/api/agreements/{aid}/signing-lock",
-        headers=_ORG_A,
-        json={
-            "locked_version_id": "lv-ws-1",
-            "locked_at": "2026-04-01T12:00:00Z",
-            "locked_by": "owner",
-        },
+    sign_tok = mint_party_bound_recipient_token(
+        client,
+        aid,
+        _ORG_A,
+        mode="sign",
+        recipient_party_id="p-r1",
     )
-    assert lock.status_code == 200
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_A,
-        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-r1"},
-    )
-    assert mint.status_code == 200
-    sign_tok = mint.json()["token"]
     rv = client.post(
         f"/api/agreements/{aid}/revise",
         headers={"X-Claw-Recipient-Access-Token": sign_tok},
@@ -413,3 +417,49 @@ def test_recipient_revise_rejects_sign_mode_token(monkeypatch, tmp_path):
     )
     assert rv.status_code == 403
     assert rv.json()["detail"]["code"] == "recipient_token_mode_not_allowed"
+
+
+def test_unbound_review_token_cannot_approve_any_party(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-unbound-review-secret")
+    client = TestClient(app)
+    aid, _draft = _draft_with_two_signers(client, _ORG_A)
+    accepted = persist_and_accept_review_snapshot(
+        client,
+        aid,
+        "LawDog fixture commercial review corpus. " * 40 + "Unbound review reject.\n",
+        headers=_ORG_A,
+    )
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_ORG_A,
+        json={"mode": "review", "role": "signer"},
+    )
+    assert mint.status_code == 200
+    assert not (mint.json().get("recipient_party_id") or "").strip()
+    unbound = {"X-Claw-Recipient-Access-Token": mint.json()["token"]}
+    first = client.post(
+        f"/api/agreements/{aid}/recipient-approve",
+        headers=unbound,
+        json={
+            "participant_id": "p-r1",
+            "snapshot_id": accepted["snapshot_id"],
+            "expected_digest": accepted["corpus_sha256"],
+        },
+    )
+    second = client.post(
+        f"/api/agreements/{aid}/recipient-approve",
+        headers=unbound,
+        json={
+            "participant_id": "p-r2",
+            "snapshot_id": accepted["snapshot_id"],
+            "expected_digest": accepted["corpus_sha256"],
+        },
+    )
+    assert first.status_code == 403
+    assert first.json()["detail"]["code"] == "unbound_recipient_token"
+    assert second.status_code == 403
+    assert second.json()["detail"]["code"] == "unbound_recipient_token"

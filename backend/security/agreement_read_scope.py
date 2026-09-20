@@ -349,23 +349,30 @@ def assert_agreement_recipient_write_allowed(
     if bind_participant_id is not None:
         tok_pid = str(out.get("recipient_party_id") or "").strip()
         body_pid = (bind_participant_id or "").strip()
-        if tok_pid:
-            if not body_pid:
-                raise HTTPException(
-                    status_code=403,
-                    detail={
-                        "code": "recipient_party_id_required",
-                        "message": RECIPIENT_LINK_INVALID_OR_EXPIRED,
-                    },
-                )
-            if tok_pid != body_pid:
-                raise HTTPException(
-                    status_code=403,
-                    detail={
-                        "code": "recipient_party_token_mismatch",
-                        "message": RECIPIENT_LINK_INVALID_OR_EXPIRED,
-                    },
-                )
+        if not tok_pid:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "unbound_recipient_token",
+                    "message": RECIPIENT_LINK_INVALID_OR_EXPIRED,
+                },
+            )
+        if not body_pid:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "recipient_party_id_required",
+                    "message": RECIPIENT_LINK_INVALID_OR_EXPIRED,
+                },
+            )
+        if tok_pid != body_pid:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "recipient_party_token_mismatch",
+                    "message": RECIPIENT_LINK_INVALID_OR_EXPIRED,
+                },
+            )
 
 
 def assert_agreement_full_draft_read_allowed(

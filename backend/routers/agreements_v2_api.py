@@ -9117,13 +9117,22 @@ def post_vs01_signer_complete(
                 display_name = (sp.name or "").strip()
 
         from backend.services.accepted_review_snapshot import requires_accepted_snapshot_for_continuation
+        from backend.services.vs01_signer_completion import signer_role_already_completed
 
         # Commercial post-cutover: every completion path must bind accepted snapshot,
         # including requests that omit portable_packet (hydrate from stored packet).
-        require_snap = requires_accepted_snapshot_for_continuation(draft)
+        # Duplicate completion is idempotent: do not re-attest a packet mutated by
+        # the first successful completion against the original accepted snapshot.
+        already_complete = signer_role_already_completed(
+            draft.model_dump().get("audit_log") or [],
+            signer_role_id,
+        )
+        require_snap = requires_accepted_snapshot_for_continuation(draft) and not already_complete
         stored_portable = stored_pkt.get("portable") if isinstance(stored_pkt.get("portable"), dict) else None
         portable_packet = body.portable_packet if isinstance(body.portable_packet, dict) else None
-        if require_snap:
+        if already_complete:
+            portable_packet = None
+        elif require_snap:
             if portable_packet is None and isinstance(stored_portable, dict):
                 portable_packet = dict(stored_portable)
             if not isinstance(portable_packet, dict):

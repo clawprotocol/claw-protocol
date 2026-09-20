@@ -7,6 +7,12 @@ import json
 from fastapi.testclient import TestClient
 
 from backend.services.quick_pdf_envelope import OWNER_ROLE_ID, RECIPIENT_ROLE_ID
+from backend.tests.auth_fixtures import (
+    load_agreement_draft_for_tests,
+    mint_party_bound_recipient_token,
+    persist_accept_party_bound_approvals_and_lock,
+    persisted_party_id,
+)
 from backend.tests.conftest_auth_security import make_authenticated_user_headers
 from backend.tests.test_phase4c2_quick_pdf_envelope import client  # noqa: F401
 from backend.tests.test_phase4c22_quick_receipt_integrity import _prepare, _recipient_complete
@@ -298,42 +304,29 @@ def _prepare_drafted_ceremony(client: TestClient, headers: dict) -> tuple[str, s
         },
     )
     assert upd.status_code == 200, upd.text
-    mint_rev = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=headers,
-        json={"mode": "review", "role": "signer", "recipient_party_id": "p-acme"},
+    draft = load_agreement_draft_for_tests(client, aid, headers)
+    acme_id = persisted_party_id(draft, name="Acme Growth LLC", role="signer")
+    persist_accept_party_bound_approvals_and_lock(
+        client,
+        aid,
+        headers,
+        locked_version_id="lv-phase4c23",
+        signer_party_ids=[acme_id],
     )
-    assert mint_rev.status_code == 200, mint_rev.text
-    review_hdr = {"X-Claw-Recipient-Access-Token": mint_rev.json()["token"]}
-    approved = client.post(
-        f"/api/agreements/{aid}/recipient-approve",
-        headers=review_hdr,
-        json={"participant_id": "p-acme", "participant_display_name": "Acme"},
+    token = mint_party_bound_recipient_token(
+        client, aid, headers, mode="sign", recipient_party_id=acme_id
     )
-    assert approved.status_code == 200, approved.text
-    lock = client.put(
-        f"/api/agreements/{aid}/signing-lock",
-        headers=headers,
-        json={"locked_version_id": "lv-phase4c23", "locked_at": "2026-09-12T12:00:00Z", "locked_by": "owner"},
-    )
-    assert lock.status_code == 200, lock.text
-    minted = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=headers,
-        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-acme"},
-    )
-    assert minted.status_code == 200, minted.text
-    return aid, minted.json()["token"], "lv-phase4c23"
+    return aid, token, "lv-phase4c23", acme_id
 
 
 def test_drafted_recipient_ceremony_rejects_owner_impersonation(client: TestClient) -> None:
     headers = make_authenticated_user_headers("phase4c23-accept-drafted")
-    aid, token, lv = _prepare_drafted_ceremony(client, headers)
+    aid, token, lv, acme_id = _prepare_drafted_ceremony(client, headers)
     impersonate = client.post(
         f"/api/agreements/{aid}/signing-ceremony/complete",
         headers=headers,
         json={
-            "participant_id": "p-acme",
+            "participant_id": acme_id,
             "typed_name": "Acme Growth LLC",
             "locked_version_id": lv,
             "consent": _consent(),
@@ -345,14 +338,14 @@ def test_drafted_recipient_ceremony_rejects_owner_impersonation(client: TestClie
     start = client.post(
         f"/api/agreements/{aid}/signing-ceremony/start",
         headers={"X-Claw-Recipient-Access-Token": token},
-        json={"participant_id": "p-acme"},
+        json={"participant_id": acme_id},
     )
     assert start.status_code == 200, start.text
     done = client.post(
         f"/api/agreements/{aid}/signing-ceremony/complete",
         headers={"X-Claw-Recipient-Access-Token": token},
         json={
-            "participant_id": "p-acme",
+            "participant_id": acme_id,
             "typed_name": "Acme Growth LLC",
             "locked_version_id": lv,
             "consent": _consent(),
@@ -362,7 +355,7 @@ def test_drafted_recipient_ceremony_rejects_owner_impersonation(client: TestClie
     body = done.json()
     assert body["ok"] is True
     assert body["agreement_id"] == aid
-    assert body["participant_id"] == "p-acme"
+    assert body["participant_id"] == acme_id
     assert body["status"] in {"completed", "fully_executed"}
     validated = client.get(
         "/api/agreements/access/validate",
