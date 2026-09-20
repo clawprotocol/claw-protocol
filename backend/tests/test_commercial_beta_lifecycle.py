@@ -407,7 +407,7 @@ def test_completion_email_exactly_one_under_concurrent_finalize(life_env):
     client, _eco, _usage = life_env
     ensure_headers_entitled(mod._org_headers())
     aid = mod._create_two_signer_agreement(client)
-    token = mod._cp_token(aid)
+    token = mod._cp_token(client, aid)
     assert mod._complete(client, aid, "role_owner", "p1", name="Owner Signer").status_code == 200
     sends: list[str] = []
 
@@ -446,7 +446,7 @@ def test_completion_email_zero_when_delivery_explicitly_skipped(life_env):
     client, _eco, _usage = life_env
     ensure_headers_entitled(mod._org_headers())
     aid = mod._create_two_signer_agreement(client)
-    token = mod._cp_token(aid)
+    token = mod._cp_token(client, aid)
     assert mod._complete(client, aid, "role_owner", "p1", name="Owner Signer").status_code == 200
     sends: list[str] = []
 

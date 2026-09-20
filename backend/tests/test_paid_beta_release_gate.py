@@ -148,7 +148,7 @@ def test_concurrent_finalizer_duplicate_event_counts_under_load(client: TestClie
     from backend.tests import test_vs01_signer_complete_api as mod
 
     aid = mod._create_two_signer_agreement(client)
-    token = mod._cp_token(aid)
+    token = mod._cp_token(client, aid)
     assert mod._complete(client, aid, "role_owner", "p1", name="Owner Signer").status_code == 200
     send_calls: list[str] = []
 
