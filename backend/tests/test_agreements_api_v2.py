@@ -13,6 +13,14 @@ from backend.tests.auth_fixtures import (
     persist_accept_party_bound_approvals_and_lock,
     persisted_party_id,
 )
+from backend.tests.premium_full_draft_commercial_fixtures import (
+    AGENCY_SUCCESS_INTAKE,
+    agency_success_context,
+    agency_success_model_json,
+    headings_plus_filler_model_json,
+    saas_success_model_json,
+    saas_two_party_context,
+)
 from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
@@ -1169,39 +1177,8 @@ def test_premium_full_draft_ok(monkeypatch, tmp_path):
 
     monkeypatch.setattr(av2, "OPENAI_API_KEY", "sk-test-unit")
 
-    body_block = "\n\n".join(
-        [
-            "1. PARTIES. Agency LLC and Client LLC enter this Agreement.",
-            "2. SCOPE. Paid media, spend approvals, CRM ownership, and performance reporting.",
-            "3. COMPENSATION. Monthly retainer; invoicing and net payment terms as stated.",
-            "4. CONFIDENTIALITY. Mutual protection of non-public business information.",
-            "5. TERM AND TERMINATION. Initial term with written notice for convenience.",
-            "6. LIABILITY. Commercially reasonable limitation except for gross negligence.",
-            "7. DISPUTES. Good-faith negotiation then courts of the selected jurisdiction.",
-            "8. NOTICES. Email and mailing to designated business addresses.",
-            "9. MISCELLANEOUS. Entire agreement; counterparts; electronic signatures valid.",
-            "10. GOVERNING LAW. As stated in the agreement header.",
-        ]
-    )
-    doc = (
-        "WHEREAS the parties wish to document paid media services.\n\n"
-        + body_block
-        + "\n\n"
-        # Clear the frontend-aligned substance floor (10_000) so this exercises the accepted (200) path.
-        + ("Additional operative detail. " * 320)
-        + "\n\n"
-        + ("z" * 1200)
-    )
-    out_json = {
-        "title": "Agency Services Agreement",
-        "agreement_family": "Marketing / agency retainer",
-        "document_text": doc,
-        "key_terms_found": ["Fees", "IP"],
-        "missing_material_info": ["Cap table"],
-    }
-
     def fake_llm(*args, **kwargs):
-        return __import__("json").dumps(out_json)
+        return json.dumps(agency_success_model_json())
 
     monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
     client = TestClient(app)
@@ -1209,18 +1186,8 @@ def test_premium_full_draft_ok(monkeypatch, tmp_path):
         "/api/agreements/premium-full-draft",
         headers=_ORG_H,
         json={
-            "intake_text": "Retainer for paid media between Agency LLC and Client LLC, spend pre-approval, CRM ownership.",
-            "context": {
-                "title": "T",
-                "jurisdiction": "New York",
-                "parties": [
-                    {"name": "Agency LLC", "role": "Agency"},
-                    {"name": "Client LLC", "role": "Client"},
-                ],
-                "purpose": "Run campaigns",
-                "payment_terms": "Monthly",
-                "material_asks": ["Own CRM exports"],
-            },
+            "intake_text": AGENCY_SUCCESS_INTAKE,
+            "context": agency_success_context(),
         },
     )
     assert res.status_code == 200
@@ -1230,6 +1197,10 @@ def test_premium_full_draft_ok(monkeypatch, tmp_path):
     assert b.get("key_terms_found") == ["Fees", "IP"]
     assert "server_full_document_text" in b and len(b.get("server_full_document_text") or "") > 1000
     assert isinstance(b.get("server_repair_document_text"), str)
+    assert "Agency LLC" in (b.get("authoritative_draft") or "")
+    assert "Client LLC" in (b.get("authoritative_draft") or "")
+    assert "Own CRM exports" in (b.get("authoritative_draft") or "")
+    assert "shall" in (b.get("authoritative_draft") or "")
 
 
 def test_premium_full_draft_repair_pass_uses_agreement_outbound_airlock_profile(monkeypatch, tmp_path):
@@ -1242,36 +1213,8 @@ def test_premium_full_draft_repair_pass_uses_agreement_outbound_airlock_profile(
 
     monkeypatch.setattr(av2, "OPENAI_API_KEY", "sk-test-unit")
 
-    body_block = "\n\n".join(
-        [
-            "1. PARTIES. Agency LLC and Client LLC enter this Agreement.",
-            "2. SCOPE. Paid media, spend approvals, CRM ownership, and performance reporting.",
-            "3. COMPENSATION. Monthly retainer; invoicing and net payment terms as stated.",
-            "4. CONFIDENTIALITY. Mutual protection of non-public business information.",
-            "5. TERM AND TERMINATION. Initial term with written notice for convenience.",
-            "6. LIABILITY. Commercially reasonable limitation except for gross negligence.",
-            "7. DISPUTES. Good-faith negotiation then courts of the selected jurisdiction.",
-            "8. NOTICES. Email and mailing to designated business addresses.",
-            "9. MISCELLANEOUS. Entire agreement; counterparts; electronic signatures valid.",
-            "10. GOVERNING LAW. As stated in the agreement header.",
-        ]
-    )
-    long_doc = (
-        "WHEREAS the parties wish to document paid media services.\n\n"
-        + body_block
-        + "\n\n"
-        # Clear the frontend-aligned substance floor (10_000) so this exercises the accepted (200) path.
-        + ("Additional operative detail. " * 320)
-        + "\n\n"
-        + ("z" * 1200)
-    )
-    long_json = {
-        "title": "Agency Services Agreement",
-        "agreement_family": "Marketing / agency retainer",
-        "document_text": long_doc,
-        "key_terms_found": ["Fees", "IP"],
-        "missing_material_info": [],
-    }
+    long_json = agency_success_model_json()
+    long_json["missing_material_info"] = []
     short_json = {
         "title": "Agency Services Agreement",
         "agreement_family": "Marketing / agency retainer",
@@ -1294,24 +1237,15 @@ def test_premium_full_draft_repair_pass_uses_agreement_outbound_airlock_profile(
         "/api/agreements/premium-full-draft",
         headers=_ORG_H,
         json={
-            "intake_text": "Retainer for paid media between Agency LLC and Client LLC, spend pre-approval, CRM ownership.",
-            "context": {
-                "title": "T",
-                "jurisdiction": "New York",
-                "parties": [
-                    {"name": "Agency LLC", "role": "Agency"},
-                    {"name": "Client LLC", "role": "Client"},
-                ],
-                "purpose": "Run campaigns",
-                "payment_terms": "Monthly",
-                "material_asks": ["Own CRM exports"],
-            },
+            "intake_text": AGENCY_SUCCESS_INTAKE,
+            "context": agency_success_context(),
         },
     )
     assert res.status_code == 200
     assert profiles == ["agreement_outbound", "agreement_outbound"]
     b = res.json()
     assert len((b.get("document_text") or "").strip()) > 1000
+    assert "Own CRM exports" in (b.get("authoritative_draft") or b.get("document_text") or "")
 
 
 def test_premium_full_draft_saas_reseller_qa_prompt_not_airlock_blocked(monkeypatch, tmp_path):
@@ -1325,39 +1259,9 @@ def test_premium_full_draft_saas_reseller_qa_prompt_not_airlock_blocked(monkeypa
 
     monkeypatch.setattr(av2, "OPENAI_API_KEY", "sk-test-unit")
 
-    body_block = "\n\n".join(
-        [
-            "1. PARTIES. Five named entities enter this Reseller Agreement.",
-            "2. SCOPE. White-label software, APIs, onboarding, analytics, and maintenance.",
-            "3. FEES. $124,750 across five milestone payments as stated.",
-            "4. TERM. Eighteen months with month-to-month renewal and notice.",
-            "5. CONFIDENTIALITY AND SECURITY. Mutual duties and reasonable safeguards.",
-            "6. IP. Ownership and license scope for deliverables.",
-            "7. LIMITATION OF LIABILITY AND INDEMNITY. Commercial caps and defense obligations.",
-            "8. SLA. Uptime and service credit mechanics.",
-            "9. DISPUTES. Governing law Delaware; mediation optional; arbitration optional; venue.",
-            "10. MISCELLANEOUS. Notices, counterparts, electronic signatures.",
-        ]
-    )
-    doc = (
-        "WHEREAS the parties wish to document reseller and white-label services.\n\n"
-        + body_block
-        + "\n\n"
-        + ("Additional operative detail. " * 200)
-        + "\n\n"
-        + ("z" * 5200)
-    )
-    out_json = {
-        "title": "Reseller and White-Label Services Agreement",
-        "agreement_family": "SaaS / software services",
-        "document_text": doc,
-        "key_terms_found": ["Fees", "SLA"],
-        "missing_material_info": [],
-    }
-
     def fake_llm(*args, **kwargs):
         assert kwargs.get("airlock_profile") == "agreement_outbound"
-        return json.dumps(out_json)
+        return json.dumps(saas_success_model_json())
 
     monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
     client = TestClient(app)
@@ -1366,25 +1270,83 @@ def test_premium_full_draft_saas_reseller_qa_prompt_not_airlock_blocked(monkeypa
         headers=_ORG_H,
         json={
             "intake_text": LAWDOG_QA_SAAS_RESELLER_PROMPT,
-            "context": {
-                "title": "Web Development Agreement",
-                "jurisdiction": "Delaware",
-                "parties": [
-                    {"name": "Redwood Peak Ventures LLC", "role": "party"},
-                    {"name": "Atlas Harbor Technologies Inc.", "role": "party"},
-                ],
-                "purpose": "Reseller and white-label services",
-                "payment_terms": "$124,750 milestone payments",
-                "agreement_family": "services_agreement",
-                "material_asks": ["confidentiality", "indemnification", "dispute resolution"],
-            },
+            "context": saas_two_party_context(),
         },
     )
     assert res.status_code == 200
     body = res.json()
     assert body.get("server_generation_failure_code") != "airlock_blocked"
     assert body.get("generation_ok") is True
-    assert len((body.get("document_text") or "").strip()) > 5000
+    paper = body.get("authoritative_draft") or body.get("document_text") or ""
+    assert len(paper.strip()) > 5000
+    assert "Redwood Peak Ventures LLC" in paper
+    assert "Atlas Harbor Technologies Inc." in paper
+    assert "Meridian Workforce Group LLC" not in paper
+    assert "Prairie Signal Holdings LP" not in paper
+    assert "NovaGrid Systems LLC" not in paper
+    assert "indemnification" in paper.lower()
+    assert "only legal parties" in paper
+
+
+def test_premium_full_draft_document_text_alias_still_accepted(monkeypatch, tmp_path):
+    """Backward-compat: a substantive paper emitted only as document_text still normalizes."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-unit")
+    import backend.routers.agreements_v2_api as av2
+
+    monkeypatch.setattr(av2, "OPENAI_API_KEY", "sk-test-unit")
+    monkeypatch.setattr(
+        av2,
+        "call_legal_llm",
+        lambda *a, **k: json.dumps(agency_success_model_json(use_authoritative_draft=False)),
+    )
+    client = TestClient(app)
+    res = client.post(
+        "/api/agreements/premium-full-draft",
+        headers=_ORG_H,
+        json={"intake_text": AGENCY_SUCCESS_INTAKE, "context": agency_success_context()},
+    )
+    assert res.status_code == 200
+    b = res.json()
+    assert len((b.get("document_text") or "").strip()) > 1000
+    assert len((b.get("authoritative_draft") or "").strip()) > 1000
+    assert "Own CRM exports" in (b.get("authoritative_draft") or "")
+
+
+def test_premium_full_draft_headings_plus_filler_rejected_503(monkeypatch, tmp_path):
+    """Long headings-plus-padding remains fail-closed: no frozen rejected paper."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-unit")
+    import backend.routers.agreements_v2_api as av2
+
+    monkeypatch.setattr(av2, "OPENAI_API_KEY", "sk-test-unit")
+    monkeypatch.setattr(
+        av2, "call_legal_llm", lambda *a, **k: json.dumps(headings_plus_filler_model_json())
+    )
+    client = TestClient(app)
+    res = client.post(
+        "/api/agreements/premium-full-draft",
+        headers=_ORG_H,
+        json={"intake_text": AGENCY_SUCCESS_INTAKE, "context": agency_success_context()},
+    )
+    assert res.status_code == 503
+    body = res.json()
+    assert (body.get("document_text") or "").strip() == ""
+    assert (body.get("authoritative_draft") or "").strip() == ""
+    assert (body.get("server_full_document_text") or "").strip() == ""
+    assert body.get("generation_ok") is False
+    assert body.get("retryable") is True
+    assert body.get("generation_outcome") == "degraded"
+    assert body.get("server_generation_failure_code") == "agreement_validation_failed"
+    assert "Additional operative detail" not in json.dumps(body)
+    reasons = body.get("agreement_validation") or {}
+    codes = [str(f.get("code")) for f in (reasons.get("failures") or [])]
+    assert "missing_minimum_contract_element:identifiable_parties" in codes
+    assert "missing_minimum_contract_element:obligations_or_performance" in codes
 
 
 def test_premium_full_draft_degraded_503_when_llm_fails(monkeypatch, tmp_path):

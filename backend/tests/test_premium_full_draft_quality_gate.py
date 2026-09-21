@@ -360,9 +360,11 @@ def test_premium_full_draft_invokes_repair_on_quality_fail(monkeypatch, tmp_path
     monkeypatch.setattr(av2, "OPENAI_API_KEY", "sk-test-unit")
     ensure_headers_entitled(_ORG_H)
 
-    good_body = _long_commercial_body(
-        "\nFlat fee **$1,500** for logo work including **two revision rounds**.\n"
+    from backend.tests.premium_full_draft_commercial_fixtures import (
+        client_co_designer_llc_logo_agreement,
     )
+
+    good_body = client_co_designer_llc_logo_agreement()
     bad_json: Dict[str, Any] = {
         "title": "AGREEMENT",
         "agreement_family": "generic",
@@ -373,7 +375,7 @@ def test_premium_full_draft_invokes_repair_on_quality_fail(monkeypatch, tmp_path
     good_json: Dict[str, Any] = {
         "title": "Logo Design Services Agreement",
         "agreement_family": "Creative services",
-        "document_text": good_body,
+        "authoritative_draft": good_body,
         "key_terms_found": ["Fee", "Revisions", "IP"],
         "missing_material_info": [],
     }
