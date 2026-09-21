@@ -2,7 +2,10 @@
  * Resolve full recipient signing document fields (all parties for display + current signer actions).
  */
 
-import { loadVs01CanonicalPacketPortable } from "./vs01CanonicalPacketSeed";
+import {
+  loadVs01CanonicalPacketPortable,
+  type Vs01CanonicalPacketPortableV1,
+} from "./vs01CanonicalPacketSeed";
 import {
   buildRecipientSigningDocumentFields,
   recipientFieldBelongsToLockedSigner,
@@ -108,11 +111,13 @@ export function resolveRecipientSigningDocumentFields(args: {
   lockedSignerRoleId: string | null;
   canonicalModel?: Pick<Vs01SigningPacketModel, "fields"> | null;
   packetRevision?: string | null;
+  /** Server-attested portable — display every party’s fields; only the locked signer is editable. */
+  portablePacket?: Vs01CanonicalPacketPortableV1 | null;
 }): Vs01RecipientPlacedField[] {
   const roles = args.prepareRoles ?? [];
   const ownerRole = roles.find((r) => r.kind === "owner") ?? roles[0];
   const did = (args.documentId ?? "").trim();
-  const portable = did ? loadVs01CanonicalPacketPortable(did) : null;
+  const portable = args.portablePacket ?? (did ? loadVs01CanonicalPacketPortable(did) : null);
   const initialsEnabled = resolveRecipientInitialsEnabled({
     portable,
     packetRevision: args.packetRevision,
@@ -120,16 +125,31 @@ export function resolveRecipientSigningDocumentFields(args: {
   const agreementId = portable?.seed.agreementId ?? null;
 
   let baseFields: Vs01RecipientPlacedField[];
-  if (args.recipientFields.length > 0) {
-    baseFields = [...args.recipientFields];
-  } else if (portable?.fields.length) {
-    baseFields = stripLockedSignerEditableValuesOnHydrate(
-      initialsEnabled
-        ? [...portable.fields]
-        : portable.fields.filter((f) => f.type !== "initials"),
+  if (portable?.fields.length) {
+    const packetFields = initialsEnabled
+      ? [...portable.fields]
+      : portable.fields.filter((f) => f.type !== "initials");
+    const stripped = stripLockedSignerEditableValuesOnHydrate(
+      packetFields,
       agreementId,
       args.lockedSignerRoleId,
     );
+    const liveById = new Map(args.recipientFields.map((f) => [f.id, f]));
+    baseFields = stripped.map((f) => {
+      const live = liveById.get(f.id);
+      if (
+        !live ||
+        !recipientFieldBelongsToLockedSigner(f, args.lockedCounterpartyId, args.lockedSignerRoleId)
+      ) {
+        return f;
+      }
+      return { ...f, value: live.value };
+    });
+    for (const live of args.recipientFields) {
+      if (!baseFields.some((f) => f.id === live.id)) baseFields.push(live);
+    }
+  } else if (args.recipientFields.length > 0) {
+    baseFields = [...args.recipientFields];
   } else {
     baseFields = [];
   }

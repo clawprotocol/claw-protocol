@@ -148,11 +148,8 @@ def test_concurrent_finalizer_duplicate_event_counts_under_load(client: TestClie
     from backend.tests import test_vs01_signer_complete_api as mod
 
     aid = mod._create_two_signer_agreement(client)
-    client.post(
-        f"/api/agreements/{aid}/vs01-signer-complete",
-        headers=mod._org_headers(),
-        json={"signer_role_id": "role_owner", "participant_id": "p1", "document_id": "doc_vs01"},
-    )
+    token = mod._cp_token(client, aid)
+    assert mod._complete(client, aid, "role_owner", "p1", name="Owner Signer").status_code == 200
     send_calls: list[str] = []
 
     def _track_send(*, agreement_id: str, draft: dict, org_id: str | None = None):
@@ -167,17 +164,13 @@ def test_concurrent_finalizer_duplicate_event_counts_under_load(client: TestClie
         "backend.services.email.signing_completion_delivery.maybe_send_signing_completion_emails",
         side_effect=_track_send,
     ):
-        payload = {
-            "signer_role_id": "role_cp",
-            "participant_id": "p2",
-            "document_id": "doc_vs01",
-        }
+        payload = mod._evidence("role_cp", "p2", "CP Signer")
         with ThreadPoolExecutor(max_workers=8) as pool:
             futures = [
                 pool.submit(
                     client.post,
                     f"/api/agreements/{aid}/vs01-signer-complete",
-                    headers=mod._org_headers(),
+                    headers={"X-Claw-Recipient-Access-Token": token},
                     json=payload,
                 )
                 for _ in range(8)

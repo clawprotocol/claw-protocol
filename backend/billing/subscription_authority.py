@@ -24,6 +24,15 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _mark_checkout_attempt_complete(
+    economics: EconomicsStore, *, org_id: Optional[str], session_id: str
+) -> None:
+    marker = getattr(economics, "mark_checkout_attempt_complete_by_session", None)
+    if not callable(marker):
+        return
+    marker(org_id=str(org_id or "").strip(), stripe_session_id=session_id)
+
+
 def stripe_timestamp_to_iso(value: Any) -> Optional[str]:
     if value is None:
         return None
@@ -205,6 +214,22 @@ def current_period_end_from_stripe_subscription(sub: Dict[str, Any]) -> Optional
     return _current_period_end_from_subscription(sub)
 
 
+def billing_interval_from_stripe_subscription(sub: Dict[str, Any]) -> Optional[str]:
+    items = sub.get("items") or {}
+    data = items.get("data") if isinstance(items, dict) else None
+    if not isinstance(data, list) or not data:
+        return None
+    first = data[0] if isinstance(data[0], dict) else {}
+    price = first.get("price") if isinstance(first.get("price"), dict) else {}
+    recurring = price.get("recurring") if isinstance(price.get("recurring"), dict) else {}
+    raw = str(recurring.get("interval") or "").strip().lower()
+    if raw in {"month", "monthly"}:
+        return "month"
+    if raw in {"year", "annual", "yearly"}:
+        return "year"
+    return None
+
+
 def _canceled_at_from_subscription(sub: Dict[str, Any]) -> Optional[str]:
     c_at = sub.get("canceled_at")
     if c_at is not None:
@@ -281,6 +306,8 @@ def apply_stripe_subscription_object(
     period_end = _current_period_end_from_subscription(sub)
     canceled_at = _canceled_at_from_subscription(sub)
     user_id = _metadata_user_id(sub)
+    cancel_at_period_end = bool(sub.get("cancel_at_period_end"))
+    billing_interval = billing_interval_from_stripe_subscription(sub)
 
     sub_id = economics.upsert_subscription_authority(
         org_id=org_id,
@@ -294,6 +321,8 @@ def apply_stripe_subscription_object(
         stripe_customer_id=stripe_customer_id,
         payment_id=payment_id,
         renewed_at=_utc_now_iso() if internal_status == "active" else None,
+        cancel_at_period_end=cancel_at_period_end,
+        billing_interval=billing_interval,
     )
     _log.info(
         "subscription_authority_applied org=%s sub=%s stripe_sub=%s status=%s period_end=%s",
@@ -365,6 +394,8 @@ def apply_invoice_paid_subscription_renewal(
         plan_code = str(row["plan_code"])
 
     payment_id = f"stripe:invoice:{inv_id}"
+    # Invoice period data has no cancellation authority. Preserve cancel_at_period_end
+    # unless an expanded Subscription object was applied above.
     sub_id = economics.upsert_subscription_authority(
         org_id=org_id,
         user_id=str(row.get("user_id") or "").strip() or None if row else None,
@@ -377,6 +408,7 @@ def apply_invoice_paid_subscription_renewal(
         stripe_customer_id=customer_id or None,
         payment_id=payment_id,
         renewed_at=_utc_now_iso(),
+        cancel_at_period_end=None,
     )
     if stripe_sub_id:
         economics.upsert_stripe_subscription_org(
@@ -460,6 +492,7 @@ def apply_stripe_checkout_session_authority(
         )
         result["plan_code"] = plan_code
         result["payment_id"] = payment_id
+        _mark_checkout_attempt_complete(economics, org_id=org_id, session_id=session_id)
         return result
 
     stripe_sub_id = sub_sid.strip() if isinstance(sub_sid, str) and sub_sid.strip() else None
@@ -483,6 +516,7 @@ def apply_stripe_checkout_session_authority(
             result["source"] = "checkout_session_subscription_id"
         else:
             result["source"] = "retrieved_subscription"
+        _mark_checkout_attempt_complete(economics, org_id=org_id, session_id=session_id)
         return result
 
     sub_id = economics.upsert_subscription_authority(
@@ -498,6 +532,7 @@ def apply_stripe_checkout_session_authority(
         payment_id=payment_id,
         renewed_at=_utc_now_iso(),
     )
+    _mark_checkout_attempt_complete(economics, org_id=org_id, session_id=session_id)
     return {
         "ok": True,
         "org_id": org_id,

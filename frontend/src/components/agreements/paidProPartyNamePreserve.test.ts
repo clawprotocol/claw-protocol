@@ -5,20 +5,115 @@ import {
   preserveFullLegalPartyNames,
   collapseDuplicateNoticeEntityLines,
   isOccupationalOrJobTitlePartyName,
+  isContractProsePartyName,
+  isAgreementSectionHeadingPartyName,
   isAuthoritativeLegalEntityName,
+  isTitleCaseNonPersonMention,
+  shouldPreservePartyShortFormMatch,
 } from "./paidProPartyNamePreserve";
 
 describe("paidProPartyNamePreserve", () => {
+  it("rejects operative section headings as legal-entity authority", () => {
+    expect(isAgreementSectionHeadingPartyName("SCOPE OF SERVICES")).toBe(true);
+    expect(isAgreementSectionHeadingPartyName("PARTIES AND ROLES")).toBe(true);
+    expect(isAgreementSectionHeadingPartyName("1. PARTIES AND ROLES")).toBe(true);
+    expect(isAuthoritativeLegalEntityName("PARTIES AND ROLES")).toBe(false);
+    expect(isAuthoritativeLegalEntityName("1. PARTIES AND ROLES")).toBe(false);
+    expect(isAgreementSectionHeadingPartyName("2. SCOPE OF SERVICES.")).toBe(true);
+    expect(isAgreementSectionHeadingPartyName("LIMITATION OF LIABILITY")).toBe(true);
+    expect(isAuthoritativeLegalEntityName("SCOPE OF SERVICES")).toBe(false);
+    expect(isAuthoritativeLegalEntityName("2. SCOPE OF SERVICES.")).toBe(false);
+    expect(isAgreementSectionHeadingPartyName("Summit AI Consulting LLC")).toBe(false);
+    expect(isTitleCaseNonPersonMention("Intellectual Property")).toBe(true);
+    expect(isTitleCaseNonPersonMention("Platform Developer")).toBe(true);
+    expect(isTitleCaseNonPersonMention("San Diego")).toBe(true);
+    expect(isTitleCaseNonPersonMention("James O'")).toBe(true);
+    expect(isTitleCaseNonPersonMention("Elena Vasquez")).toBe(false);
+    expect(isAgreementSectionHeadingPartyName("2. Summit AI Consulting LLC (Lead Provider)")).toBe(false);
+    expect(isAuthoritativeLegalEntityName("Summit AI Consulting LLC")).toBe(true);
+    expect(isAgreementSectionHeadingPartyName("Commercial safeguards")).toBe(true);
+    expect(isAgreementSectionHeadingPartyName("New York Commercial")).toBe(true);
+    expect(isAuthoritativeLegalEntityName("New York Commercial")).toBe(false);
+    expect(isAuthoritativeLegalEntityName("New York Life Insurance Company")).toBe(true);
+  });
+
   it("rejects occupational appositives as party legal entities", () => {
     expect(isOccupationalOrJobTitlePartyName("Freelance Product Designer")).toBe(true);
     expect(isAuthoritativeLegalEntityName("Freelance Product Designer")).toBe(false);
     expect(isOccupationalOrJobTitlePartyName("Alex Rivera")).toBe(false);
     expect(isOccupationalOrJobTitlePartyName("PixelForge Labs")).toBe(false);
+    expect(isOccupationalOrJobTitlePartyName("Managing Member")).toBe(true);
+    expect(isOccupationalOrJobTitlePartyName("Chief Product Officer")).toBe(true);
+  });
+
+  it("rejects safeguard clause fragments as party legal entities", () => {
+    expect(
+      isContractProsePartyName(
+        "No authority to bind: the service provider has no authority to bind the company",
+      ),
+    ).toBe(true);
+    expect(
+      isContractProsePartyName(
+        "Authority, representations, and access controls: provider may not make false or misleading promises, and company",
+      ),
+    ).toBe(true);
+    expect(isContractProsePartyName("Harbor Peak Analytics LLC")).toBe(false);
+    expect(isAuthoritativeLegalEntityName("No authority to bind: the service provider has no authority to bind the company")).toBe(
+      false,
+    );
   });
 
   it("derives short forms from legal entity names", () => {
     expect(shortFormsFromLegalName("Ironclad Systems Group LLC")).toContain("Ironclad");
     expect(shortFormsFromLegalName("Silver Mesa Analytics LP")).toContain("Silver Mesa");
+  });
+
+  it("detects person-name and postal-address short-form collisions", () => {
+    const oakLine = "Client representative: Avery Oak.";
+    expect(shouldPreservePartyShortFormMatch(oakLine, oakLine.indexOf("Oak"), 3)).toBe(true);
+    const street = "1 Oak Street, Wilmington, DE 19801";
+    expect(shouldPreservePartyShortFormMatch(street, street.indexOf("Oak Street"), "Oak Street".length)).toBe(
+      true,
+    );
+    expect(shouldPreservePartyShortFormMatch("Oak Street shall provide access credentials.", 0, "Oak Street".length)).toBe(
+      false,
+    );
+  });
+
+  it("collapses a leftover entity word after Inc in a notice header", () => {
+    const parties = ["Harbor Peak Analytics LLC", "Ironvale Manufacturing Inc."];
+    const body = [
+      "If to Ironvale Manufacturing Inc. Manufacturing.:",
+      "Ironvale Manufacturing Inc.",
+      "Attn: Jordan Hale",
+    ].join("\n");
+    const out = collapseDuplicateNoticeEntityLines(body, parties);
+    expect(out).toMatch(/^If to Ironvale Manufacturing Inc\.:$/m);
+    expect(out).not.toMatch(/Inc\. Manufacturing/);
+  });
+
+  it("collapses a leftover Inc token after the full legal name", () => {
+    const parties = ["Harbor Peak Analytics LLC", "Ironvale Manufacturing Inc."];
+    const out = collapseDuplicateNoticeEntityLines(
+      "If to Ironvale Manufacturing Inc. Manufacturing Inc.:\nIronvale Manufacturing Inc.",
+      parties,
+    );
+    expect(out).toMatch(/^If to Ironvale Manufacturing Inc\.:$/m);
+    expect(out).not.toMatch(/Inc\. Manufacturing Inc/);
+  });
+
+  it("does not append leftover industry words when Inc already lacks a period", () => {
+    const intake =
+      "Draft a consulting services agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client).";
+    const body =
+      'This Agreement is entered into by and between Harbor Peak Analytics LLC, as "Consultant," and Ironvale Manufacturing Inc, as "Client."';
+    const out = preserveFullLegalPartyNames(
+      body,
+      ["Harbor Peak Analytics LLC", "Ironvale Manufacturing Inc."],
+      intake,
+    );
+    expect(out).toMatch(/Ironvale Manufacturing Inc\.?, as "Client\."/);
+    expect(out).not.toMatch(/Inc\. Manufacturing/);
   });
 
   it("preserves full names in preamble when model shortened them", () => {
@@ -85,6 +180,28 @@ describe("paidProPartyNamePreserve", () => {
       .filter((line) => line.trim() === "Iron Vale Systems Inc.");
     expect(entityBodyLines).toHaveLength(1);
     expect(out).toContain("Attn: Robert Henderson, President");
+  });
+
+  it("keeps overlapping person names and street addresses when expanding short party labels", () => {
+    const oak = "Oak Street Holdings LLC";
+    const pine = "Pine Creek Manufacturing Inc.";
+    const body = [
+      `This Agreement is between ${oak} ("Client") and ${pine} ("Supplier"),`,
+      "with a principal place of business at 1 Oak Street, Wilmington, DE 19801,",
+      "and at 9 Pine Creek Rd, Wilmington, DE 19802.",
+      "Client representative: Avery Oak.",
+      "Supplier representative: Casey Pine.",
+      "Oak Street shall provide access credentials.",
+    ].join("\n");
+    const out = preserveFullLegalPartyNamesInOpeningAndSignatures(body, [oak, pine], null);
+    expect(out).toContain("Client representative: Avery Oak.");
+    expect(out).not.toContain("Avery Oak Street");
+    expect(out).toContain("Supplier representative: Casey Pine.");
+    expect(out).not.toContain("Casey Pine Creek");
+    expect(out).toContain("1 Oak Street, Wilmington, DE 19801");
+    expect(out).not.toContain("1 Oak Street Holdings");
+    expect(out).toContain("9 Pine Creek Rd, Wilmington, DE 19802");
+    expect(out).toContain("Oak Street Holdings LLC shall provide access credentials.");
   });
 
   it("collapseDuplicateNoticeEntityLines removes consecutive canonical entity dupes", () => {

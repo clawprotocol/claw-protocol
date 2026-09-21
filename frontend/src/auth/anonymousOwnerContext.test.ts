@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -13,6 +13,11 @@ import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
 import { getOrgId, setOrgId } from "../launch/orgContext";
 
 describe("anonymousSessionApi storage", () => {
+  beforeEach(() => {
+    clearAnonymousSession();
+    setOrgId("");
+  });
+
   it("stores token without exposing in org id", () => {
     writeAnonymousSession({
       orgId: "anon-abc123",
@@ -43,6 +48,16 @@ describe("anonymousSessionApi storage", () => {
     });
     const headers = clawAgreementHeaders() as Record<string, string>;
     expect(headers["X-Claw-Anon-Session"]).toBe("opaque-token-value");
+  });
+
+  it("does not clobber a server-authorized user workspace", () => {
+    setOrgId("user-phase4b51-owner");
+    writeAnonymousSession({
+      orgId: "anon-must-not-win",
+      sessionId: "sess-late",
+      token: "late-anon-token",
+    });
+    expect(getOrgId()).toBe("user-phase4b51-owner");
   });
 
   it("clears stored anonymous session after sign-in finalize", () => {

@@ -8,6 +8,7 @@
 import { PAID_PRO_REVIEW_DECISION_SCROLL_REASON } from "./paidProSignerFinalizeRouting";
 import {
   PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
+  PAID_PRO_SIGNER_DETAILS_COMPLETE_SIGNING_CTA,
   PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
 } from "./signerSetupPartyIdentity";
 
@@ -102,6 +103,8 @@ export function resolvePaidProStickyBarHeadlines(phase: PaidProStickyCtaPhase): 
 export type ResolvePaidProStickyCtaArgs = ResolvePaidProStickyCtaPhaseArgs & {
   sendLabel?: string;
   sendDisabled?: boolean;
+  /** Owner already chose signing; confirmation must not return to the review-decision loop. */
+  signatureContinuationRequested?: boolean;
 };
 
 /**
@@ -149,7 +152,9 @@ export function resolvePaidProStickyCta(args: ResolvePaidProStickyCtaArgs): Paid
     return {
       phase,
       showStickyBar,
-      label: PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
+      label: args.signatureContinuationRequested
+        ? PAID_PRO_SIGNER_DETAILS_COMPLETE_SIGNING_CTA
+        : PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
       action: "guided_continue",
       disabled: false,
       reason: "paid_pro_signer_details_complete",

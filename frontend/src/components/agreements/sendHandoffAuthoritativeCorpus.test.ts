@@ -8,6 +8,7 @@ import {
   buildSendRouteReadonlyHtmlFromPlain,
   describePaidProSendModalBranch,
   longestPlainForAgreementPersist,
+  plainForCreateRecordPersist,
   mergePremiumRenderSourceField,
   paidProSendAllowed,
   pickAuthoritativePlainForSendHandoff,
@@ -148,6 +149,15 @@ describe("sendHandoffAuthoritativeCorpus", () => {
       purpose: "x".repeat(100),
     });
     expect(longestPlainForAgreementPersist(parsed, "e".repeat(50))).toBe(longPremium);
+  });
+
+  it("plainForCreateRecordPersist does not let a longer generated preview outrank customer purpose", () => {
+    const parsed = minimalParsed({
+      purpose: "AI workflow implementation",
+    });
+    const generated =
+      "1. Purpose and Scope\nService Provider will provide AI workflow implementation, dashboard setup, onboarding assistance, and light ongoing maintenance for Client.";
+    expect(plainForCreateRecordPersist(parsed, generated)).toBe("AI workflow implementation");
   });
 
   it("longestPlainForAgreementPersist ignores placeholder blocker editor text", () => {

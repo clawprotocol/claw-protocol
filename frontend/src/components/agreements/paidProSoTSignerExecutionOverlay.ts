@@ -2,6 +2,10 @@
  * Render-time signature-region overlay on frozen Paid Pro SoT — does not mutate stored SoT bytes.
  */
 
+import {
+  fillBlankPreservedAddedPartySignerNames,
+  shouldPreserveApprovedAddedPartyExecutionTail,
+} from "./paidProDeclaredConsultantClientPaper";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import {
   mergeLabeledPartyAuthorityIntoParties,
@@ -11,6 +15,21 @@ import {
 import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
 import { shouldApplyExecutionBlockSignerOverlay } from "./paidProSignerMetadataCommitPolicy";
 
+function splitFrozenOperativeAndExecution(text: string): { clause: string; tail: string } {
+  const idx = (text || "").search(/\bIN WITNESS WHEREOF\b/i);
+  if (idx < 0) return { clause: text, tail: "" };
+  return { clause: text.slice(0, idx), tail: text.slice(idx) };
+}
+
+/** After freeze, keep the accepted clause and take only the overlaid execution tail. */
+export function preserveFrozenOperativeClause(frozenCorpus: string, overlaid: string): string {
+  const frozenParts = splitFrozenOperativeAndExecution(frozenCorpus);
+  const overlaidParts = splitFrozenOperativeAndExecution(overlaid);
+  if (overlaidParts.clause === frozenParts.clause) return overlaid;
+  if (!overlaidParts.tail) return frozenCorpus;
+  return `${frozenParts.clause}${overlaidParts.tail}`;
+}
+
 export function applyPaidProSoTSignerExecutionOverlay(
   frozenCorpus: string,
   parties: readonly PaidProSignerMetadataParty[],
@@ -18,6 +37,10 @@ export function applyPaidProSoTSignerExecutionOverlay(
 ): string {
   const intake = roleContext?.intakeText ?? "";
   const hydrationParties = mergeLabeledPartyAuthorityIntoParties(parties, intake);
+  const hydrationNames = hydrationParties.map((party) => party.partyLegalName);
+  if (shouldPreserveApprovedAddedPartyExecutionTail(frozenCorpus, hydrationNames)) {
+    return fillBlankPreservedAddedPartySignerNames(frozenCorpus, hydrationParties);
+  }
   if (
     !hydrationParties.length ||
     !shouldApplyExecutionBlockSignerOverlay({ parties: hydrationParties, intakeText: intake })
@@ -37,5 +60,5 @@ export function applyPaidProSoTSignerExecutionOverlay(
     draftPartyNames: ctx.draftPartyNames ?? null,
   }).text;
   const finalized = finalizePaidProSigningCorpusText(text, hydrationParties, ctx);
-  return finalized.text;
+  return preserveFrozenOperativeClause(frozenCorpus, finalized.text);
 }

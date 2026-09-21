@@ -22,11 +22,21 @@ import { resolveSimpleProFinalReviewActive } from "./simpleProFinalReviewPhase";
 import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSeed";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntitiesForMetadata";
-import { markPaidProPipelineAcceptedCorpusHash, readPaidProPipelineAcceptedCorpusBody } from "./paidProPipelineAcceptedCorpus";
+import {
+  markPaidProPipelineAcceptedCorpusHash,
+  readPaidProPipelineAcceptedCorpusBody,
+} from "./paidProPipelineAcceptedCorpus";
 import {
   hasPaidProPipelineValidationForCorpus,
-  markPaidProPipelineValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
+import { rememberImmutableFrozenLegalCorpus } from "./paidProFrozenLegalCorpus";
+import {
+  alignIntakeSignerMetadataToLegalEntities,
+  extractCanonicalIntakeSignerMetadata,
+  isLikelyHumanSignerName,
+  scrubLegalEntityCopiedSignerNames,
+} from "./intakeSignerMetadataAuthority";
+import { entitiesMatchForSignerMetadata } from "./universalSignerMetadataAuthority";
 
 export type CanonicalPaidProReviewEntrySource =
   | "post_checkout_apply_success"
@@ -161,9 +171,9 @@ export function planEnterCanonicalPaidProReviewFlow(
     return { ...baseBlocked, blockedReason: "create_flow_routing_gate" };
   }
 
-  // Returning paid-create and first-paid routes must not enter canonical review on a
-  // hash-only / unvalidated corpus (TEST515). Post-checkout apply still commits markers
-  // via commitAcceptedPaidProCorpusHandoffSync after evaluateFirstPaidCreatePipelineGate.
+  // Returning paid-create must not enter on hash-only freeze-prep (TEST515)
+  // or merely because no accepted hash exists. Professional validation must
+  // already be latched for this corpus.
   if (
     !args.assumeFreshPipelineValidation &&
     args.source === "returning_paid_create"
@@ -249,16 +259,38 @@ export function planCanonicalPaidProSignerHandoff(args: {
     draft: args.draft,
     authoritativePartyCount: legalEntities.length,
   });
+  const aligned = alignIntakeSignerMetadataToLegalEntities(args.intakeText, legalEntities);
+  const authorizedBullets = extractCanonicalIntakeSignerMetadata(args.intakeText).filter(
+    (row) => row.source === "authorized_signers_bullet" && isLikelyHumanSignerName(row.signerName),
+  );
+  const signerNames = scrubLegalEntityCopiedSignerNames(seed.names, legalEntities);
+  const signerTitles = seed.titles.slice();
+  while (signerNames.length < legalEntities.length) signerNames.push("");
+  while (signerTitles.length < legalEntities.length) signerTitles.push("");
+  for (let i = 0; i < legalEntities.length; i++) {
+    const entity = legalEntities[i] ?? "";
+    const fromBullet =
+      authorizedBullets.find((row) => entitiesMatchForSignerMetadata(row.legalEntity, entity)) ??
+      authorizedBullets[i];
+    const humanName = (fromBullet?.signerName || aligned[i]?.signerName || "").trim();
+    const humanTitle = (fromBullet?.signerTitle || aligned[i]?.signerTitle || "").trim();
+    if (humanName && isLikelyHumanSignerName(humanName)) {
+      signerNames[i] = humanName;
+      if (humanTitle) signerTitles[i] = humanTitle;
+    }
+  }
+  const scrubbedNames = scrubLegalEntityCopiedSignerNames(signerNames, legalEntities);
+  for (let i = 0; i < signerNames.length; i++) signerNames[i] = scrubbedNames[i] ?? "";
   const hasIntakeEntitySignal = legalEntities.some(Boolean);
   const hasIntakeContactSignal =
     seed.addresses.some(Boolean) ||
     seed.emails.some(Boolean) ||
-    seed.names.some((n) => n.trim()) ||
-    seed.titles.some((t) => t.trim());
+    signerNames.some((n) => n.trim()) ||
+    signerTitles.some((t) => t.trim());
   if (!hasIntakeEntitySignal && !hasIntakeContactSignal) return null;
   return {
-    signerNames: seed.names,
-    signerTitles: seed.titles,
+    signerNames,
+    signerTitles,
     partyLegalNames: legalEntities,
     partyEmails: args.recipientCandidates?.map((c) => c.email ?? "") ?? seed.emails,
     partyAddresses: seed.addresses,
@@ -352,15 +384,41 @@ export function planCanonicalPaidProStaleUiReset(pipelineSource: string): Canoni
 export function commitAcceptedPaidProCorpusHandoffSync(args: {
   corpusPlain: string;
   pipelineSource: string;
+  agreementId?: string | null;
+  organizationId?: string | null;
 }): boolean {
   const body = args.corpusPlain.trim();
   if (body.length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return false;
   const pipelineSource = (args.pipelineSource || "server_full_draft").trim();
   if (!isAuthoritativePremiumPipelineRenderSource(pipelineSource)) return false;
-  markPaidProPipelineValidationPassed({ text: body, source: pipelineSource });
+  if (
+    !hasPaidProPipelineValidationForCorpus({
+      text: body,
+      source: pipelineSource,
+    })
+  ) {
+    return false;
+  }
   markPaidProPipelineAcceptedCorpusHash(body);
+  rememberImmutableFrozenLegalCorpus(body, {
+    agreementId: args.agreementId,
+    organizationId: args.organizationId,
+  });
   commitPaidProAcceptanceStorageHygiene();
   return (readPaidProPipelineAcceptedCorpusBody()?.trim().length ?? 0) >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN;
+}
+
+/**
+ * Rewrite-time handoff after the exact corpus already passed professional validation.
+ * Does not manufacture a validation latch.
+ */
+export function commitValidatedPaidProRewriteCorpusHandoff(args: {
+  corpusPlain: string;
+  pipelineSource: string;
+  agreementId?: string | null;
+  organizationId?: string | null;
+}): boolean {
+  return commitAcceptedPaidProCorpusHandoffSync(args);
 }
 
 export const ACCEPTED_PAID_PRO_CORPUS_HANDOFF_HELPER = "commitAcceptedPaidProCorpusHandoffSync";

@@ -1,4 +1,4 @@
-import { getOrgId } from "../launch/orgContext";
+import { getOrgId, subscribeToOrgContextChanges } from "../launch/orgContext";
 import {
   hasOneTimeAgreementUnlock,
   hasSimpleFlowSendUnlocked,
@@ -7,6 +7,7 @@ import { mustBlockPaidEntitlementForLegacyFallbackOrg } from "../launch/fallback
 import { fetchAgreementUsageSummary } from "./agreementWorkspaceApi";
 
 let workspaceProResolved: boolean | null = null;
+let workspaceProResolvedOrgId: string | null = null;
 
 const WORKSPACE_USAGE_TIER_CACHE_KEY = "claw_workspace_usage_tier_v1";
 
@@ -18,6 +19,32 @@ type PersistedWorkspaceUsageTier = {
 
 export function invalidateWorkspaceProEntitlementCache(): void {
   workspaceProResolved = null;
+  workspaceProResolvedOrgId = null;
+}
+
+function currentWorkspaceOrgId(): string {
+  return getOrgId().trim();
+}
+
+function workspaceProResolutionMatchesCurrentOrg(): boolean {
+  const oid = currentWorkspaceOrgId();
+  if (!oid || mustBlockPaidEntitlementForLegacyFallbackOrg(oid)) return false;
+  return workspaceProResolvedOrgId === oid;
+}
+
+function bindWorkspaceProResolution(entitled: boolean | null, orgId?: string): void {
+  if (entitled === null) {
+    invalidateWorkspaceProEntitlementCache();
+    return;
+  }
+  const oid = (orgId ?? currentWorkspaceOrgId()).trim();
+  if (!oid || mustBlockPaidEntitlementForLegacyFallbackOrg(oid)) {
+    workspaceProResolved = false;
+    workspaceProResolvedOrgId = oid || "local-org";
+    return;
+  }
+  workspaceProResolved = entitled;
+  workspaceProResolvedOrgId = oid;
 }
 
 export function clearPersistedWorkspaceUsageTierCache(): void {
@@ -71,27 +98,48 @@ export function markPersistedWorkspaceUsageTierForTests(tier: string | null, org
 
 export function readCachedWorkspaceProEntitlement(): boolean {
   if (mustBlockPaidEntitlementForLegacyFallbackOrg()) return false;
-  return workspaceProResolved === true || readPersistedWorkspaceUsageTierPaid();
+  if (workspaceProResolutionMatchesCurrentOrg() && workspaceProResolved === true) return true;
+  return readPersistedWorkspaceUsageTierPaid();
 }
 
-/** Vitest: seed workspace billing resolution without network. */
+/**
+ * In-memory workspace billing resolution for the current org only.
+ * Never readable for another org or local-org / empty bootstrap (Case F).
+ */
+export function readExplicitWorkspaceProBillingResolution(): boolean {
+  if (!workspaceProResolutionMatchesCurrentOrg()) return false;
+  return workspaceProResolved === true;
+}
+
+/** Vitest: seed workspace billing resolution without network for the current org. */
 export function markWorkspaceProEntitlementResolvedForTests(entitled: boolean | null): void {
-  workspaceProResolved = entitled;
+  bindWorkspaceProResolution(entitled);
 }
 
 /** Workspace billing: Pro / paid plan for the current org (cached until invalidated). */
 export async function fetchWorkspaceProEntitlement(): Promise<boolean> {
-  if (mustBlockPaidEntitlementForLegacyFallbackOrg()) {
-    workspaceProResolved = false;
+  const oid = currentWorkspaceOrgId();
+  if (mustBlockPaidEntitlementForLegacyFallbackOrg(oid)) {
+    bindWorkspaceProResolution(false, oid || "local-org");
     return false;
   }
-  if (workspaceProResolved !== null) return workspaceProResolved;
+  if (workspaceProResolutionMatchesCurrentOrg() && workspaceProResolved !== null) {
+    return workspaceProResolved;
+  }
   const res = await fetchAgreementUsageSummary();
   if (res.ok && res.data?.tier) {
-    writePersistedWorkspaceUsageTier(res.data.tier);
+    writePersistedWorkspaceUsageTier(res.data.tier, oid);
   }
-  workspaceProResolved = Boolean(res.ok && res.data && res.data.tier === "paid");
-  return workspaceProResolved;
+  bindWorkspaceProResolution(Boolean(res.ok && res.data && res.data.tier === "paid"), oid);
+  return workspaceProResolved === true;
+}
+
+if (typeof window !== "undefined") {
+  subscribeToOrgContextChanges((orgId) => {
+    if (workspaceProResolvedOrgId && workspaceProResolvedOrgId !== orgId) {
+      invalidateWorkspaceProEntitlementCache();
+    }
+  });
 }
 
 export function hasSessionAgreementSendUnlock(agreementId: string | undefined): boolean {

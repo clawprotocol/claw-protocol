@@ -482,6 +482,22 @@ function matchContactToParty(contact: IntakeContactRecord, partyName: string): b
   return false;
 }
 
+/** Expand a UI/draft slot to a full legal name by identity, never by pool index. */
+function expandPartySlotAgainstEntityPool(slot: string, pool: readonly string[]): string {
+  const name = String(slot || "").trim();
+  if (!name) return "";
+  const n = normalizePartyToken(name);
+  if (!n) return name;
+  let best = "";
+  for (const entity of pool) {
+    const p = normalizePartyToken(entity);
+    if (!p) continue;
+    if (p === n) return entity;
+    if ((p.includes(n) || n.includes(p)) && entity.length > best.length) best = entity;
+  }
+  return best || name;
+}
+
 /** Preserve signer names/titles/emails from intake through premium completion (not VS01-only). */
 export function buildPremiumRecipientCandidatesFromIntake(
   partyNames: readonly string[],
@@ -489,25 +505,28 @@ export function buildPremiumRecipientCandidatesFromIntake(
   defaultRole = "Party",
 ): PremiumRecipientCandidate[] {
   const authoritative = resolveFullLegalPartiesFromIntake(partyNames, intakeText);
+  // Match each UI/draft party to a contact by identity. Do not substitute
+  // authoritative[i]: that pool is length-sorted and will bind the longest
+  // legal name (Northwind) onto Ironclad's slot.
   const slots =
-    authoritative.length >= partyNames.length && partyNames.length > 0
-      ? partyNames.map((slot, i) => authoritative[i] || slot)
+    partyNames.length > 0
+      ? partyNames.map((slot) => expandPartySlotAgainstEntityPool(String(slot || "").trim(), authoritative))
       : authoritative.length > 0
-        ? authoritative
-        : [...partyNames];
+        ? [...authoritative]
+        : [];
   const contacts = extractIntakeContacts(intakeText);
   const used = new Set<number>();
-  return slots.map((rawName) => {
-    const name = String(rawName || "").trim();
+  return slots.map((rawName, index) => {
+    const uiName = String(partyNames[index] || rawName || "").trim();
+    const name = String(rawName || uiName).trim();
     let hitIdx = contacts.findIndex((c, i) => !used.has(i) && matchContactToParty(c, name));
-    if (hitIdx < 0 && contacts.length === partyNames.length) {
-      const ordinal = partyNames.indexOf(rawName);
-      if (ordinal >= 0 && ordinal < contacts.length && !used.has(ordinal)) hitIdx = ordinal;
+    if (hitIdx < 0 && uiName && uiName !== name) {
+      hitIdx = contacts.findIndex((c, i) => !used.has(i) && matchContactToParty(c, uiName));
     }
     if (hitIdx >= 0) used.add(hitIdx);
     const c = hitIdx >= 0 ? contacts[hitIdx] : null;
     return {
-      name: name || c?.name || "",
+      name: uiName || name || c?.name || "",
       email: (c?.email || "").trim(),
       role: (c?.title || "").trim() || defaultRole,
     };

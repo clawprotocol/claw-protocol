@@ -33,6 +33,7 @@ import { buildReviewFirstTextDiffSummary } from "../../agreement/reviewFirstText
 import {
   acceptedProposalCorpusText,
   logReviewStatusTransition,
+  persistAcceptedProposalCurrentReviewRevision,
   promoteAcceptedReviewCorpus,
 } from "../../agreement/reviewCorpusAuthority";
 import { resolveReviewFirstDisplayCorpus } from "../../launch/simpleProduct/reviewFirstDisplayCorpus";
@@ -166,6 +167,12 @@ export function OwnerProposalReviewPanel(props: Props) {
             draft: nextDraft ?? null,
           })
         : null;
+      if (acceptedPlain.trim()) {
+        await persistAcceptedProposalCurrentReviewRevision({
+          agreementId,
+          corpusPlain: acceptedPlain,
+        });
+      }
       const proposerId = String(selected.proposer_id || "").trim();
       if (proposerId) {
         logReviewStatusTransition({

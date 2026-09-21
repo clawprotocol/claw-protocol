@@ -30,6 +30,15 @@ def completed_pdf_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         "backend.routers.agreements_v2_api.assert_agreement_full_draft_read_allowed",
         lambda *a, **k: None,
     )
+    monkeypatch.setattr(
+        "backend.routers.agreements_v2_api._completed_signed_pdf_authority_or_403",
+        lambda *_a, **_k: {
+            "accepted_snapshot_id": "crs_test",
+            "accepted_digest": "c" * 64,
+            "lock_version_id": "lv_test",
+            "receipt_id": "agr_rcpt_test",
+        },
+    )
     app = FastAPI()
     app.include_router(av2.router)
     return TestClient(app)
@@ -223,6 +232,41 @@ def test_build_completed_signed_pdf_bytes_uses_canonical_html_renderer(
     assert "dashboard-live-html" not in html_arg
 
 
+def test_evaluate_completed_signed_pdf_export_fail_closed_gates() -> None:
+    from backend.services.completed_signed_pdf_export import evaluate_completed_signed_pdf_export
+
+    required = ["p1", "p2", "p3", "p4"]
+    digest = "c" * 64
+    base = {
+        "required_participant_ids": required,
+        "signed_participant_ids": required,
+        "receipt_bound": True,
+        "receipt_id": "agr_rcpt_test",
+        "accepted_snapshot_id": "crs_1",
+        "accepted_digest": digest,
+        "lock_snapshot_id": "crs_1",
+        "lock_digest": digest,
+        "lock_version_id": "lv_1",
+        "packet_snapshot_id": "crs_1",
+        "packet_digest": digest,
+    }
+    assert evaluate_completed_signed_pdf_export(args=base) is None
+    assert (
+        evaluate_completed_signed_pdf_export(args={**base, "signed_participant_ids": required[:3]})
+        == "incomplete_required_signatures"
+    )
+    assert evaluate_completed_signed_pdf_export(args={**base, "receipt_bound": False}) == "unbound_receipt"
+    assert (
+        evaluate_completed_signed_pdf_export(args={**base, "packet_digest": "d" * 64})
+        == "snapshot_digest_mismatch"
+    )
+    assert (
+        evaluate_completed_signed_pdf_export(args={**base, "unsigned_historical_paper": True})
+        == "historical_unsigned_paper"
+    )
+    assert evaluate_completed_signed_pdf_export(args={**base, "receipt_id": ""}) == "unbound_receipt"
+
+
 def test_public_completed_signed_export_pdf_403_when_not_fully_executed(
     completed_pdf_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -244,3 +288,72 @@ def test_public_completed_signed_export_pdf_403_when_not_fully_executed(
     monkeypatch.setattr("backend.routers.agreements_v2_api._agreement_draft_fully_executed", lambda _d: False)
     r = completed_pdf_client.get("/api/agreements/public/ag-x/completed-signed-export-pdf")
     assert r.status_code == 403
+
+
+def test_reconstruct_signed_snapshot_from_participant_bound_ceremony() -> None:
+    from backend.services.vs01_fully_executed_snapshot import reconstruct_corpus_from_audit_and_portable
+
+    corpus = (
+        "JOINT AI SOFTWARE ROLLOUT AGREEMENT\n"
+        "Texas law. $187,500. 24 months. 78701.\n"
+        "IN WITNESS WHEREOF, the Parties execute this Agreement.\n"
+        "Ironclad Systems Group LLC\n"
+        "By: ______________________\n"
+        "Name: Ethan Cole\n"
+        "Silver Mesa Analytics LP\n"
+        "By: ______________________\n"
+        "Name: Olivia Hart\n"
+    )
+    draft = {
+        "audit_log": [
+            {
+                "event_type": "signature_completed",
+                "at": "2026-09-19T00:00:00Z",
+                "value": {
+                    "participant_id": "ironclad-id",
+                    "typed_name": "TEST-SIGNATURE Ethan Cole",
+                    "participant_display_name": "Ethan Cole",
+                },
+            },
+            {
+                "event_type": "signature_completed",
+                "at": "2026-09-19T00:01:00Z",
+                "value": {
+                    "participant_id": "silver-id",
+                    "typed_name": "TEST-SIGNATURE Olivia Hart",
+                    "participant_display_name": "Olivia Hart",
+                },
+            },
+        ],
+        "vs01_signing_packet_v1": {
+            "portable": {
+                "seed": {"corpusPlain": corpus},
+                "fields": [],
+                "roles": [
+                    {
+                        "roleId": "role_ironclad-id",
+                        "partyIndex": 0,
+                        "partyId": "ironclad-id",
+                        "signerName": "Ethan Cole",
+                        "signerEmail": "ethan.cole@ironcladsg.com",
+                    },
+                    {
+                        "roleId": "role_silver-id",
+                        "partyIndex": 1,
+                        "partyId": "silver-id",
+                        "signerName": "Olivia Hart",
+                        "signerEmail": "olivia.hart@silvermesaanalytics.com",
+                    },
+                ],
+            }
+        },
+    }
+    rebuilt = reconstruct_corpus_from_audit_and_portable(draft)
+    assert rebuilt is not None
+    assert "TEST-SIGNATURE Ethan Cole" in rebuilt
+    assert "TEST-SIGNATURE Olivia Hart" in rebuilt
+    from backend.services.vs01_fully_executed_snapshot import build_snapshot_record
+
+    snap = build_snapshot_record(rebuilt, draft["vs01_signing_packet_v1"]["portable"])
+    assert snap is not None
+    assert "TEST-SIGNATURE Olivia Hart" in str(snap.get("corpus_plain") or "")

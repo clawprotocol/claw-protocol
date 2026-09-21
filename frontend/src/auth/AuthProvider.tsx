@@ -4,6 +4,7 @@ import {
   getAuthSession,
   isSupabaseAuthEnabled,
   onAuthStateChange,
+  resolveBrowserAuthSession,
   signInWithEmailMagicLink,
   signInWithGoogle,
   signOutAuth,
@@ -18,12 +19,16 @@ import {
   hasGenesisDogOnboardingIntent,
 } from "../launch/genesisReferral/genesisDogOnboardingCapture";
 import { readE2eAuthSessionForDev } from "./e2eAuthSessionBridge";
+import { clearLawdogUserSessionState } from "./userSessionState";
+import { bindResolvedAuthLifecycle } from "../account/currentUser";
 
 export type AuthSignInOpts = {
   returningSignIn?: boolean;
   stagingDirectOnly?: boolean;
   /** Allowlisted internal path (e.g. `/app/create?ref=CODE`). Overrides returning `/app` default. */
   destinationPath?: string;
+  /** Server continuation purpose. ``quick_pdf_return`` is the only way into Quick. */
+  authPurpose?: string;
 };
 
 export type AuthContextValue = {
@@ -83,19 +88,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     let unsub: { unsubscribe: () => void } | null = null;
-    void getAuthSession().then(async (s) => {
-      setSession(s);
-      if (s?.access_token) setCachedAccessToken(s.access_token);
-      if (s?.user && !isAuthCallbackPath()) {
-        await finalizeUser(s.user, "session_restore");
-      }
-      setLoading(false);
-    });
+    void getAuthSession()
+      .then(async (s) => {
+        const next = resolveBrowserAuthSession(s);
+        setSession(next);
+        if (next?.access_token) setCachedAccessToken(next.access_token);
+        if (next?.user && !isAuthCallbackPath()) {
+          await finalizeUser(next.user, "session_restore");
+        }
+      })
+      .finally(() => {
+        setLoading(false);
+      });
     unsub = onAuthStateChange((s) => {
-      setSession(s);
-      if (s?.access_token) setCachedAccessToken(s.access_token);
-      if (s?.user && !isAuthCallbackPath()) {
-        void finalizeUser(s.user, "session_restore");
+      const next = resolveBrowserAuthSession(s);
+      setSession(next);
+      if (next?.access_token) setCachedAccessToken(next.access_token);
+      else clearCachedAccessToken();
+      if (next?.user && !isAuthCallbackPath()) {
+        void finalizeUser(next.user, "session_restore");
       }
     }) ?? null;
     return () => {
@@ -138,6 +149,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         returningSignIn: opts?.returningSignIn,
         workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
         destinationPath: resolveSignInDestination(opts),
+        authPurpose: opts?.authPurpose,
         provider: "email",
       });
       return signInWithEmailMagicLink(email, buildAuthCallbackUrl(undefined, continuationId), {
@@ -153,6 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         returningSignIn: opts?.returningSignIn,
         workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
         destinationPath: resolveSignInDestination(opts),
+        authPurpose: opts?.authPurpose,
         provider: "google",
       });
       await signInWithGoogle(buildAuthCallbackUrl(undefined, continuationId));
@@ -161,11 +174,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
-    await signOutAuth();
-    setSession(null);
-    finalizedUserRef.current = null;
-    clearCachedAccessToken();
+    try {
+      await signOutAuth();
+    } finally {
+      setSession(null);
+      finalizedUserRef.current = null;
+      bindResolvedAuthLifecycle({ status: "signed_out" });
+      clearLawdogUserSessionState();
+    }
   }, []);
+
+  useEffect(() => {
+    if (!enabled) {
+      bindResolvedAuthLifecycle(null);
+      return;
+    }
+    if (loading && !session) {
+      bindResolvedAuthLifecycle({ status: "loading" });
+      return;
+    }
+    const token = String(session?.access_token || "").trim();
+    const userId = String(session?.user?.id || "").trim();
+    if (userId && token) {
+      bindResolvedAuthLifecycle({
+        status: "authenticated",
+        accessToken: token,
+        userId,
+        email: session?.user?.email ?? null,
+        displayName: session?.user ? displayNameFromUser(session.user) : null,
+      });
+      return;
+    }
+    if (session?.user && !token) {
+      bindResolvedAuthLifecycle({ status: "refresh_failed", userId: session.user.id });
+      return;
+    }
+    if (!loading) {
+      bindResolvedAuthLifecycle({ status: "signed_out" });
+    }
+  }, [enabled, loading, session]);
 
   const value = useMemo(
     (): AuthContextValue => ({

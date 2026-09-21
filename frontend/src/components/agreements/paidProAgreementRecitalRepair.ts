@@ -11,8 +11,16 @@ import {
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { authorityPartiesToCanonicalPartyIdentities } from "./paidProSignerMetadataAuthority";
+import { overlayCorpusDeclaredRoleLabels } from "./paidProAcceptedCorpusPartyRoles";
 import { ensurePaidProMultiPartyAgreementOpening, ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
-import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
+import {
+  overlayDeclaredOpeningRoleParentheticals,
+  repairOpeningRecitalRoleLabelsFromManifest,
+} from "./paidProOpeningRoleLabelConsistency";
+import {
+  corpusDeclaresConsultantClientOpening,
+  restoreDeclaredConsultantClientPaper,
+} from "./paidProDeclaredConsultantClientPaper";
 
 export function repairMalformedPaidProAgreementRecital(
   text: string,
@@ -30,9 +38,16 @@ export function repairMalformedPaidProAgreementRecital(
   repairs.push(...phrases.repairs);
 
   const records = parties?.length
-    ? canonicalPartyRecordsFromSignerIdentities(authorityPartiesToCanonicalPartyIdentities(parties))
+    ? overlayDeclaredOpeningRoleParentheticals(
+        overlayCorpusDeclaredRoleLabels(
+          canonicalPartyRecordsFromSignerIdentities(authorityPartiesToCanonicalPartyIdentities(parties)),
+          out,
+        ),
+        out,
+      )
     : undefined;
-  if (records && records.length >= 2) {
+  const acceptedBeforeRoleRepair = out;
+  if (records && records.length >= 2 && !corpusDeclaresConsultantClientOpening(out)) {
     const roleLabels = repairOpeningRecitalRoleLabelsFromManifest(out, records);
     out = roleLabels.text;
     repairs.push(...roleLabels.repairs);
@@ -55,6 +70,11 @@ export function repairMalformedPaidProAgreementRecital(
   repairs.push(...servicePartyLabels.repairs);
 
   out = stripPremiumIntelligenceCalloutsFromCorpus(out);
+  const restored = restoreDeclaredConsultantClientPaper(out, acceptedBeforeRoleRepair || text);
+  if (restored !== out) {
+    out = restored;
+    repairs.push("recital:restore_declared_consultant_client");
+  }
 
   return { text: out, repairs };
 }

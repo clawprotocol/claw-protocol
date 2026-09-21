@@ -20,7 +20,7 @@ import type { ResolvePaidProReviewRenderPartiesArgs } from "./paidProReviewRende
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
 import { applyFrozenManifestPaidProDisplayAuthority } from "./paidProFrozenManifestDisplayAuthority";
-import { preparePaidProReviewDisplayPlain, preparePaidProFrozenDisplayPlain } from "./paidProFlattenedDocumentNormalize";
+import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
 import { shouldApplyExecutionBlockSignerOverlay, isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 
@@ -43,11 +43,7 @@ export function resolvePaidProAuthoritativeDisplayPlain(
 ): string {
   const displayOnly = shouldUsePaidProSourceOfTruthDisplayOnly();
   const prepared = displayOnly
-    ? preparePaidProFrozenDisplayPlain(resolvePaidProFrozenDisplayPlain(), {
-        intakeText: args?.intakeText ?? null,
-        draftPartyNames:
-          args?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null,
-      }).text
+    ? resolvePaidProFrozenDisplayPlain()
     : preparePaidProReviewDisplayPlain(resolvePaidProFrozenDisplayPlain()).text;
   const base = displayOnly
     ? prepared

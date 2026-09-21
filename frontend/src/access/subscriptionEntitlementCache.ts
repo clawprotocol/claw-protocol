@@ -8,6 +8,27 @@ import { getOrgId } from "../launch/orgContext";
 import { hasPaidPremiumCompletionSession } from "../components/agreements/premiumCompletionStorage";
 
 const CACHE_KEY = "claw_subscription_entitlement_v1";
+export const SUBSCRIPTION_ENTITLEMENT_CHANGED_EVENT = "lawdog:subscription-entitlement-changed";
+
+function notifySubscriptionEntitlementChanged(): void {
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+    window.dispatchEvent(new Event(SUBSCRIPTION_ENTITLEMENT_CHANGED_EVENT));
+  }
+}
+
+/** Subscribe to checkout, refresh, sign-out, and cross-tab entitlement changes. */
+export function subscribeToSubscriptionEntitlementChanges(listener: () => void): () => void {
+  if (typeof window === "undefined" || typeof window.addEventListener !== "function") return () => {};
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === CACHE_KEY) listener();
+  };
+  window.addEventListener(SUBSCRIPTION_ENTITLEMENT_CHANGED_EVENT, listener);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(SUBSCRIPTION_ENTITLEMENT_CHANGED_EVENT, listener);
+    window.removeEventListener("storage", onStorage);
+  };
+}
 
 function isSubscriptionCheckoutReturnWindow(): boolean {
   if (typeof window === "undefined") return false;
@@ -68,6 +89,7 @@ export function writeCachedSubscriptionEntitlement(row: SubscriptionRow | null, 
   } catch {
     /* ignore */
   }
+  notifySubscriptionEntitlementChanged();
   return snap;
 }
 
@@ -78,6 +100,7 @@ export function clearCachedSubscriptionEntitlement(): void {
   } catch {
     /* ignore */
   }
+  notifySubscriptionEntitlementChanged();
 }
 
 export async function refreshSubscriptionEntitlement(orgId?: string): Promise<SubscriptionEntitlementSnapshot | null> {

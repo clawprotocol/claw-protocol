@@ -29,10 +29,13 @@ describe("esign bridge cold-open (agreement_bridge=1)", () => {
     expect(wizard).toContain("authLoading");
     expect(wizard).toContain("useAuth");
     const api = readFileSync(join(__dirname, "vs01Api.ts"), "utf8");
-    expect(api).toContain("refreshCachedAccessToken");
     const fnStart = api.indexOf("export async function fetchDocumentContent");
     const fnBody = api.slice(fnStart, fnStart + 900);
-    expect(fnBody.indexOf("refreshCachedAccessToken")).toBeLessThan(fnBody.indexOf("clawAgreementHeaders"));
+    expect(fnBody).toContain("ownerApiFetch");
+    const ownerClient = readFileSync(join(__dirname, "../lib/ownerApiClient.ts"), "utf8");
+    const ownerFetchStart = ownerClient.indexOf("export async function ownerApiFetch");
+    const ownerFetchBody = ownerClient.slice(ownerFetchStart);
+    expect(ownerFetchBody.indexOf("refreshCachedAccessToken")).toBeLessThan(ownerFetchBody.indexOf("clawAgreementHeaders"));
   });
 
   it("when auth is still loading, content GET is deferred even if APIs would return 200", () => {

@@ -78,26 +78,89 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const WELL_FORMED_EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+const ENTITY_SUFFIX_IN_DOMAIN =
+  "(?:LLC|L\\.L\\.C\\.|Inc\\.?|Incorporated|Corp\\.?|Corporation|Ltd\\.?|Limited|LLP|LP)";
+
+function wellFormedEmailSpanRe(local: string): RegExp {
+  return new RegExp(`${escapeRe(local)}@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}`, "gi");
+}
+
+/** Damaged `local@Title Case Entity Inc.com` — stops at the glued TLD, not following wording. */
+function corruptedEntityEmailSpanRe(local: string): RegExp {
+  return new RegExp(
+    `${escapeRe(local)}@[A-Z][A-Za-z0-9.'-]*(?:\\s+[A-Z][A-Za-z0-9.'-]*)*\\s*${ENTITY_SUFFIX_IN_DOMAIN}\\.?[A-Za-z]{2,}`,
+    "g",
+  );
+}
+
+function isWellFormedEmail(address: string): boolean {
+  return WELL_FORMED_EMAIL_RE.test(address.trim());
+}
+
+function emailsByLocalPart(emails: readonly string[]): Map<string, string[]> {
+  const byLocal = new Map<string, string[]>();
+  for (const email of emails) {
+    const local = email.split("@")[0]?.toLowerCase();
+    if (!local) continue;
+    const bucket = byLocal.get(local) ?? [];
+    if (!bucket.some((item) => item.toLowerCase() === email.toLowerCase())) bucket.push(email);
+    byLocal.set(local, bucket);
+  }
+  return byLocal;
+}
+
+export type RestoreExactEmailsOptions = {
+  /**
+   * When true, a well-formed address that is not in `emails` may be replaced only if
+   * exactly one provided email shares its local part (confirmed party contact).
+   * Default false: never overwrite a well-formed current address from stale intake.
+   */
+  enforceProvidedEmails?: boolean;
+};
+
 /**
- * Force exact intake emails back into the document after polish (byte-for-byte when possible).
+ * Restore emails from the provided confirmed/intake list after polish.
+ * Well-formed current addresses are not rewritten from a different well-formed source
+ * unless `enforceProvidedEmails` is set and the local-part mapping is unique.
  */
 export function restoreExactIntakeEmails(
   text: string,
   intakeEmails: readonly string[],
+  opts?: RestoreExactEmailsOptions,
 ): { text: string; repairedCount: number } {
-  let out = unmaskEmailAddresses(text, intakeEmails);
+  const provided = intakeEmails.map((email) => String(email || "").trim()).filter(Boolean);
+  let out = unmaskEmailAddresses(text, provided);
   let repairedCount = 0;
+  const providedLower = new Set(provided.map((email) => email.toLowerCase()));
+  const byLocal = emailsByLocalPart(provided);
 
-  for (const email of intakeEmails) {
-    if (!email) continue;
-    if (out.includes(email)) continue;
-    const local = email.split("@")[0];
-    if (!local) continue;
-    const corruptRe = new RegExp(`${escapeRe(local)}@[^\\n\\r,;<>\\]\\]]+`, "gi");
-    const next = out.replace(corruptRe, email);
-    if (next !== out) {
-      out = next;
+  const replaceLocalSpans = (sourceEmail: string, allowWellFormed: boolean): void => {
+    const local = sourceEmail.split("@")[0];
+    if (!local) return;
+    const peers = byLocal.get(local.toLowerCase()) ?? [];
+    const uniquePeer = peers.length === 1 ? peers[0]! : null;
+
+    const replaceSpan = (span: string, treatAsCorrupted: boolean): string => {
+      if (span.toLowerCase() === sourceEmail.toLowerCase()) return span;
+      if (providedLower.has(span.toLowerCase())) return span;
+      if (!treatAsCorrupted && isWellFormedEmail(span) && !allowWellFormed) return span;
+      if (!uniquePeer) return span;
+      if (!treatAsCorrupted && !allowWellFormed) return span;
       repairedCount += 1;
+      return uniquePeer;
+    };
+
+    out = out.replace(wellFormedEmailSpanRe(local), (span) => replaceSpan(span, false));
+    out = out.replace(corruptedEntityEmailSpanRe(local), (span) => replaceSpan(span, true));
+  };
+
+  for (const email of provided) {
+    replaceLocalSpans(email, false);
+  }
+  if (opts?.enforceProvidedEmails) {
+    for (const email of provided) {
+      replaceLocalSpans(email, true);
     }
   }
 

@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Literal, Optional, Set, Tuple, cast
 from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from backend.config.anchor_network_config import (
     ALLOWED_AGREEMENT_ANCHOR_NETWORKS,
@@ -33,7 +33,11 @@ from backend.config.runtime_environment import (
     recipient_token_ttl_min_seconds,
 )
 from backend.handlers.verifier_api_handler import get_batch
-from backend.proof.agreement_receipt import create_agreement_receipt_response
+from backend.proof.agreement_receipt import (
+    build_drafted_ceremony_execution_packet,
+    create_agreement_receipt_response,
+    verify_drafted_finalized_receipt,
+)
 from backend.security.agreement_read_scope import (
     assert_agreement_full_draft_read_allowed,
     assert_agreement_recipient_write_allowed,
@@ -91,7 +95,11 @@ from backend.agreements.explicit_acceptance_authority import (
     ExplicitAcceptanceRecord,
     establish_explicit_acceptance,
 )
+from backend.agreements.completion_criteria_guard import apply_completion_criteria_guard
+from backend.agreements.date_meaning_guard import apply_date_meaning_guard
 from backend.agreements.premium_full_draft_quality_gate import (
+    apply_unconfirmed_payment_timing_guard,
+    unconfirmed_payment_questions_present,
     build_free_reference_blob,
     build_premium_full_draft_repair_user_payload,
     evaluate_premium_full_draft_quality,
@@ -650,6 +658,16 @@ def _fallback_role_for_party_index(idx: int) -> str:
     return "party"
 
 
+def _party_signer_kwargs(party: Any) -> Dict[str, Optional[str]]:
+    if isinstance(party, dict):
+        signer_name = str(party.get("signer_name") or party.get("signerName") or "").strip() or None
+        signer_title = str(party.get("signer_title") or party.get("signerTitle") or "").strip() or None
+    else:
+        signer_name = str(getattr(party, "signer_name", None) or getattr(party, "signerName", None) or "").strip() or None
+        signer_title = str(getattr(party, "signer_title", None) or getattr(party, "signerTitle", None) or "").strip() or None
+    return {"signer_name": signer_name, "signer_title": signer_title}
+
+
 def _sanitize_agreement_parties_in_order(parties: List[AgreementParty]) -> List[AgreementParty]:
     """Drop empty names after cleanup; remap internal placeholder roles to party_a / party_b by final order."""
     out: List[AgreementParty] = []
@@ -662,7 +680,19 @@ def _sanitize_agreement_parties_in_order(parties: List[AgreementParty]) -> List[
         pid = (p.id or "").strip() or None
         email = str(getattr(p, "email", None) or "").strip() or None
         phone = str(getattr(p, "phone", None) or "").strip() or None
-        out.append(AgreementParty(name=name, role=role_out, id=pid, email=email, phone=phone))
+        signer_name = str(getattr(p, "signer_name", None) or "").strip() or None
+        signer_title = str(getattr(p, "signer_title", None) or "").strip() or None
+        out.append(
+            AgreementParty(
+                name=name,
+                role=role_out,
+                id=pid,
+                email=email,
+                phone=phone,
+                signer_name=signer_name,
+                signer_title=signer_title,
+            )
+        )
     return out
 
 
@@ -708,11 +738,15 @@ def _party_display_names_role(
 
 
 class AgreementParty(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str
     role: str
     id: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
+    signer_name: Optional[str] = Field(default=None, alias="signerName")
+    signer_title: Optional[str] = Field(default=None, alias="signerTitle")
 
 
 class VersionSnapshot(BaseModel):
@@ -745,6 +779,7 @@ class AgreementDraftCreate(BaseModel):
     # Stub: no processor — persisted for UI + future billing (amount, type, payer, condition).
     payment_request: Optional[Dict[str, Any]] = None
     payment_required: bool = False
+    unresolved_identity_v1: Optional[List[Dict[str, Any]]] = None
 
 
 class AgreementDraft(AgreementDraftCreate):
@@ -754,6 +789,7 @@ class AgreementDraft(AgreementDraftCreate):
     versions: List[VersionSnapshot] = Field(default_factory=list)
     audit_log: List[AuditEvent] = Field(default_factory=list)
     review_sent_at: Optional[str] = None
+    owner_delivery_track: Optional[str] = None
     """Set when review invite Resend delivery orchestration completed (idempotent email guard)."""
     review_invite_emails_sent_at: Optional[str] = None
     """VS01 prepared signing packet for cross-browser recipient hydration (test346)."""
@@ -787,6 +823,12 @@ class AgreementDraft(AgreementDraftCreate):
     explicit_acceptance_v1: Optional[Dict[str, Any]] = None
     """Completion evidence package for fully executed agreements (who signed, when, corpus hash, retrieval)."""
     completion_evidence_v1: Optional[Dict[str, Any]] = None
+    """Phase 4C.2 — owner-guarded uploaded-PDF envelope (not drafted paper)."""
+    quick_pdf_envelope_v1: Optional[Dict[str, Any]] = None
+    """Phase 4C.2.1 — typed uploaded-PDF authority (never accepted-review corpus)."""
+    uploaded_final_pdf_authority_v1: Optional[Dict[str, Any]] = None
+    """Phase 4C.2.3 — private raw signature/consent execution record (never on receipts)."""
+    vs01_signer_execution_v1: Optional[Dict[str, Any]] = None
 
 
 def _merge_agreement_draft(base: AgreementDraft, **updates: Any) -> AgreementDraft:
@@ -1107,14 +1149,6 @@ def _classify_premium_full_draft_failure(exc: BaseException) -> tuple[str, str]:
     return "unknown", f"{et}"
 
 
-PREMIUM_TRUNCATED_KEEP_MIN_LEN = 1_600
-"""
-Minimum length to keep truncated/insufficient model text. Lower than the full substance floor
-because a truncated draft that the model actually wrote is more useful to the user than an
-empty skeleton with Retry.
-"""
-
-
 def _premium_full_draft_degraded_response(
     *,
     intake_s: str,
@@ -1135,30 +1169,27 @@ def _premium_full_draft_degraded_response(
       * there is no substantive body — return an EMPTY body with ``generation_ok=False`` +
         ``retryable=True`` so the client shows an explicit retry, not local text.
 
-    When ``use_truncated_keep_floor=True`` (for output_truncated / premium_generation_insufficient),
-    the body is kept if it is >= PREMIUM_TRUNCATED_KEEP_MIN_LEN (1600 chars), bypassing the full
-    substance floor check. This ensures that truncated model output the user paid for is not
-    discarded in favor of an empty paid shell.
+    Length alone never grants authority. The legacy ``use_truncated_keep_floor`` argument
+    remains call-compatible but cannot bypass completion, substance, or validation checks.
+    A truncated response (including complete-looking prose inside incomplete JSON) stays
+    retryable. Raw JSON is diagnostics, not agreement paper.
     """
     preserved = (preserved_substantive_body or "").strip()
     keep_body = False
-    if preserved:
-        if use_truncated_keep_floor:
-            # For truncated/insufficient cases: keep if >= 1600 chars (lower floor).
-            # The model wrote real text; discarding it and showing an empty skeleton is worse.
-            keep_body = len(preserved) >= PREMIUM_TRUNCATED_KEEP_MIN_LEN
-            if keep_body:
-                log.info(
-                    "[premium-full-draft] event=truncated_keep_floor_passed doc_len=%s min=%s failure_code=%s",
-                    len(preserved),
-                    PREMIUM_TRUNCATED_KEEP_MIN_LEN,
-                    failure_code,
-                )
-        else:
-            floor_ok, _floor_reasons = premium_full_draft_body_meets_substance_floor(
-                preserved, intake=intake_s, context=ctx_dict
-            )
-            keep_body = floor_ok
+    if preserved and failure_code != "output_truncated" and not preserved.startswith(("{", "[", "```")):
+        floor_ok, _floor_reasons = premium_full_draft_body_meets_substance_floor(
+            preserved, intake=intake_s, context=ctx_dict
+        )
+        keep_body = floor_ok
+    doc = preserved if keep_body else ""
+    empty_intelligence = AgreementIntelligence()
+    agreement_validation = _validate_and_log_premium_agreement_draft(
+        authoritative_draft=doc,
+        agreement_intelligence=empty_intelligence,
+        original_intake=intake_s,
+        stage=f"degraded:{failure_code}",
+    )
+    keep_body = keep_body and bool(agreement_validation.passed)
     doc = preserved if keep_body else ""
     fam = ""
     if ctx_dict:
@@ -1181,13 +1212,6 @@ def _premium_full_draft_degraded_response(
             "[CLAW] premium generation blocked category=%s stage=model_path suppress_fallback_document=1",
             failure_code,
         )
-    empty_intelligence = AgreementIntelligence()
-    agreement_validation = _validate_and_log_premium_agreement_draft(
-        authoritative_draft=doc,
-        agreement_intelligence=empty_intelligence,
-        original_intake=intake_s,
-        stage=f"degraded:{failure_code}",
-    )
     log.info(
         "[premium-full-draft-diagnostics] outcome=degraded raw_model_len=%s primary_document_text_len=%s "
         "document_text_len=%s server_full_document_text_len=%s agreement_validation_passed=%s "
@@ -1281,6 +1305,54 @@ def _premium_full_draft_model_to_wire_dict(model: PremiumFullDraftResponse) -> D
     return _premium_full_draft_sanitize_wire_nested(dumped)
 
 
+def _persist_draft_quality_trace_before_wire(
+    dq_trace: Any,
+    model: PremiumFullDraftResponse,
+    *,
+    rejected_corpus: str = "",
+) -> None:
+    """Persist TRACE metadata, and DUMP-authorized redacted rejected paper, before the wire is emptied."""
+    if dq_trace is None or not getattr(dq_trace, "enabled", False):
+        return
+    reasons = list(getattr(model, "schema_validation_reasons", None) or [])
+    validation = getattr(model, "agreement_validation", None)
+    validation_reasons = list(getattr(validation, "reasons", None) or [])
+    dq_trace.generation_outcome = str(
+        getattr(model, "generation_outcome", "")
+        or getattr(model, "server_generation_failure_code", "")
+        or ""
+    )
+    dq_trace.gate_reasons = (validation_reasons or reasons)[:32]
+    if rejected_corpus:
+        dq_trace.record_stage(
+            "rejected_paper_before_wire_empty",
+            rejected_corpus,
+            extra={
+                "failure_code": str(getattr(model, "server_generation_failure_code", "") or ""),
+                "validation_passed": bool(getattr(validation, "passed", True)),
+                "wire_will_empty": True,
+            },
+        )
+    try:
+        persisted = dq_trace.persist_local()
+        dq_trace.safe_log_event(dq_trace.generation_outcome or "complete")
+        log.info(
+            "[draft-quality-trace] event=persist_before_wire trace_id=%s persisted=%s "
+            "stages=%s llm_calls=%s dump_authorized=%s rejected_len=%s",
+            getattr(dq_trace, "trace_id", ""),
+            "1" if persisted else "0",
+            len(getattr(dq_trace, "stages", []) or []),
+            len(getattr(dq_trace, "llm_calls", []) or []),
+            int(bool(rejected_corpus)),
+            len(rejected_corpus or ""),
+        )
+    except Exception as persist_exc:
+        log.warning(
+            "[draft-quality-trace] event=persist_failed err=%s",
+            type(persist_exc).__name__,
+        )
+
+
 def _premium_full_draft_finalize_http_response(
     model: PremiumFullDraftResponse,
     *,
@@ -1288,11 +1360,34 @@ def _premium_full_draft_finalize_http_response(
     session_hint: str,
     server_timing: Optional[PaidProServerTiming] = None,
     request: Optional[Request] = None,
+    dq_trace: Any = None,
+    rejected_corpus: str = "",
 ) -> Response:
     """
     Single JSON serialization to bytes — avoids streaming/partial frames and catches wire-unsafe text
     before any response bytes are committed.
     """
+    captured_rejected = rejected_corpus
+    if model.generation_ok and model.agreement_validation is not None and not model.agreement_validation.passed:
+        # Final boundary: neither normal nor degraded paths may contradict validation.
+        # Keep questions/diagnostics, never put rejected bytes in an authority alias.
+        captured_rejected = captured_rejected or (
+            model.document_text or model.authoritative_draft or model.server_full_document_text or ""
+        )
+        _persist_draft_quality_trace_before_wire(dq_trace, model, rejected_corpus=captured_rejected)
+        model = model.model_copy(update={
+            "generation_ok": False, "retryable": True, "generation_outcome": "degraded",
+            "document_text": "", "authoritative_draft": "", "server_full_document_text": "",
+            "server_repair_document_text": "", "server_generation_failure_code": "agreement_validation_failed",
+            "server_generation_failure_message": "The draft did not pass document checks. Your Pro access is saved. Please retry; no rejected agreement was frozen.",
+        })
+    elif dq_trace is not None:
+        failed_body = captured_rejected
+        if not failed_body and not model.generation_ok:
+            failed_body = (
+                model.document_text or model.authoritative_draft or model.server_full_document_text or ""
+            )
+        _persist_draft_quality_trace_before_wire(dq_trace, model, rejected_corpus=failed_body)
     serialize_started = time.perf_counter()
     try:
         wire = _premium_full_draft_model_to_wire_dict(model)
@@ -1833,7 +1928,9 @@ def _premium_full_draft_system_prompt() -> str:
         "Output ONLY a single JSON object (no markdown, no code fences) with EXACT keys:\n"
         '{ "title": string, "agreement_family": string, "authoritative_draft": string, "agreement_intelligence": object, "key_terms_found": string array, "missing_material_info": string array }\n'
         "- `authoritative_draft` is the full agreement in plain text, not a summary. This must be a complete first-pass draft a user can review. "
-        "For backward compatibility you may also include `document_text` with the exact same value, but `authoritative_draft` is required.\n"
+        "Emit the full agreement ONCE, only in `authoritative_draft`. Do not emit `document_text`, "
+        "HTML, or any second copy of the paper. The server creates compatibility fields. "
+        "Keep intelligence and labels concise so the entire JSON object finishes within the output budget.\n"
         "- `key_terms_found`: 6–20 short labels for the major commercial points you actually included (including key standard protections you added).\n"
         "- `missing_material_info`: only material items still unknown after a fair read of the user materials, else [].\n"
         "- `agreement_family`: short human label of deal type, e.g. 'Marketing services retainer' or 'Referral commission'—use it to calibrate which standard clauses to emphasize.\n"
@@ -3133,6 +3230,8 @@ class RecipientProposalRequest(BaseModel):
     rendered_html: str = ""
     proposer_id: str = ""
     proposer_display_name: str = ""
+    snapshot_id: str = ""
+    expected_digest: str = ""
 
 
 class RecipientProposalResolveBody(BaseModel):
@@ -3150,16 +3249,34 @@ class RecipientApproveBody(BaseModel):
     message: str = ""
     participant_id: str = ""
     participant_display_name: str = ""
+    snapshot_id: str = ""
+    expected_digest: str = ""
 
 
 class SigningCeremonyStartBody(BaseModel):
     participant_id: str = ""
 
 
+class Vs01ConsentIntentBody(BaseModel):
+    accepted: bool = False
+    intent_version: str = ""
+    intent_statement: str = ""
+    action: str = ""
+
+
+class Vs01AssignedFieldBody(BaseModel):
+    field_id: str = ""
+    field_type: str = ""
+    value: str = ""
+    page_index: Optional[int] = None
+    page: Optional[int] = None
+
+
 class SigningCeremonyCompleteBody(BaseModel):
     participant_id: str = ""
     typed_name: str = ""
     locked_version_id: str = ""
+    consent: Optional[Vs01ConsentIntentBody] = None
 
 
 class SigningInviteTargetBody(BaseModel):
@@ -3192,6 +3309,8 @@ class CanonicalReviewSnapshotCreateBody(BaseModel):
     created_by_session: Optional[str] = None
     """Optimistic concurrency: must match current registryVersion when provided."""
     expected_registry_version: Optional[int] = None
+    """Confirmed customer answers only — never inferred from generated paper."""
+    customer_confirmed_answers: Optional[str] = None
 
 
 class CanonicalReviewSnapshotAcceptBody(BaseModel):
@@ -3245,6 +3364,9 @@ class Vs01SignerCompleteBody(BaseModel):
     signed_date_iso: str = ""
     signed_date_display: str = ""
     portable_packet: Optional[Dict[str, Any]] = None
+    assigned_fields: List[Vs01AssignedFieldBody] = Field(default_factory=list)
+    consent: Optional[Vs01ConsentIntentBody] = None
+    packet_revision: str = ""
 
 
 class ReviewRecipientEmailCorrectBody(BaseModel):
@@ -3560,7 +3682,23 @@ def _extract_json_object(text: str) -> Dict[str, Any]:
     return parsed
 
 
-def _normalize_parsed_draft(raw: Dict[str, Any]) -> AgreementDraftCreate:
+def _unwrap_llm_document_text(raw: str) -> str:
+    """Use document_text when a model/stub returns JSON instead of plain paper."""
+    text = (raw or "").strip()
+    if not text.startswith("{"):
+        return text
+    try:
+        parsed = _extract_json_object(text)
+    except Exception:
+        return text
+    for key in ("document_text", "updated_document_text", "free_document_text"):
+        value = parsed.get(key)
+        if isinstance(value, str) and len(value.strip()) >= 40:
+            return value.strip()
+    return text
+
+
+def _normalize_parsed_draft(raw: Dict[str, Any], intake_text: str = "") -> AgreementDraftCreate:
     parties_in = raw.get("parties") if isinstance(raw.get("parties"), list) else []
     tmp: List[AgreementParty] = []
     for p in parties_in:
@@ -3571,7 +3709,55 @@ def _normalize_parsed_draft(raw: Dict[str, Any]) -> AgreementDraftCreate:
         pid = str(p.get("id") or "").strip()
         email = str(p.get("email") or "").strip() or None
         phone = str(p.get("phone") or "").strip() or None
-        tmp.append(AgreementParty(name=name, role=role, id=pid or None, email=email, phone=phone))
+        tmp.append(
+            AgreementParty(
+                name=name,
+                role=role,
+                id=pid or None,
+                email=email,
+                phone=phone,
+                **_party_signer_kwargs(p),
+            )
+        )
+    unresolved_identity: List[Dict[str, Any]] = []
+    if intake_text:
+        from backend.agreements.legal_party_representative_bind import bind_representatives_to_legal_parties
+
+        bound = bind_representatives_to_legal_parties([p.model_dump(by_alias=True) for p in tmp], intake_text)
+        rebound: List[AgreementParty] = []
+        for p in bound.get("parties") or []:
+            if not isinstance(p, dict):
+                continue
+            rebound.append(
+                AgreementParty(
+                    name=str(p.get("name") or "").strip(),
+                    role=str(p.get("role") or "party").strip() or "party",
+                    email=str(p.get("email") or "").strip() or None,
+                    **_party_signer_kwargs(p),
+                )
+            )
+        if rebound:
+            tmp = rebound
+        for row in bound.get("unresolved_extraction_rows") or []:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("name") or "").strip()
+            if not name:
+                continue
+            mentioned = bool(re.search(rf"\b{re.escape(name)}\b", intake_text or "", re.I))
+            unresolved_identity.append(
+                {
+                    "name": name,
+                    "source": "customer_mentioned" if mentioned else "extraction_only",
+                    **({"email": str(row.get("email")).strip()} if str(row.get("email") or "").strip() else {}),
+                    **(
+                        {"roleHint": str(row.get("role") or "").strip()}
+                        if str(row.get("role") or "").strip()
+                        and str(row.get("role") or "").strip().lower() not in {"party", "signer", "email"}
+                        else {}
+                    ),
+                }
+            )
     parties = _ensure_agreement_parties_have_ids(tmp)
     due_date = str(raw.get("due_date") or "").strip() or None
     duration = str(raw.get("duration") or "").strip() or None
@@ -3579,6 +3765,9 @@ def _normalize_parsed_draft(raw: Dict[str, Any]) -> AgreementDraftCreate:
         duration = f"until {due_date}"
     jurisdiction = str(raw.get("jurisdiction") or "").strip() or "TBD"
     effective_date = str(raw.get("effective_date") or "").strip() or None
+    incoming_unresolved = raw.get("unresolved_identity_v1")
+    if isinstance(incoming_unresolved, list) and incoming_unresolved:
+        unresolved_identity = [row for row in incoming_unresolved if isinstance(row, dict)]
     return AgreementDraftCreate(
         title=str(raw.get("title") or "").strip(),
         jurisdiction=jurisdiction,
@@ -3588,6 +3777,7 @@ def _normalize_parsed_draft(raw: Dict[str, Any]) -> AgreementDraftCreate:
         duration=duration,
         due_date=due_date,
         effective_date=effective_date,
+        unresolved_identity_v1=unresolved_identity or None,
     )
 
 
@@ -3604,11 +3794,11 @@ _PREMIUM_FAMILY_HINTS = frozenset(
 _PREMIUM_CONFIDENCE = frozenset({"low", "medium", "high"})
 
 
-def _parse_premium_intake_result(raw: Dict[str, Any]) -> Tuple[AgreementDraftCreate, AgreementParseExtract]:
+def _parse_premium_intake_result(raw: Dict[str, Any], intake_text: str = "") -> Tuple[AgreementDraftCreate, AgreementParseExtract]:
     """
     Build validated draft from LLM JSON; pull optional extract keys without letting unknown keys break draft validation.
     """
-    draft = _normalize_parsed_draft(raw)
+    draft = _normalize_parsed_draft(raw, intake_text)
     material_asks: List[str] = []
     ma = raw.get("material_asks")
     if isinstance(ma, list):
@@ -3616,6 +3806,16 @@ def _parse_premium_intake_result(raw: Dict[str, Any]) -> Tuple[AgreementDraftCre
             s = str(x).strip() if x is not None else ""
             if s and len(material_asks) < 8:
                 material_asks.append(s)
+    if intake_text:
+        from backend.agreements.legal_party_representative_bind import bind_representatives_to_legal_parties
+
+        bound_asks = bind_representatives_to_legal_parties(
+            [p for p in (raw.get("parties") or []) if isinstance(p, dict)],
+            intake_text,
+        )
+        question = str(bound_asks.get("clarification_question") or "").strip()
+        if question and question not in material_asks and len(material_asks) < 8:
+            material_asks.append(question)
     hint_raw = raw.get("agreement_family_hint")
     hint_s: Optional[str] = None
     if hint_raw is not None:
@@ -3761,6 +3961,16 @@ def _purpose_looks_like_full_client_agreement_text(purpose: str) -> bool:
     return False
 
 
+def _document_lifecycle_banner(draft: AgreementDraft) -> str:
+    """Presentation-only label. Does not rewrite accepted document bytes."""
+    if _agreement_draft_fully_executed(draft):
+        return "Completed agreement"
+    aid = str(getattr(draft, "id", "") or "").strip()
+    if aid and _signing_lock_active(aid):
+        return "Agreement locked for signature"
+    return "Draft Agreement (non-binding template)"
+
+
 def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
     review_first_corpus, review_first_source = _review_first_final_corpus_from_draft(draft)
     if review_first_corpus:
@@ -3781,10 +3991,11 @@ def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
         )
         body = html.escape(purpose_for_body)
         wm = html.escape(WATERMARK_LABEL)
+        banner = html.escape(_document_lifecycle_banner(draft))
         article = (
             "<article style='position:relative;max-width:720px;margin:0 auto'>"
             "<p style='text-align:center;color:#475569;font-size:12px;margin-bottom:12px'>"
-            "Draft Agreement (non-binding template)</p>"
+            f"{banner}</p>"
             "<pre style='white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.65;"
             "color:#0f172a;margin:0;padding:0;border:0;background:transparent'>"
             f"{body}</pre>"
@@ -3803,10 +4014,11 @@ def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
             purpose_for_body = purpose_raw
         body = html.escape(purpose_for_body)
         wm = html.escape(WATERMARK_LABEL)
+        banner = html.escape(_document_lifecycle_banner(draft))
         article = (
             "<article style='position:relative;max-width:720px;margin:0 auto'>"
             "<p style='text-align:center;color:#475569;font-size:12px;margin-bottom:12px'>"
-            "Draft Agreement (non-binding template)</p>"
+            f"{banner}</p>"
             "<pre style='white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.65;"
             "color:#0f172a;margin:0;padding:0;border:0;background:transparent'>"
             f"{body}</pre>"
@@ -3841,10 +4053,11 @@ def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
     party_a_role = html.escape(party_a_role_raw)
     party_b_role = html.escape(party_b_role_raw)
     wm = html.escape(WATERMARK_LABEL)
+    banner = html.escape(_document_lifecycle_banner(draft))
     article = (
         "<article style='position:relative'>"
         f"<h1 style='text-align:center;margin-bottom:6px'>{title}</h1>"
-        "<p style='text-align:center;margin-top:0;color:#475569'>Draft Agreement (non-binding template)</p>"
+        f"<p style='text-align:center;margin-top:0;color:#475569'>{banner}</p>"
         f"<p>This {title} (the \"Agreement\") is made effective as of {effective_date}, by and between "
         f"{party_a_name} ({party_a_role}) and {party_b_name} ({party_b_role}). The parties agree as follows:</p>"
         "<h2>1. Scope of Services</h2>"
@@ -4424,7 +4637,7 @@ def _revise_llm_once(
             airlock_profile="agreement_outbound",
         )
         parsed = _extract_json_object(llm_text)
-        return _normalize_parsed_draft(parsed), True
+        return _normalize_parsed_draft(parsed, instruction), True
     except Exception:
         return _revise_instruction_fallback(current, instruction), False
 
@@ -4509,6 +4722,27 @@ def _load_or_404(agreement_id: str) -> AgreementDraft:
         return AgreementDraft.model_validate(raw)
     except KeyError:
         raise HTTPException(status_code=404, detail="agreement_not_found")
+
+
+def _assert_review_revision_binding(
+    draft: AgreementDraft,
+    agreement_id: str,
+    snapshot_id: Optional[str],
+    expected_digest: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    from backend.services.accepted_review_snapshot import assert_review_revision_binding
+
+    ok, err, rev = assert_review_revision_binding(draft, agreement_id, snapshot_id, expected_digest)
+    if ok:
+        return rev
+    status = 409 if err in {"stale_review_revision", "snapshot_agreement_mismatch"} else 400
+    raise HTTPException(
+        status_code=status,
+        detail={
+            "code": err or "review_revision_required",
+            "message": "Approval and proposals must target the owner-authorized review revision.",
+        },
+    )
 
 
 def _load_draft_dict_or_404(agreement_id: str) -> Dict[str, Any]:
@@ -4850,6 +5084,7 @@ def _generate_free_one_pager(intake_text: str, llm_model: str, max_retries: int 
                 lines = document.split('\n')
                 lines = [l for l in lines if not l.strip().startswith("```")]
                 document = '\n'.join(lines).strip()
+            document = _unwrap_llm_document_text(document)
             
             # Validate the document
             validation = _validate_free_one_pager(document, intake_text)
@@ -4972,9 +5207,9 @@ def parse_agreement_intake(request: Request, body: AgreementParseRequest) -> Agr
         )
         parsed = _extract_json_object(llm_text)
         if body.ai_model_class == "premium":
-            draft_out, extract_out = _parse_premium_intake_result(parsed)
+            draft_out, extract_out = _parse_premium_intake_result(parsed, body.intake_text)
         else:
-            draft_out = _normalize_parsed_draft(parsed)
+            draft_out = _normalize_parsed_draft(parsed, body.intake_text)
             extract_out = None
         ip = request.client.host if request.client else "unknown"
         record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=ip or "unknown")
@@ -5303,6 +5538,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
         len(intake_s),
         len(json.dumps(user_payload, ensure_ascii=False)),
     )
+    dq_trace = None
     if not (OPENAI_API_KEY or "").strip():
         log.error("premium_full_draft event=config_error category=missing_env OPENAI_API_KEY_unset=1")
         dm = _premium_full_draft_degraded_response(
@@ -5322,6 +5558,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             session_hint=session_hint,
             server_timing=server_timing,
             request=request,
+            dq_trace=dq_trace,
         )
     primary_temp = 0.2 if sim_regen else 0.15
     _ablation_temp = ablation_temperature_override()
@@ -5403,6 +5640,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 session_hint=session_hint,
                 server_timing=server_timing,
                 request=request,
+                dq_trace=dq_trace,
             )
         if dq_trace.enabled:
             u0 = dq_usage_primary[-1] if dq_usage_primary else {}
@@ -5474,6 +5712,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                     session_hint=session_hint,
                     server_timing=server_timing,
                     request=request,
+                    dq_trace=dq_trace,
                 )
             log.warning(
                 "[premium-full-draft] event=json_parse_no_substantive_body "
@@ -5555,6 +5794,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                         session_hint=session_hint,
                         server_timing=server_timing,
                         request=request,
+                        dq_trace=dq_trace,
                     )
                 log.warning(
                     "[premium-full-draft] event=json_parse_regen_still_degraded "
@@ -5695,6 +5935,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 context=ctx_dict,
                 deterministic_premium_intent_skeleton=intent_skeleton,
                 premium_intent_key=(intent_key.value if intent_key is not None else None),
+                user_gap_answers=uga,
             )
             if len(json.dumps(repair_payload, ensure_ascii=False)) > 260_000:
                 raise ValueError("repair_payload_too_large")
@@ -5879,6 +6120,33 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             )
         validation_started = time.perf_counter()
         generation_outcome: Literal["ok", "needs_details", "degraded"] = "ok" if ok_final else "needs_details"
+        doc, miss = apply_unconfirmed_payment_timing_guard(
+            intake=intake_s,
+            user_gap_answers=uga,
+            document_text=doc,
+            missing_material_info=list(out.missing_material_info or []),
+        )
+        doc, miss = apply_date_meaning_guard(
+            intake=intake_s,
+            user_gap_answers=uga,
+            document_text=doc,
+            missing_material_info=miss,
+        )
+        doc, miss = apply_completion_criteria_guard(
+            intake=intake_s,
+            user_gap_answers=uga,
+            document_text=doc,
+            missing_material_info=miss,
+        )
+        if unconfirmed_payment_questions_present(miss):
+            generation_outcome = "needs_details"
+        out = out.model_copy(
+            update={
+                "document_text": doc,
+                "authoritative_draft": doc,
+                "missing_material_info": miss,
+            }
+        )
         if not ok_final:
             log.info(
                 "premium_full_draft event=validator_reject category=quality_or_intent_schema needs_details=1 "
@@ -5936,10 +6204,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                     qualityOk=bool(ok_final),
                     substanceOk=False,
                 )
-            # Pass the model's doc with use_truncated_keep_floor=True so that if the doc
-            # is >= 1600 chars, we return 200 with that text instead of 503 with empty body.
-            # A truncated/insufficient draft the model actually wrote is more useful to the
-            # user than an empty paid shell with Retry.
+            # Failed substance checks remain retryable; length alone cannot grant authority.
             dm = _premium_full_draft_degraded_response(
                 intake_s=intake_s,
                 ctx_dict=ctx_dict,
@@ -5954,6 +6219,8 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 session_hint=session_hint,
                 server_timing=server_timing,
                 request=request,
+                dq_trace=dq_trace,
+                rejected_corpus=doc,
             )
         log.info(
             "premium_full_draft_quality_event event=premium_full_draft_render_source source=%s doc_len=%s",
@@ -6046,6 +6313,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 session_hint=session_hint,
                 server_timing=server_timing,
                 request=request,
+                dq_trace=dq_trace,
             )
 
         dq_summary: Optional[Dict[str, Any]] = None
@@ -6061,27 +6329,10 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 },
             )
             # Metadata-only summary may attach on non-production when TRACE=1.
-            # Full corpora never ride the HTTP response.
+            # Full corpora never ride the HTTP response. Persist happens in finalize
+            # so rejection paths also capture DUMP-authorized paper before the wire empties.
             if api_trace_summary_allowed():
                 dq_summary = dq_trace.summary()
-            try:
-                persisted = dq_trace.persist_local()
-                dq_trace.safe_log_event("complete")
-                log.info(
-                    "[draft-quality-trace] event=complete_meta trace_id=%s persisted=%s "
-                    "stages=%s llm_calls=%s finish_reasons=%s api_summary=%s",
-                    dq_trace.trace_id,
-                    "1" if persisted else "0",
-                    len(dq_trace.stages),
-                    len(dq_trace.llm_calls),
-                    ",".join(str(c.get("finish_reason") or "") for c in dq_trace.llm_calls),
-                    int(dq_summary is not None),
-                )
-            except Exception as persist_exc:
-                log.warning(
-                    "[draft-quality-trace] event=persist_failed err=%s",
-                    type(persist_exc).__name__,
-                )
         ok_model = PremiumFullDraftResponse(
             title=out.title,
             agreement_family=out.agreement_family,
@@ -6106,6 +6357,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             session_hint=session_hint,
             server_timing=server_timing,
             request=request,
+            dq_trace=dq_trace,
         )
     except Exception as exc:
         code, log_detail = _classify_premium_full_draft_failure(exc)
@@ -6185,6 +6437,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             session_hint=session_hint,
             server_timing=server_timing,
             request=request,
+            dq_trace=dq_trace,
         )
 
 
@@ -6276,6 +6529,28 @@ def get_agreement_usage_summary(request: Request) -> Dict[str, Any]:
     return usage_summary_for_subject(identity.subject_ref)
 
 
+def _normalize_party_legal_name(name: str) -> str:
+    return " ".join(str(name or "").split()).strip().lower().rstrip(".,;:")
+
+
+def _existing_party_id_for_legal_name(
+    name: str,
+    prior_parties: List[AgreementParty],
+    used: set,
+) -> str:
+    """Reuse the durable id already bound to this legal name. Do not mint a new UUID."""
+    key = _normalize_party_legal_name(name)
+    if not key:
+        return ""
+    for prior in prior_parties or []:
+        pid = str(getattr(prior, "id", "") or "").strip()
+        if not pid or pid in used:
+            continue
+        if _normalize_party_legal_name(str(getattr(prior, "name", "") or "")) == key:
+            return pid
+    return ""
+
+
 def _ensure_agreement_parties_have_ids(parties: List[AgreementParty]) -> List[AgreementParty]:
     sanitized = _sanitize_agreement_parties_in_order(list(parties or []))
     out: List[AgreementParty] = []
@@ -6283,7 +6558,16 @@ def _ensure_agreement_parties_have_ids(parties: List[AgreementParty]) -> List[Ag
         pid = (p.id or "").strip() or str(uuid.uuid4())
         email = str(getattr(p, "email", None) or "").strip() or None
         phone = str(getattr(p, "phone", None) or "").strip() or None
-        out.append(AgreementParty(name=p.name, role=p.role, id=pid, email=email, phone=phone))
+        out.append(
+            AgreementParty(
+                name=p.name,
+                role=p.role,
+                id=pid,
+                email=email,
+                phone=phone,
+                **_party_signer_kwargs(p),
+            )
+        )
     return out
 
 
@@ -6342,6 +6626,7 @@ def create_agreement_draft(body: AgreementDraftCreate, request: Request) -> Dict
         feed_party_anonymize=body.feed_party_anonymize,
         feed_show_financial_summary=body.feed_show_financial_summary,
         feed_anchor_network=body.feed_anchor_network,
+        unresolved_identity_v1=body.unresolved_identity_v1,
         created_at=now,
         updated_at=now,
         versions=[],
@@ -6790,7 +7075,7 @@ def recipient_access_validate(token: str = "", agreement_id: str = "") -> Dict[s
         aid = str(out.get("agreement_id") or "").strip()
         pid = str(out.get("recipient_party_id") or "").strip()
         mode = str(out.get("mode") or "").strip()
-        if aid and pid and mode in ("review", "sign"):
+        if (not out.get("signer_already_completed")) and aid and pid and mode in ("review", "sign"):
             phase = "review" if mode == "review" else "signing"
             jti = extract_jti_from_token(token)
             # Authorized CAS path: open telemetry bumps registry revision and must
@@ -6824,6 +7109,8 @@ def recipient_access_validate(token: str = "", agreement_id: str = "") -> Dict[s
         "role": out["role"],
         "recipient_party_id": out["recipient_party_id"],
         "inviter_display_name": out["inviter_display_name"],
+        "signer_already_completed": bool(out.get("signer_already_completed")),
+        "completion_status": out.get("completion_status"),
     }
 
 
@@ -7003,6 +7290,12 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
                     "locked_version_id": lv,
                     "workspace_archived_at": d.get("workspace_archived_at"),
                     "review_sent_at": d.get("review_sent_at"),
+                    "owner_delivery_track": (
+                        str(d.get("owner_delivery_track") or "").strip().lower()
+                        if str(d.get("owner_delivery_track") or "").strip().lower()
+                        in ("review", "signature")
+                        else None
+                    ),
                     "reviewer_approved": reviewer_approved,
                     "review_approvals_completed": appr_done,
                     "review_approvals_required": appr_req,
@@ -7013,6 +7306,24 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
                     "dashboard_source": "draft",
                     "content_unavailable": False,
                     "accepted_review_snapshot": accepted_public,
+                    "uploaded_final_pdf": (
+                        {
+                            "kind": "uploaded_final_pdf",
+                            "document_id": str((d.get("quick_pdf_envelope_v1") or {}).get("document_id") or "").strip() or None,
+                            "content_sha256": str((d.get("quick_pdf_envelope_v1") or {}).get("content_sha256") or "").strip().lower() or None,
+                            "page_count": (d.get("quick_pdf_envelope_v1") or {}).get("page_count"),
+                            "label": "Uploaded final PDF signed through LawDog",
+                        }
+                        if isinstance(d.get("quick_pdf_envelope_v1"), dict)
+                        and str((d.get("quick_pdf_envelope_v1") or {}).get("kind") or "") == "uploaded_final_pdf"
+                        else None
+                    ),
+                    "document_kind": (
+                        "uploaded_final_pdf"
+                        if isinstance(d.get("quick_pdf_envelope_v1"), dict)
+                        and str((d.get("quick_pdf_envelope_v1") or {}).get("kind") or "") == "uploaded_final_pdf"
+                        else "lawdog_drafted"
+                    ),
                 }
             )
         except Exception as exc:
@@ -7057,22 +7368,53 @@ def put_agreement_signing_lock(
         raise HTTPException(status_code=404, detail="agreement_not_found")
     draft_full = _load_or_404(agreement_id)
     draft_full = _persist_party_id_backfill(draft_full)
-    missing_signer_approvals = _signing_approval_gate_errors(draft_full)
-    if missing_signer_approvals:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "approvals_incomplete",
-                "missing_signer_approvals": missing_signer_approvals,
-            },
-        )
+    # Owner-chosen direct signature locks the confirmed paper. Review-first
+    # still requires each signer approval before lock.
+    if _owner_delivery_track_value(draft_full) != "signature":
+        missing_signer_approvals = _signing_approval_gate_errors(draft_full)
+        if missing_signer_approvals:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "approvals_incomplete",
+                    "missing_signer_approvals": missing_signer_approvals,
+                },
+            )
     content_sha256 = _draft_locked_content_sha256(draft_full)
     payload = {
+        "agreement_id": agreement_id,
         "locked_version_id": body.locked_version_id,
         "locked_at": body.locked_at,
         "locked_by": body.locked_by,
         "content_sha256": content_sha256,
+        "content_length": len(canon_json_bytes(_signing_snapshot_dict(draft_full))),
     }
+    from backend.services.accepted_review_snapshot import (
+        assert_signing_lock_bound_to_snapshot,
+        is_pure_legacy_pre_cutover,
+        lock_authority_from_accepted_snapshot,
+    )
+    from backend.services.quick_pdf_envelope import is_uploaded_final_pdf_authority
+
+    if not (is_uploaded_final_pdf_authority(draft_full) or is_pure_legacy_pre_cutover(draft_full)):
+        snap_bind = lock_authority_from_accepted_snapshot(draft_full)
+        if not snap_bind:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "accepted_review_snapshot_required"},
+            )
+        payload.update(snap_bind)
+        bound_ok, bound_err = assert_signing_lock_bound_to_snapshot(
+            payload,
+            snap_bind["accepted_snapshot_id"],
+            snap_bind["accepted_snapshot_digest"],
+        )
+        if not bound_ok:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": bound_err or "lock_snapshot_binding_missing"},
+            )
+    _require_production_signing_lock_authority(draft_full, agreement_id, payload)
     write_signing_lock(agreement_id, payload)
     record_public_feed_event_if_applicable(
         draft_dict=draft_full.model_dump(),
@@ -7137,6 +7479,33 @@ def post_signing_ceremony_start(
     }
 
 
+def _ceremony_lock_row_or_400(agreement_id: str, draft: AgreementDraft) -> Tuple[str, Dict[str, Any]]:
+    lock_row = read_signing_lock(agreement_id) or {}
+    lv = str(lock_row.get("locked_version_id") or "").strip()
+    if not lv:
+        raise HTTPException(status_code=400, detail="not_ready_for_signature")
+    stored_sha = str(lock_row.get("content_sha256") or "").strip()
+    if stored_sha and _draft_locked_content_sha256(draft) != stored_sha:
+        raise HTTPException(status_code=409, detail="stale_locked_version")
+    return lv, lock_row
+
+
+def _authorize_ceremony_complete_or_recovery(
+    request: Request, agreement_id: str, participant_id: str
+) -> None:
+    try:
+        assert_agreement_recipient_write_allowed(
+            request,
+            agreement_id,
+            allowed_modes=("sign",),
+            bind_participant_id=participant_id or None,
+        )
+        return
+    except HTTPException:
+        pass
+    _owner_mutation_guards(request, agreement_id, surface="signing_ceremony_complete")
+
+
 @router.post("/{agreement_id}/signing-ceremony/complete")
 def post_signing_ceremony_complete(
     agreement_id: str, body: SigningCeremonyCompleteBody, request: Request
@@ -7144,6 +7513,35 @@ def post_signing_ceremony_complete(
     """Record signature_completed; append legacy signed when every signer has completed."""
     assert_free_incomplete_draft_not_expired(agreement_id, surface="signing_ceremony_complete")
     draft = _load_or_404(agreement_id)
+    if _agreement_draft_fully_executed(draft):
+        lv, lock_row = _ceremony_lock_row_or_400(agreement_id, draft)
+        req_lv = str(body.locked_version_id or "").strip()
+        if req_lv != lv:
+            raise HTTPException(status_code=400, detail="locked_version_mismatch")
+        _require_production_signing_lock_authority(draft, agreement_id, lock_row)
+        part_id, sp = _resolve_signing_participant_for_ceremony(draft, body.participant_id)
+        _authorize_ceremony_complete_or_recovery(request, agreement_id, part_id)
+        finalized_receipt = _issue_or_reuse_drafted_finalized_receipt(
+            agreement_id=agreement_id,
+            draft=draft,
+            lock=lock_row,
+            finalized_at=_finalized_at_from_draft(draft) or _utc_now_iso(),
+        )
+        if _receipt_view_is_bound(finalized_receipt):
+            _maybe_supersede_completing_invite(draft.model_dump(), request, part_id, persist=True)
+        return {
+            "ok": True,
+            "status": "fully_executed",
+            "agreement_id": agreement_id,
+            "participant_id": part_id,
+            "locked_version_id": lv,
+            "participant_display_name": sp.name,
+            "signed_at": _finalized_at_from_draft(draft),
+            "agreement_version_hash": _agreement_version_hash(agreement_id, lv, draft),
+            "fully_executed": True,
+            "finalized_receipt": finalized_receipt,
+            "recovered": True,
+        }
     lv, draft = _signing_ceremony_guards_lv(draft, agreement_id)
     req_lv = str(body.locked_version_id or "").strip()
     if req_lv != lv:
@@ -7152,6 +7550,7 @@ def post_signing_ceremony_complete(
     stored_sha = str((lock_row or {}).get("content_sha256") or "").strip()
     if stored_sha and _draft_locked_content_sha256(draft) != stored_sha:
         raise HTTPException(status_code=409, detail="stale_locked_version")
+    _require_production_signing_lock_authority(draft, agreement_id, lock_row)
     part_id, sp = _resolve_signing_participant_for_ceremony(draft, body.participant_id)
     assert_agreement_recipient_write_allowed(
         request,
@@ -7163,6 +7562,15 @@ def post_signing_ceremony_complete(
         raise HTTPException(status_code=409, detail="already_signed")
     if not part_id and _has_legacy_signature_without_participant(draft.audit_log):
         raise HTTPException(status_code=409, detail="already_signed")
+    from backend.services.vs01_completion_evidence import (
+        CompletionEvidenceError,
+        parse_consent,
+    )
+
+    try:
+        parse_consent(body.consent.model_dump() if body.consent is not None else None, required=True)
+    except CompletionEvidenceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.http_detail()) from exc
     now = _utc_now_iso()
     fp = _agreement_version_hash(agreement_id, lv, draft)
     typed = (body.typed_name or "").strip()
@@ -7194,34 +7602,19 @@ def post_signing_ceremony_complete(
         )
     next_draft = _merge_agreement_draft(draft, updated_at=now, audit_log=audit)
     dump = next_draft.model_dump()
-    # Replay protection: consume the completing party's active signing invite JTI.
-    # Generic save_draft cannot mutate recipient_delivery_v1 — CAS when registry changes.
-    from backend.security.agreement_read_scope import recipient_access_token_from_request
-    from backend.services.recipient_delivery_registry import (
-        extract_jti_from_token,
-        get_registry_revision,
-        supersede_active_invite,
-    )
-
-    base_rev = get_registry_revision(dump)
-    recipient_tok = recipient_access_token_from_request(request)
-    registry_mutated = False
-    if part_id and recipient_tok:
-        dump = supersede_active_invite(
-            dump,
-            phase="signing",
-            participant_id=part_id,
-            jti=extract_jti_from_token(recipient_tok),
-            audit_log=list(dump.get("audit_log") or []),
-        )
-        registry_mutated = True
-    if registry_mutated and get_registry_revision(dump) > base_rev:
-        _save_draft_registry_cas_sync(dump, request, expected_revision=base_rev)
-    else:
-        _save_draft_sync(dump, request)
+    _save_draft_sync(dump, request)
+    finalized_receipt = None
     if fully:
         record_agreement_finalized(agreement_id=agreement_id)
+        finalized_receipt = _issue_or_reuse_drafted_finalized_receipt(
+            agreement_id=agreement_id,
+            draft=next_draft,
+            lock=lock_row or {},
+            finalized_at=now,
+        )
         record_public_feed_event_if_applicable(draft_dict=dump, event_type="signed", at=now)
+        if _receipt_view_is_bound(finalized_receipt):
+            dump = _maybe_supersede_completing_invite(dump, request, part_id, persist=True)
         try:
             from backend.integrations.hooks_emit import (
                 claw_emit_integration_event,
@@ -7247,12 +7640,19 @@ def post_signing_ceremony_complete(
                 )
         except Exception:
             pass
+    else:
+        dump = _maybe_supersede_completing_invite(dump, request, part_id, persist=True)
     return {
         "ok": True,
+        "status": "fully_executed" if fully else "completed",
+        "agreement_id": agreement_id,
+        "participant_id": part_id,
+        "locked_version_id": lv,
         "participant_display_name": sp.name,
         "signed_at": now,
         "agreement_version_hash": fp,
         "fully_executed": fully,
+        "finalized_receipt": finalized_receipt,
     }
 
 
@@ -7297,10 +7697,12 @@ def post_recipient_access_token(
     env_ttl = os.getenv("CLAW_RECIPIENT_TOKEN_TTL_SECONDS", "").strip()
     raw_ttl = int(env_ttl) if env_ttl else int(body.ttl_seconds)
     ttl = clamp_recipient_token_ttl_seconds(raw_ttl)
+    draft_for_authority = _load_or_404(agreement_id)
 
     if body.mode == "sign":
         if not lock or not lock.get("locked_version_id"):
             raise HTTPException(status_code=409, detail="signing_not_finalized_server_side")
+        _require_production_signing_lock_authority(draft_for_authority, agreement_id, lock)
         lv = str(lock["locked_version_id"])
     else:
         lv = str((lock or {}).get("locked_version_id") or "")
@@ -7578,6 +7980,10 @@ def _attest_portable_envelope_or_400(
                 ),
             },
         )
+    from backend.services.quick_pdf_envelope import is_uploaded_final_pdf_authority
+
+    if is_uploaded_final_pdf_authority(draft_obj):
+        return bound_portable
 
     if stored_portable is not None:
         ok, err, attested = validate_portable_against_stored_attested_sot(
@@ -7605,6 +8011,30 @@ def _attest_portable_envelope_or_400(
             },
         )
     return attested
+
+
+def _pending_snapshot_pipeline_fields(
+    accepted: Optional[Dict[str, Any]],
+    snap: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Copy latest pending snapshot paper onto draft pipeline fields for GET/reopen.
+
+    Accepted snapshot bytes stay immutable: never overwrite pipeline after accept.
+    """
+    if isinstance(accepted, dict) and str(accepted.get("status") or "").strip() == "accepted":
+        return {}
+    if not isinstance(snap, dict):
+        return {}
+    corpus = str(snap.get("corpusPlain") or snap.get("corpus_plain") or "").strip()
+    if len(corpus) < 500:
+        return {}
+    return {
+        "document_text": corpus,
+        "server_full_document_text": corpus,
+        "premium_server_full_document_text": corpus,
+        "premium_full_document_text": corpus,
+        "premium_render_source": "server_full_document_text",
+    }
 
 
 def _apply_snapshot_registry_to_draft(
@@ -7668,6 +8098,7 @@ def post_canonical_review_snapshot(
         registry=get_registry(draft),
         expected_registry_version=body.expected_registry_version,
         draft_for_immutability=draft,
+        customer_confirmed_answers=body.customer_confirmed_answers,
     )
     if not ok or not isinstance(snap, dict) or not isinstance(reg, dict):
         status = 409 if err in {"registry_version_conflict", "accepted_snapshot_mutation_rejected"} else 400
@@ -7696,6 +8127,9 @@ def post_canonical_review_snapshot(
             },
         ),
     )
+    pipeline = _pending_snapshot_pipeline_fields(accepted if isinstance(accepted, dict) else None, snap)
+    if pipeline:
+        next_draft = _merge_agreement_draft(next_draft, **pipeline)
     _save_draft_sync(next_draft.model_dump(), request)
     return {
         "ok": True,
@@ -7709,6 +8143,7 @@ def post_canonical_review_snapshot(
             "created_at": snap.get("createdAt"),
             "schema_version": snap.get("schemaVersion"),
             "status": snap.get("status"),
+            "customer_confirmed_answers": snap.get("customerConfirmedAnswers"),
         },
         "registry_version": reg.get("registryVersion"),
         "accepted": public_accepted_snapshot_fragment(accepted),
@@ -7930,6 +8365,7 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
                 "accepted_at": accepted.get("acceptedAt"),
                 "schema_version": accepted.get("schemaVersion"),
                 "status": accepted.get("status"),
+                "customer_confirmed_answers": accepted.get("customerConfirmedAnswers"),
             },
             "registry_version": reg.get("registryVersion"),
             "public": public_accepted_snapshot_fragment(accepted),
@@ -7963,6 +8399,7 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
             "created_at": latest.get("createdAt"),
             "schema_version": latest.get("schemaVersion"),
             "status": latest.get("status"),
+            "customer_confirmed_answers": latest.get("customerConfirmedAnswers"),
         },
         "registry_version": reg.get("registryVersion"),
         "public": None,
@@ -8629,88 +9066,103 @@ def post_vs01_signer_complete(
 
     auth_mode: Optional[str] = None
     recipient_token_raw: Optional[str] = None
-    if _agreements_write_allowed():
+    from backend.config.agreement_signing_token import (
+        SigningTokenSecretMissingInProductionError,
+        resolve_signing_token_secret_raw,
+    )
+    from backend.security.agreement_read_scope import (
+        recipient_access_token_from_request,
+        validate_recipient_access_token_for_agreement,
+    )
+    from backend.services.vs01_completion_evidence import owner_authorized_identity
+    from backend.services.vs01_signer_completion import (
+        assert_recipient_signer_completion_binding,
+        resolve_participant_id_for_signer_role,
+        vs01_open_signing_link_completion_allowed,
+    )
+
+    tok = recipient_access_token_from_request(request)
+    if tok:
+        recipient_token_raw = tok
+        try:
+            secret_raw = resolve_signing_token_secret_raw()
+        except SigningTokenSecretMissingInProductionError as e:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "signing_token_secret_not_configured", "message": str(e)},
+            ) from e
+        draft_for_auth = _load_or_404(aid)
+        participant_id = resolve_participant_id_for_signer_role(
+            draft_for_auth.model_dump(),
+            signer_role_id,
+            body.participant_id or "",
+        )
+        token_out = validate_recipient_access_token_for_agreement(
+            token=tok,
+            path_agreement_id=aid,
+            query_agreement_id=None,
+            secret_raw=secret_raw,
+            consume_single_use=False,
+            log_validation=False,
+            allow_completed_signer_replay=True,
+        )
+        token_party_id = str(token_out.get("recipient_party_id") or "").strip()
+        assert_agreement_recipient_write_allowed(
+            request,
+            aid,
+            allowed_modes=("sign",),
+            bind_participant_id=participant_id or token_party_id or None,
+            allow_completed_signer_replay=True,
+        )
+        assert_recipient_signer_completion_binding(
+            draft_for_auth.model_dump(),
+            signer_role_id=signer_role_id,
+            participant_id=participant_id,
+            token_party_id=token_party_id,
+        )
+        auth_mode = "recipient"
+    elif _agreements_write_allowed():
         try:
             _owner_mutation_guards(request, aid, surface="vs01_signer_complete")
-            auth_mode = "owner"
-        except HTTPException:
-            auth_mode = None
-    if not auth_mode:
-        from backend.config.agreement_signing_token import (
-            SigningTokenSecretMissingInProductionError,
-            resolve_signing_token_secret_raw,
-        )
-        from backend.security.agreement_read_scope import (
-            recipient_access_token_from_request,
-            validate_recipient_access_token_for_agreement,
-        )
-        from backend.services.vs01_signer_completion import (
-            assert_recipient_signer_completion_binding,
-            resolve_participant_id_for_signer_role,
-            vs01_open_signing_link_completion_allowed,
-        )
-
-        tok = recipient_access_token_from_request(request)
-        if tok:
-            recipient_token_raw = tok
-            try:
-                secret_raw = resolve_signing_token_secret_raw()
-            except SigningTokenSecretMissingInProductionError as e:
-                raise HTTPException(
-                    status_code=422,
-                    detail={"code": "signing_token_secret_not_configured", "message": str(e)},
-                ) from e
             draft_for_auth = _load_or_404(aid)
-            participant_id = resolve_participant_id_for_signer_role(
-                draft_for_auth.model_dump(),
-                signer_role_id,
-                body.participant_id or "",
-            )
-            token_out = validate_recipient_access_token_for_agreement(
-                token=tok,
-                path_agreement_id=aid,
-                query_agreement_id=None,
-                secret_raw=secret_raw,
-                consume_single_use=False,
-                log_validation=False,
-            )
-            token_party_id = str(token_out.get("recipient_party_id") or "").strip()
-            assert_agreement_recipient_write_allowed(
-                request,
-                aid,
-                allowed_modes=("sign",),
-                bind_participant_id=participant_id or token_party_id or None,
-            )
-            assert_recipient_signer_completion_binding(
-                draft_for_auth.model_dump(),
-                signer_role_id=signer_role_id,
-                participant_id=participant_id,
-                token_party_id=token_party_id,
-            )
-            auth_mode = "recipient"
-        else:
-            from backend.security.commercial_auth import tokenless_signer_complete_allowed
-
-            draft_for_auth = _load_or_404(aid)
-            # Commercial / staging / production: never allow tokenless completion.
-            # Legacy opt-in only when CLAW_ALLOW_TOKENLESS_SIGNER_COMPLETE=1 in local/dev/test.
-            if tokenless_signer_complete_allowed() and vs01_open_signing_link_completion_allowed(
-                draft_for_auth.model_dump(),
-                signer_role_id=signer_role_id,
-                document_id=(body.document_id or "").strip(),
-            ):
-                auth_mode = "signing_link"
-            else:
+            owner_role, owner_pid = owner_authorized_identity(draft_for_auth.model_dump())
+            body_pid = (body.participant_id or "").strip()
+            if signer_role_id != owner_role or (owner_pid and body_pid and body_pid != owner_pid):
                 raise HTTPException(
                     status_code=403,
                     detail={
-                        "code": "signing_token_required",
-                        "message": (
-                            "Recipient completion requires a valid, unexpired, "
-                            "recipient-bound signing token."
-                        ),
+                        "code": "owner_cannot_complete_other_signer",
+                        "message": "Ownership cannot authorize signing another participant’s fields.",
                     },
                 )
+            auth_mode = "owner"
+        except HTTPException as exc:
+            detail = exc.detail
+            code = detail.get("code") if isinstance(detail, dict) else detail
+            if code == "owner_cannot_complete_other_signer":
+                raise
+            auth_mode = None
+    if not auth_mode:
+        from backend.security.commercial_auth import tokenless_signer_complete_allowed
+
+        draft_for_auth = _load_or_404(aid)
+        if tokenless_signer_complete_allowed() and vs01_open_signing_link_completion_allowed(
+            draft_for_auth.model_dump(),
+            signer_role_id=signer_role_id,
+            document_id=(body.document_id or "").strip(),
+        ):
+            auth_mode = "signing_link"
+        else:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "signing_token_required",
+                    "message": (
+                        "Recipient completion requires a valid, unexpired, "
+                        "recipient-bound signing token."
+                    ),
+                },
+            )
 
     from backend.services.vs01_signer_completion import (
         completion_emails_already_sent,
@@ -8719,6 +9171,18 @@ def post_vs01_signer_complete(
         resolve_participant_id_for_signer_role,
         vs01_signer_complete_lock,
     )
+    from backend.services.vs01_completion_evidence import (
+        CompletionEvidenceError,
+        append_private_execution_record,
+        validate_completion_evidence,
+    )
+    from backend.services.vs01_completion_ledger import (
+        CompletionEvidenceConflict,
+        assert_completion_persistence_ready,
+        claim_signer_completion,
+        multi_worker_completion_ready,
+    )
+    from backend.utils.canon_json import sha256_hex
 
     with vs01_signer_complete_lock(aid):
         draft = _load_or_404(aid)
@@ -8751,7 +9215,7 @@ def post_vs01_signer_complete(
                 },
             )
 
-        now = (body.signed_at or "").strip() or _utc_now_iso()
+        now = _utc_now_iso()
         signed_date_iso = (body.signed_date_iso or "").strip() or now[:10]
         signed_date_display = (body.signed_date_display or "").strip()
         if not signed_date_display and signed_date_iso:
@@ -8776,13 +9240,22 @@ def post_vs01_signer_complete(
                 display_name = (sp.name or "").strip()
 
         from backend.services.accepted_review_snapshot import requires_accepted_snapshot_for_continuation
+        from backend.services.vs01_signer_completion import signer_role_already_completed
 
         # Commercial post-cutover: every completion path must bind accepted snapshot,
         # including requests that omit portable_packet (hydrate from stored packet).
-        require_snap = requires_accepted_snapshot_for_continuation(draft)
+        # Duplicate completion is idempotent: do not re-attest a packet mutated by
+        # the first successful completion against the original accepted snapshot.
+        already_complete = signer_role_already_completed(
+            draft.model_dump().get("audit_log") or [],
+            signer_role_id,
+        )
+        require_snap = requires_accepted_snapshot_for_continuation(draft) and not already_complete
         stored_portable = stored_pkt.get("portable") if isinstance(stored_pkt.get("portable"), dict) else None
         portable_packet = body.portable_packet if isinstance(body.portable_packet, dict) else None
-        if require_snap:
+        if already_complete:
+            portable_packet = None
+        elif require_snap:
             if portable_packet is None and isinstance(stored_portable, dict):
                 portable_packet = dict(stored_portable)
             if not isinstance(portable_packet, dict):
@@ -8813,18 +9286,81 @@ def post_vs01_signer_complete(
                 document_id=(body.document_id or "").strip() or None,
             )
 
+        require_evidence = auth_mode in ("recipient", "owner")
+        assert_completion_persistence_ready()
+        try:
+            evidence = validate_completion_evidence(
+                draft=draft.model_dump(),
+                signer_role_id=signer_role_id,
+                participant_id=participant_id,
+                document_id=(body.document_id or "").strip(),
+                packet_revision=(body.packet_revision or "").strip(),
+                assigned_fields=[row.model_dump() for row in (body.assigned_fields or [])],
+                consent=body.consent.model_dump() if body.consent is not None else None,
+                required=require_evidence,
+            )
+        except CompletionEvidenceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.http_detail()) from exc
+
+        event_id = "evt_" + sha256_hex(
+            f"{aid}|{signer_role_id}|{participant_id}".encode("utf-8")
+        )[:20]
+        invite_jti = ""
+        if recipient_token_raw:
+            from backend.services.recipient_delivery_registry import extract_jti_from_token
+
+            invite_jti = extract_jti_from_token(recipient_token_raw) or ""
+        claim = None
+        if multi_worker_completion_ready():
+            try:
+                claim = claim_signer_completion(
+                    agreement_id=aid,
+                    signer_role_id=signer_role_id,
+                    participant_id=participant_id,
+                    event_id=event_id,
+                    signature_artifact_digest=evidence.signature_artifact_digest,
+                    consent_artifact_digest=evidence.consent_artifact_digest,
+                    signed_at=now,
+                    packet_revision=evidence.packet_revision,
+                    document_id=evidence.document_id or (body.document_id or "").strip(),
+                    document_hash=fp or "",
+                    invite_jti=invite_jti,
+                )
+            except CompletionEvidenceConflict:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "completion_evidence_mismatch",
+                        "message": "This signer already completed with different evidence.",
+                    },
+                ) from None
+        else:
+            logging.getLogger(__name__).warning(
+                "vs01_completion_ledger_unconfigured agreement_id=%s",
+                aid,
+            )
+        if claim is not None and claim.already:
+            now = claim.signed_at or now
+            event_id = claim.event_id or event_id
+
         pending = orchestrate_vs01_signer_complete(
             draft.model_dump(),
             signer_role_id=signer_role_id,
             participant_id=participant_id,
             display_name=display_name,
-            document_id=(body.document_id or "").strip(),
+            document_id=(body.document_id or "").strip() or evidence.document_id,
             signed_at=now,
             signed_date_iso=signed_date_iso,
             signed_date_display=signed_date_display,
             locked_version_id=lv,
             agreement_version_hash=fp,
             portable_packet=portable_packet,
+            event_id=event_id,
+            signature_artifact_digest=evidence.signature_artifact_digest
+            or (claim.signature_artifact_digest if claim else ""),
+            consent_artifact_digest=evidence.consent_artifact_digest
+            or (claim.consent_artifact_digest if claim else ""),
+            packet_revision=evidence.packet_revision or (claim.packet_revision if claim else ""),
         )
 
         fresh = _load_or_404(aid)
@@ -8841,6 +9377,11 @@ def post_vs01_signer_complete(
             from backend.services.recipient_delivery_registry import get_registry_revision
 
             draft_dict_to_save = outcome.draft_dict
+            if evidence.private_record and not outcome.already_signed:
+                draft_dict_to_save = append_private_execution_record(
+                    dict(draft_dict_to_save),
+                    {**evidence.private_record, "event_id": event_id, "signed_at": now},
+                )
             base_rev = get_registry_revision(draft_dict_to_save)
             registry_mutated = False
             # Replay protection: consume/supersede active signing invite JTI after recipient complete.
@@ -8865,6 +9406,7 @@ def post_vs01_signer_complete(
                 audit_log=draft_dict_to_save.get("audit_log") or outcome.audit,
                 vs01_signing_packet_v1=draft_dict_to_save.get("vs01_signing_packet_v1"),
                 recipient_delivery_v1=draft_dict_to_save.get("recipient_delivery_v1"),
+                vs01_signer_execution_v1=draft_dict_to_save.get("vs01_signer_execution_v1"),
             )
             if registry_mutated:
                 _save_draft_registry_cas_sync(
@@ -8989,6 +9531,53 @@ def post_vs01_signer_complete(
                             aid,
                         )
 
+        uploaded_final_pdf_receipt = None
+        from backend.services.quick_pdf_envelope import (
+            envelope_from_draft,
+            is_uploaded_final_pdf_authority,
+        )
+
+        reloaded_for_receipt = _load_or_404(aid)
+        if is_uploaded_final_pdf_authority(reloaded_for_receipt):
+            from backend.services.uploaded_final_pdf_receipt import issue_uploaded_final_pdf_receipt
+
+            env = envelope_from_draft(reloaded_for_receipt)
+            if env:
+                try:
+                    issued = issue_uploaded_final_pdf_receipt(draft=reloaded_for_receipt, env=env)
+                except ValueError:
+                    issued = None
+                if issued:
+                    stored = envelope_from_draft(reloaded_for_receipt) or {}
+                    if (
+                        stored.get("final_receipt_id") != issued.get("receipt_id")
+                        or stored.get("final_receipt_digest") != issued.get("receipt_hash_sha256")
+                        or stored.get("final_receipt")
+                    ):
+                        receipt_draft = _merge_agreement_draft(
+                            reloaded_for_receipt,
+                            updated_at=now,
+                            quick_pdf_envelope_v1=env,
+                        )
+                        _save_draft_sync(receipt_draft.model_dump(), request)
+                    uploaded_final_pdf_receipt = issued
+
+        receipt_status = "not_applicable"
+        receipt_out = None
+        if uploaded_final_pdf_receipt:
+            receipt_status = "issued"
+            receipt_out = {
+                "receipt_id": uploaded_final_pdf_receipt.get("receipt_id"),
+                "receipt_hash_sha256": uploaded_final_pdf_receipt.get("receipt_hash_sha256"),
+            }
+        elif outcome.fully_executed:
+            from backend.services.quick_pdf_envelope import is_uploaded_final_pdf_authority
+
+            if is_uploaded_final_pdf_authority(reloaded_for_receipt):
+                receipt_status = "pending"
+        completion_status = "already_signed" if outcome.already_signed else "completed"
+        if outcome.fully_executed:
+            completion_status = "fully_executed" if outcome.already_signed else "completed"
         return {
             "ok": True,
             "already_signed": outcome.already_signed,
@@ -8996,6 +9585,26 @@ def post_vs01_signer_complete(
             "completion_evidence_created": completion_evidence_created,
             "completion_emails_sent": completion_emails_sent,
             "auth_mode": auth_mode,
+            "uploaded_final_pdf_receipt": uploaded_final_pdf_receipt,
+            "receipt_status": receipt_status,
+            "receipt": receipt_out,
+            "completion": {
+                "status": completion_status,
+                "agreement_id": aid,
+                "signed_at": now,
+                "signature_artifact_digest": evidence.signature_artifact_digest
+                or (claim.signature_artifact_digest if claim else ""),
+                "consent_artifact_digest": evidence.consent_artifact_digest
+                or (claim.consent_artifact_digest if claim else ""),
+                "signer_role_id": signer_role_id,
+                "participant_id": participant_id,
+                "document_id": evidence.document_id or (body.document_id or "").strip(),
+                "document_hash": fp or "",
+                "packet_revision": evidence.packet_revision or (claim.packet_revision if claim else ""),
+                "event_id": event_id,
+                "already_signed": outcome.already_signed,
+                "fully_executed": outcome.fully_executed,
+            },
         }
 
 
@@ -9504,6 +10113,12 @@ def patch_agreement_workspace_tags(
     return {"ok": True, "draft": next_draft.model_dump()}
 
 
+def _public_verify_display_title(draft: AgreementDraft) -> str:
+    from backend.services.signed_record_display import resolve_signed_record_display_title
+
+    return resolve_signed_record_display_title(draft) or (draft.title or "")
+
+
 def _public_agreement_verify_payload(aid: str, draft: AgreementDraft) -> Dict[str, Any]:
     """Full public verify JSON; callers wrap in try/except for graceful degradation."""
     overview_hash = _public_agreement_overview_hash(aid, draft)
@@ -9589,6 +10204,16 @@ def _public_agreement_verify_payload(aid: str, draft: AgreementDraft) -> Dict[st
                 verification["accepted_review_snapshot_reason"] = snap_err
         else:
             verification["accepted_review_snapshot"] = None
+        from backend.services.quick_pdf_envelope import (
+            envelope_from_draft,
+            public_uploaded_pdf_verify_fragment,
+        )
+
+        uploaded = public_uploaded_pdf_verify_fragment(envelope_from_draft(draft))
+        verification["uploaded_final_pdf"] = uploaded
+        if uploaded:
+            verification["document_kind"] = "uploaded_final_pdf"
+            verification["accepted_review_snapshot"] = None
     except Exception:
         logging.getLogger(__name__).exception(
             "public_verify_accepted_snapshot_failed agreement_id=%s", aid
@@ -9596,7 +10221,7 @@ def _public_agreement_verify_payload(aid: str, draft: AgreementDraft) -> Dict[st
     return {
         "agreement_id": aid,
         "summary": {
-            "title": draft.title,
+            "title": _public_verify_display_title(draft),
             "jurisdiction": draft.jurisdiction,
             "created_at": draft.created_at,
             "updated_at": draft.updated_at,
@@ -9644,7 +10269,7 @@ def _public_agreement_verify_pending_payload(aid: str, draft: AgreementDraft) ->
         "record_status": "pending",
         "record_status_reason": "verification_bundle_incomplete",
         "summary": {
-            "title": draft.title,
+            "title": _public_verify_display_title(draft),
             "jurisdiction": draft.jurisdiction,
             "created_at": draft.created_at,
             "updated_at": draft.updated_at,
@@ -9726,11 +10351,44 @@ def get_public_vs01_signing_packet(
     packet_revision: Optional[str] = None,
     recipient_email: Optional[str] = None,
     participant_id: Optional[str] = None,
+    t: Optional[str] = None,
+    token: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Public VS01 signing packet for emailed recipient links (no auth; fields + corpus seed only)."""
+    """Recipient VS01 signing packet. Publicly reachable; readable only with a valid sign-mode token."""
     aid = (agreement_id or "").strip()
     did = (document_id or "").strip()
     if not aid or not did:
+        raise HTTPException(status_code=404, detail="not_found")
+    raw_token = (t or token or "").strip()
+    if not raw_token:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "recipient_token_required",
+                "message": RECIPIENT_LINK_INVALID_OR_EXPIRED,
+            },
+        )
+    try:
+        from backend.config.agreement_signing_token import resolve_signing_token_secret_raw
+
+        payload = verify_recipient_access_token(
+            token=raw_token,
+            secret=resolve_signing_token_secret_raw().encode("utf-8"),
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "invalid_token",
+                "message": RECIPIENT_LINK_INVALID_OR_EXPIRED,
+            },
+        ) from None
+    token_aid = str(payload.get("aid") or "").strip()
+    token_mode = str(payload.get("m") or "").strip()
+    if token_aid != aid or token_mode != "sign":
+        raise HTTPException(status_code=404, detail="not_found")
+    token_pid = str(payload.get("pid") or "").strip()
+    if token_pid and (participant_id or "").strip() and token_pid != (participant_id or "").strip():
         raise HTTPException(status_code=404, detail="not_found")
     try:
         raw = load_draft(aid)
@@ -9802,22 +10460,61 @@ def get_public_vs01_signing_packet(
     out: Dict[str, Any] = {"ok": True, "portable": portable}
     if recipient_projection:
         out["recipient_projection"] = recipient_projection
+    from backend.services.vs01_signer_completion import (
+        portable_party_id_for_signer_role,
+        required_vs01_signer_role_ids,
+        signer_role_already_completed,
+    )
+
+    token_pid = token_pid or pid
+    already = False
+    dump = raw if isinstance(raw, dict) else draft.model_dump()
+    audit = dump.get("audit_log")
+    for role_id in required_vs01_signer_role_ids(dump):
+        party = portable_party_id_for_signer_role(dump, role_id)
+        if token_pid and party and party == token_pid and signer_role_already_completed(audit, role_id):
+            already = True
+            break
+        env = dump.get("quick_pdf_envelope_v1") if isinstance(dump.get("quick_pdf_envelope_v1"), dict) else {}
+        if token_pid and str(env.get("recipient_party_id") or "") == token_pid:
+            recip_role = str(env.get("recipient_role_id") or "").strip()
+            if recip_role and signer_role_already_completed(audit, recip_role):
+                already = True
+                break
+    out["signer_already_completed"] = already
     return out
 
 
 @router.get("/{agreement_id}")
 def get_agreement_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
-    assert_agreement_full_draft_read_allowed(request, agreement_id)
+    assert_agreement_full_draft_read_allowed(
+        request, agreement_id, allow_completed_signer_replay=True
+    )
     draft = _load_or_404(agreement_id)
     lock = read_signing_lock(agreement_id)
     lv = str((lock or {}).get("locked_version_id") or "").strip()
     signing_lock_out: Optional[Dict[str, Any]] = None
     if lock and lv:
+        stored_len = lock.get("content_length")
+        try:
+            content_length = int(stored_len) if stored_len is not None else 0
+        except (TypeError, ValueError):
+            content_length = 0
+        stored_sha = str(lock.get("content_sha256") or "").strip().lower()
+        current_sha = _draft_locked_content_sha256(draft)
+        if content_length < 1 and stored_sha and stored_sha == current_sha:
+            content_length = len(canon_json_bytes(_signing_snapshot_dict(draft)))
         signing_lock_out = {
+            "agreement_id": lock.get("agreement_id") or agreement_id,
             "locked_version_id": lv,
             "locked_at": lock.get("locked_at"),
             "locked_by": lock.get("locked_by"),
             "content_sha256": lock.get("content_sha256"),
+            "content_length": content_length or None,
+            "accepted_snapshot_id": lock.get("accepted_snapshot_id") or None,
+            "accepted_snapshot_digest": lock.get("accepted_snapshot_digest") or None,
+            "accepted_snapshot_length": lock.get("accepted_snapshot_length") or None,
+            "accepted_snapshot_status": lock.get("accepted_snapshot_status") or None,
         }
     draft_out = _draft_with_sanitized_parties(draft).model_dump()
     # Recipient tokens receive a minimum projection (no unrelated-party PII / delivery JTIs).
@@ -9846,18 +10543,33 @@ def get_agreement_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
             draft_out,
             recipient_party_id=recipient_party_id,
         )
+        from backend.services.accepted_review_snapshot import recipient_review_revision_with_corpus
+
+        review_revision = recipient_review_revision_with_corpus(
+            draft,
+            agreement_id,
+            locked_version_id=lv,
+        )
+        if review_revision and recipient_party_id:
+            review_revision = {**review_revision, "participant_id": recipient_party_id}
         return {
             "id": agreement_id,
             "draft": draft_out,
             "economics": None,
             "signing_lock": signing_lock_out,
             "recipient_projection": True,
+            "review_revision": review_revision,
+            "accepted_review_snapshot": (
+                review_revision if review_revision and review_revision.get("status") == "accepted" else None
+            ),
+            **_authority_classification_public(draft),
         }
     return {
         "id": agreement_id,
         "draft": draft_out,
         "economics": economics_overlay_for_agreement(agreement_id),
         "signing_lock": signing_lock_out,
+        **_authority_classification_public(draft),
     }
 
 
@@ -9886,6 +10598,8 @@ def update_agreement_field(
         "feed_anchor_network",
         "payment_request",
         "payment_required",
+        "owner_delivery_track",
+        "unresolved_identity_v1",
     }:
         raise HTTPException(status_code=400, detail="unsupported_field")
 
@@ -9893,23 +10607,42 @@ def update_agreement_field(
     now = _utc_now_iso()
     audit_log = list(next_data.get("audit_log") or [])
     if body.field == "parties":
-        prior_ids = {(p.id or "").strip() for p in (draft.parties or []) if (p.id or "").strip()}
+        prior_parties = list(draft.parties or [])
+        prior_ids = {(p.id or "").strip() for p in prior_parties if (p.id or "").strip()}
         parties_raw: List[AgreementParty] = []
         if isinstance(body.value, list):
-            prior_by_id = {(p.id or "").strip(): p for p in (draft.parties or []) if (p.id or "").strip()}
+            prior_by_id = {(p.id or "").strip(): p for p in prior_parties if (p.id or "").strip()}
+            used_ids: set = set()
             for p in body.value:
                 if not isinstance(p, dict):
                     continue
                 name = str(p.get("name") or "").strip()
                 role = str(p.get("role") or "party").strip() or "party"
-                pid = str(p.get("id") or "").strip() or str(uuid.uuid4())
+                pid = str(p.get("id") or "").strip()
+                if pid not in prior_ids:
+                    reused = _existing_party_id_for_legal_name(name, prior_parties, used_ids)
+                    if reused:
+                        pid = reused
+                if not pid:
+                    pid = str(uuid.uuid4())
+                used_ids.add(pid)
                 prior = prior_by_id.get(pid)
                 email_raw = str(p.get("email") or "").strip()
                 email = email_raw or (str(prior.email or "").strip() if prior else "") or None
                 phone_raw = str(p.get("phone") or "").strip()
                 phone = phone_raw or (str(prior.phone or "").strip() if prior else "") or None
+                incoming_signer = _party_signer_kwargs(p)
+                prior_signer = _party_signer_kwargs(prior) if prior else {}
                 parties_raw.append(
-                    AgreementParty(name=name, role=role, id=pid, email=email, phone=phone)
+                    AgreementParty(
+                        name=name,
+                        role=role,
+                        id=pid,
+                        email=email,
+                        phone=phone,
+                        signer_name=incoming_signer.get("signer_name") or prior_signer.get("signer_name"),
+                        signer_title=incoming_signer.get("signer_title") or prior_signer.get("signer_title"),
+                    )
                 )
         parties = _ensure_agreement_parties_have_ids(parties_raw)
         next_data["parties"] = [p.model_dump() for p in parties]
@@ -9944,6 +10677,11 @@ def update_agreement_field(
         if v not in ("private", "link_only", "public"):
             raise HTTPException(status_code=400, detail="invalid_feed_visibility")
         next_data[body.field] = v
+    elif body.field == "owner_delivery_track":
+        v = str(body.value or "").strip().lower()
+        if v not in ("review", "signature"):
+            raise HTTPException(status_code=400, detail="invalid_owner_delivery_track")
+        next_data["owner_delivery_track"] = v
     elif body.field == "feed_anchor_network":
         if body.value is None or body.value == "":
             next_data[body.field] = None
@@ -9952,6 +10690,13 @@ def update_agreement_field(
             if net not in ALLOWED_AGREEMENT_ANCHOR_NETWORKS:
                 raise HTTPException(status_code=400, detail="invalid_feed_anchor_network")
             next_data[body.field] = net
+    elif body.field == "unresolved_identity_v1":
+        if body.value is None or body.value == "":
+            next_data["unresolved_identity_v1"] = None
+        elif isinstance(body.value, list):
+            next_data["unresolved_identity_v1"] = [row for row in body.value if isinstance(row, dict)] or None
+        else:
+            raise HTTPException(status_code=400, detail="invalid_unresolved_identity")
     else:
         if body.value is None:
             next_data[body.field] = None
@@ -10078,6 +10823,111 @@ def post_recipient_preview_export_pdf(
     )
 
 
+def _completed_signed_pdf_authority_or_403(agreement_id: str, draft: AgreementDraft) -> Dict[str, str]:
+    from backend.services.accepted_review_snapshot import get_accepted_snapshot_record, is_pure_legacy_pre_cutover
+    from backend.services.completed_signed_pdf_export import evaluate_completed_signed_pdf_export
+
+    required = _required_signing_participant_ids(draft)
+    signed = [
+        str((_audit_event_dict(e).get("value") or {}).get("participant_id") or "").strip()
+        for e in (draft.audit_log or [])
+        if str(_audit_event_dict(e).get("event_type") or "") == "signature_completed"
+    ]
+    accepted = get_accepted_snapshot_record(draft) or {}
+    lock = read_signing_lock(agreement_id) or {}
+    packet = getattr(draft, "vs01_signing_packet_v1", None) or {}
+    if not isinstance(packet, dict):
+        packet = {}
+    receipt = None
+    if _agreement_draft_fully_executed(draft):
+        receipt = _issue_or_reuse_drafted_finalized_receipt(
+            agreement_id=agreement_id,
+            draft=draft,
+            lock=lock,
+            finalized_at=_finalized_at_from_draft(draft) or _utc_now_iso(),
+        )
+    reason = evaluate_completed_signed_pdf_export(
+        args={
+            "required_participant_ids": required,
+            "signed_participant_ids": signed,
+            "receipt_bound": _receipt_view_is_bound(receipt),
+            "receipt_id": str((receipt or {}).get("receipt_id") or ""),
+            "accepted_snapshot_id": str(accepted.get("snapshotId") or ""),
+            "accepted_digest": str(accepted.get("corpusSha256") or ""),
+            "lock_snapshot_id": str(lock.get("accepted_snapshot_id") or ""),
+            "lock_digest": str(lock.get("accepted_snapshot_digest") or ""),
+            "lock_version_id": str(lock.get("locked_version_id") or ""),
+            "packet_snapshot_id": str(packet.get("accepted_review_snapshot_id") or ""),
+            "packet_digest": str(packet.get("accepted_review_snapshot_digest") or ""),
+            "unsigned_historical_paper": is_pure_legacy_pre_cutover(draft),
+        }
+    )
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+    portable = packet.get("portable") if isinstance(packet.get("portable"), dict) else {}
+    seed = portable.get("seed") if isinstance(portable.get("seed"), dict) else {}
+    return {
+        "accepted_snapshot_id": str(accepted.get("snapshotId") or ""),
+        "accepted_digest": str(accepted.get("corpusSha256") or "").strip().lower(),
+        "lock_version_id": str(lock.get("locked_version_id") or ""),
+        "receipt_id": str((receipt or {}).get("receipt_id") or ""),
+        "packet_document_id": str(
+            packet.get("document_id") or seed.get("documentId") or ""
+        ).strip(),
+    }
+
+
+def _assert_completed_signed_pdf_read_allowed(request: Request, agreement_id: str) -> None:
+    from backend.security.agreement_read_scope import (
+        recipient_access_token_from_request,
+        validate_recipient_access_token_for_agreement,
+    )
+    from backend.config.agreement_signing_token import (
+        SigningTokenSecretMissingInProductionError,
+        resolve_signing_token_secret_raw,
+    )
+
+    tok = recipient_access_token_from_request(request)
+    if not tok:
+        assert_agreement_full_draft_read_allowed(request, agreement_id)
+        return
+    try:
+        secret_raw = resolve_signing_token_secret_raw()
+    except SigningTokenSecretMissingInProductionError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "signing_token_secret_not_configured", "message": str(exc)},
+        ) from exc
+    claims = validate_recipient_access_token_for_agreement(
+        token=tok,
+        path_agreement_id=agreement_id,
+        query_agreement_id=None,
+        secret_raw=secret_raw,
+        consume_single_use=False,
+        log_validation=False,
+        allow_completed_signer_replay=True,
+    )
+    if str(claims.get("mode") or "") != "sign":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "recipient_token_mode_not_allowed",
+                "message": "Completed PDF download requires a signer link, not a review link.",
+            },
+        )
+    pid = str(claims.get("recipient_party_id") or "").strip()
+    draft = _load_or_404(agreement_id)
+    required = set(_required_signing_participant_ids(draft))
+    if not pid or pid not in required:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "recipient_party_token_mismatch",
+                "message": "This signer link is not bound to a required party on this agreement.",
+            },
+        )
+
+
 @router.post("/{agreement_id}/completed-signed-export-pdf")
 def post_completed_signed_export_pdf(
     agreement_id: str,
@@ -10089,10 +10939,11 @@ def post_completed_signed_export_pdf(
     aid = (agreement_id or "").strip()
     if not aid:
         raise HTTPException(status_code=400, detail="missing_agreement_id")
-    assert_agreement_full_draft_read_allowed(request, aid)
+    _assert_completed_signed_pdf_read_allowed(request, aid)
     draft = _load_or_404(aid)
     if not _agreement_draft_fully_executed(draft):
         raise HTTPException(status_code=403, detail="agreement_not_fully_executed")
+    authority = _completed_signed_pdf_authority_or_403(aid, draft)
 
     from backend.services.vs01_fully_executed_snapshot import ensure_fully_executed_snapshot_on_draft
 
@@ -10107,7 +10958,7 @@ def post_completed_signed_export_pdf(
         _save_draft_sync(next_draft.model_dump(), request)
         draft = next_draft
 
-    return build_completed_signed_pdf_response(agreement_id=aid, draft=draft)
+    return build_completed_signed_pdf_response(agreement_id=aid, draft=draft, authority=authority)
 
 
 @router.get("/public/{agreement_id}/completed-signed-export-pdf")
@@ -10130,7 +10981,8 @@ def get_public_completed_signed_export_pdf(agreement_id: str) -> Response:
         raise HTTPException(status_code=404, detail="not_found")
     if not _agreement_draft_fully_executed(draft):
         raise HTTPException(status_code=403, detail="agreement_not_fully_executed")
-    return build_completed_signed_pdf_response(agreement_id=aid, draft=draft)
+    authority = _completed_signed_pdf_authority_or_403(aid, draft)
+    return build_completed_signed_pdf_response(agreement_id=aid, draft=draft, authority=authority)
 
 
 @router.get("/{agreement_id}/completion-evidence")
@@ -11862,7 +12714,9 @@ def _recipient_proposal_closed_from_index(audit: List[Any], proposal_id: str, pe
     for j in range(pending_index + 1, len(audit)):
         d = _audit_event_dict(audit[j])
         et = str(d.get("event_type") or "")
-        val = d.get("value") or {}
+        val = d.get("value")
+        if not isinstance(val, dict):
+            continue
         if str(val.get("proposal_id") or "").strip() != pid:
             continue
         if et in (
@@ -11910,6 +12764,36 @@ def _normalize_workflow_role(role: str) -> str:
     if r in ("viewer", "counterparty", "fyi", "copy", "read_only", "readonly"):
         return "viewer"
     return r or "party"
+
+
+def _existing_participant_revision_approval(
+    audit: Any,
+    participant_id: Optional[str],
+    snapshot_id: Optional[str],
+    digest: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    pid = str(participant_id or "").strip()
+    snap = str(snapshot_id or "").strip()
+    dig = str(digest or "").strip().lower()
+    if not pid:
+        return None
+    for event in audit or []:
+        d = _audit_event_dict(event)
+        if str(d.get("event_type") or "") not in ("participant_approved", "recipient_approved"):
+            continue
+        val = d.get("value") or {}
+        if not isinstance(val, dict):
+            continue
+        if str(val.get("participant_id") or "").strip() != pid:
+            continue
+        prior_snap = str(val.get("snapshot_id") or "").strip()
+        prior_dig = str(val.get("corpus_sha256") or "").strip().lower()
+        if snap and prior_snap and prior_snap != snap:
+            continue
+        if dig and prior_dig and prior_dig != dig:
+            continue
+        return val
+    return None
 
 
 def _approved_participant_ids(audit: Any) -> set:
@@ -12010,6 +12894,34 @@ def _workspace_review_approval_rollups(d: Dict[str, Any]) -> tuple[int, int, boo
     return approved, required, all_done
 
 
+def _owner_delivery_track_value(draft: AgreementDraft) -> str:
+    return str(getattr(draft, "owner_delivery_track", None) or "").strip().lower()
+
+
+def _party_eligible_for_signing_ceremony(party: AgreementParty, track: str) -> bool:
+    """Owner, signer, and reviewer may complete a ceremony. Direct-sign also allows other non-viewers."""
+    n = _normalize_workflow_role(party.role)
+    if n in ("signer", "owner", "reviewer"):
+        return True
+    if track == "signature" and n not in ("viewer",):
+        return True
+    return False
+
+
+def _signing_party_by_participant_id(
+    draft: AgreementDraft, participant_id: str, track: str
+) -> Optional[AgreementParty]:
+    pid = (participant_id or "").strip()
+    if not pid:
+        return None
+    for p in draft.parties or []:
+        if (p.id or "").strip() != pid:
+            continue
+        if _party_eligible_for_signing_ceremony(p, track):
+            return p
+    return None
+
+
 def _signing_approval_gate_errors(draft: AgreementDraft) -> List[str]:
     """Each signer must have participant_approved / recipient_approved with matching participant_id once IDs exist."""
     parties = draft.parties or []
@@ -12101,6 +13013,137 @@ def _signer_party_by_participant_id(draft: AgreementDraft, participant_id: str) 
     return None
 
 
+def _authority_classification_public(draft: AgreementDraft) -> Dict[str, Any]:
+    from backend.services.accepted_review_snapshot import (
+        classify_authority_mode,
+        is_pure_legacy_pre_cutover,
+    )
+
+    return {
+        "authority_mode": classify_authority_mode(draft),
+        "legacy_pre_cutover": is_pure_legacy_pre_cutover(draft),
+    }
+
+
+def _finalized_at_from_draft(draft: Any) -> Optional[str]:
+    raw = draft.model_dump() if hasattr(draft, "model_dump") else draft
+    audit = (raw or {}).get("audit_log") if isinstance(raw, dict) else getattr(draft, "audit_log", None)
+    signed_at = None
+    completed_at = None
+    for ev in audit or []:
+        row = ev.model_dump() if hasattr(ev, "model_dump") else ev
+        if not isinstance(row, dict):
+            continue
+        et = str(row.get("event_type") or "")
+        at = str(row.get("at") or "").strip()
+        val = row.get("value") if isinstance(row.get("value"), dict) else {}
+        if et == "signed" and val.get("fully_executed") and at:
+            signed_at = at
+        if et == "signature_completed" and at:
+            completed_at = at
+    return signed_at or completed_at
+
+
+def _receipt_view_is_bound(view: Optional[Dict[str, Any]]) -> bool:
+    return bool(isinstance(view, dict) and view.get("status") == "bound" and view.get("bound") is True)
+
+
+def _pending_or_unavailable_receipt_view(
+    *,
+    status: str,
+    agreement_id: str = "",
+    locked_version_id: str = "",
+    receipt_id: Optional[str] = None,
+    code: Optional[str] = None,
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "status": status,
+        "bound": False,
+        "agreement_id": agreement_id or None,
+        "locked_version_id": locked_version_id or None,
+        "receipt_id": receipt_id,
+    }
+    if code:
+        out["code"] = code
+    return {k: v for k, v in out.items() if v is not None or k in {"bound", "status"}}
+
+
+def _maybe_supersede_completing_invite(
+    dump: Dict[str, Any], request: Request, part_id: str, *, persist: bool
+) -> Dict[str, Any]:
+    from backend.security.agreement_read_scope import recipient_access_token_from_request
+    from backend.services.recipient_delivery_registry import (
+        extract_jti_from_token,
+        get_registry_revision,
+        supersede_active_invite,
+    )
+
+    recipient_tok = recipient_access_token_from_request(request)
+    if not part_id or not recipient_tok:
+        return dump
+    base_rev = get_registry_revision(dump)
+    next_dump = supersede_active_invite(
+        dump,
+        phase="signing",
+        participant_id=part_id,
+        jti=extract_jti_from_token(recipient_tok),
+        audit_log=list(dump.get("audit_log") or []),
+    )
+    if persist and get_registry_revision(next_dump) > base_rev:
+        _save_draft_registry_cas_sync(next_dump, request, expected_revision=base_rev)
+    return next_dump
+
+
+def _require_production_signing_lock_authority(
+    draft: AgreementDraft, agreement_id: str, lock: Any
+) -> None:
+    from backend.services.accepted_review_snapshot import assert_production_signing_lock_authority
+
+    ok, err, _mode = assert_production_signing_lock_authority(draft, agreement_id, lock)
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": err or "accepted_review_snapshot_required"},
+        )
+
+
+def _required_signing_participant_ids(draft: AgreementDraft) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for party in _required_signing_parties(draft):
+        pid = str(getattr(party, "id", "") or "").strip()
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        out.append(pid)
+    return out
+
+
+def _signature_completion_event_bindings(audit: Any, locked_version_id: str) -> List[Dict[str, Any]]:
+    events: List[Dict[str, Any]] = []
+    seen = set()
+    for raw in audit or []:
+        ev = raw.model_dump() if hasattr(raw, "model_dump") else raw
+        if not isinstance(ev, dict):
+            continue
+        if str(ev.get("event_type") or "") != "signature_completed":
+            continue
+        val = ev.get("value") if isinstance(ev.get("value"), dict) else {}
+        pid = str(val.get("participant_id") or "").strip()
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        events.append(
+            {
+                "eventType": "signature_completed",
+                "participantId": pid,
+                "at": ev.get("at"),
+                "lockedVersionId": str(val.get("locked_version_id") or locked_version_id).strip(),
+            }
+        )
+    return events
+
+
 def _signing_ceremony_guards_lv(draft: AgreementDraft, agreement_id: str) -> Tuple[str, AgreementDraft]:
     draft = _persist_party_id_backfill(draft)
     if _agreement_draft_fully_executed(draft):
@@ -12120,33 +13163,52 @@ def _resolve_signing_participant_for_ceremony(
     """Returns (participant_id_for_audit, signer_party)."""
     part_id = (participant_id or "").strip()
     parties_have_ids = any((p.id or "").strip() for p in draft.parties or [])
-    signer_parties = [p for p in draft.parties or [] if _normalize_workflow_role(p.role) == "signer"]
-    if not signer_parties:
+    track = _owner_delivery_track_value(draft)
+    eligible = [p for p in draft.parties or [] if _party_eligible_for_signing_ceremony(p, track)]
+    if not eligible:
         raise HTTPException(status_code=400, detail="no_signers_on_agreement")
     if parties_have_ids:
         if not part_id:
             raise HTTPException(status_code=400, detail="participant_id_required")
-        sp = _signer_party_by_participant_id(draft, part_id)
+        sp = _signing_party_by_participant_id(draft, part_id, track)
         if not sp:
             raise HTTPException(status_code=403, detail="signer_not_found")
+        role_n = _normalize_workflow_role(sp.role)
         approved = _approved_participant_ids(draft.audit_log)
-        if part_id not in approved:
+        requires_prior_review_approval = role_n != "owner" and track != "signature"
+        if requires_prior_review_approval and part_id not in approved:
             raise HTTPException(status_code=403, detail="participant_not_approved")
         return part_id, sp
     miss = _signing_approval_gate_errors(draft)
-    if miss:
+    if miss and track != "signature":
         raise HTTPException(
             status_code=403,
             detail={"code": "approvals_incomplete", "missing_signer_approvals": miss},
         )
-    if len(signer_parties) != 1:
+    if len(eligible) != 1:
         raise HTTPException(status_code=400, detail="participant_id_required")
-    sp = signer_parties[0]
+    sp = eligible[0]
     return (sp.id or "").strip(), sp
 
 
+def _required_signing_parties(draft: AgreementDraft) -> List[Any]:
+    """Legal parties that sign. Viewers/coordinators/FYI never count."""
+    from backend.services.vs01_signer_completion import party_requires_signature
+
+    required = []
+    for p in draft.parties or []:
+        row = p.model_dump() if hasattr(p, "model_dump") else {
+            "id": getattr(p, "id", None),
+            "name": getattr(p, "name", ""),
+            "role": getattr(p, "role", ""),
+        }
+        if party_requires_signature(row):
+            required.append(p)
+    return required
+
+
 def _all_signers_signed_from_audit(draft: AgreementDraft, audit: List[Any]) -> bool:
-    signers = [p for p in draft.parties or [] if _normalize_workflow_role(p.role) == "signer"]
+    signers = _required_signing_parties(draft)
     if not signers:
         return False
     done = _signature_completed_participant_ids(audit)
@@ -12616,6 +13678,12 @@ def stage_recipient_proposal(
         lock = read_signing_lock(agreement_id)
         if lock and bool((lock or {}).get("locked_version_id")):
             raise HTTPException(status_code=400, detail="negotiation_locked")
+        _assert_review_revision_binding(
+            draft,
+            agreement_id,
+            body.snapshot_id,
+            body.expected_digest,
+        )
         draft = _persist_party_id_backfill(draft)
         proposer, proposer_source = _resolve_recipient_proposer_with_source(
             request, agreement_id, draft, body.proposer_id
@@ -12650,6 +13718,8 @@ def stage_recipient_proposal(
             "staged_at": now,
             "proposer_id": proposer_id,
             "proposer_display_name": dname,
+            "snapshot_id": (body.snapshot_id or "").strip(),
+            "expected_digest": (body.expected_digest or "").strip().lower(),
         }
         log.info(
             "[recipient-proposal-stage] payload summary agreement_id=%s proposal_id=%s instruction_len=%s proposed_purpose_len=%s rendered_html_len=%s canonical_purpose_len=%s",
@@ -12702,6 +13772,12 @@ def submit_recipient_proposal(
     staged = _pop_staged_recipient_proposal(draft, proposal_id, request)
     if not staged:
         raise HTTPException(status_code=400, detail="proposal_not_staged")
+    _assert_review_revision_binding(
+        draft,
+        agreement_id,
+        str(staged.get("snapshot_id") or ""),
+        str(staged.get("expected_digest") or ""),
+    )
     proposer_id = str(staged.get("proposer_id") or "").strip()
     assert_agreement_recipient_write_allowed(
         request,
@@ -12856,15 +13932,18 @@ def apply_recipient_proposal(
             "persisted_at": now,
             "explicit_acceptance_v1": acceptance.as_dict(),
         }
-    next_draft = AgreementDraft(
-        id=current.id,
-        created_at=current.created_at,
+    next_versions = [*(current.versions or [])]
+    next_versions.append(
+        VersionSnapshot(
+            version=len(next_versions) + 1,
+            created_at=now,
+            note="Owner accepted recipient proposal",
+        )
+    )
+    next_draft = _merge_agreement_draft(
+        current,
         updated_at=now,
-        versions=list(current.versions or []),
-        review_sent_at=current.review_sent_at,
-        workspace_archived_at=current.workspace_archived_at,
-        workspace_folder_id=current.workspace_folder_id,
-        workspace_tags=list(current.workspace_tags or []),
+        versions=next_versions,
         audit_log=[*(current.audit_log or []), *[e for e in tail_events]],
         title=body_create.title,
         jurisdiction=body_create.jurisdiction,
@@ -12874,9 +13953,15 @@ def apply_recipient_proposal(
         duration=body_create.duration,
         due_date=body_create.due_date,
         effective_date=body_create.effective_date,
-        payment_request=current.payment_request,
-        payment_required=current.payment_required,
         pro_redline_v1=pro_redline if pro_redline else current.pro_redline_v1,
+        **(
+            {
+                "server_full_document_text": accepted_corpus,
+                "document_text": accepted_corpus,
+            }
+            if len(accepted_corpus) >= 80
+            else {}
+        ),
     )
     _save_draft_sync(next_draft.model_dump(), request)
     previous_hash = _corpus_fingerprint(current.purpose or "")
@@ -12926,11 +14011,18 @@ def recipient_approve_agreement(
     lock = read_signing_lock(agreement_id)
     if lock and bool((lock or {}).get("locked_version_id")):
         raise HTTPException(status_code=400, detail="negotiation_locked")
+    bound = _assert_review_revision_binding(
+        draft,
+        agreement_id,
+        body.snapshot_id,
+        body.expected_digest,
+    )
     draft = _persist_party_id_backfill(draft)
     now = _utc_now_iso()
     msg = (body.message or "").strip()
     part_id = (body.participant_id or "").strip()
     part_name = (body.participant_display_name or "").strip()
+    named_legal_count = sum(1 for p in (draft.parties or []) if str(p.name or "").strip())
     if part_id:
         found = False
         for p in draft.parties or []:
@@ -12939,7 +14031,7 @@ def recipient_approve_agreement(
                 if not part_name:
                     part_name = p.name
                 wr = _normalize_workflow_role(p.role)
-                if wr == "owner":
+                if wr == "owner" and named_legal_count < 3:
                     raise HTTPException(status_code=403, detail="owner_uses_workspace_not_recipient_approve")
                 if wr == "viewer":
                     raise HTTPException(status_code=403, detail="viewer_cannot_approve")
@@ -12948,8 +14040,19 @@ def recipient_approve_agreement(
             raise HTTPException(status_code=400, detail="participant_not_found")
     elif any((p.id or "").strip() for p in (draft.parties or [])):
         raise HTTPException(status_code=400, detail="participant_id_required")
+    existing_approval = _existing_participant_revision_approval(
+        draft.audit_log,
+        part_id,
+        bound.get("snapshot_id") if bound else None,
+        bound.get("corpus_sha256") if bound else None,
+    )
+    if existing_approval:
+        return {"ok": True, "draft": draft.model_dump(), "idempotent": True}
     audit = [*(draft.audit_log or [])]
     approve_val: Dict[str, Any] = {"message": msg or "approved_current_draft"}
+    if bound:
+        approve_val["snapshot_id"] = bound.get("snapshot_id")
+        approve_val["corpus_sha256"] = bound.get("corpus_sha256")
     if part_id:
         approve_val["participant_id"] = part_id
         approve_val["participant_display_name"] = part_name
@@ -13068,6 +14171,185 @@ def _persist_agreement_execution_packet_artifact(
         agreement_id=agreement_id,
         version_id=finalized_version_id,
         metadata={"execution_packet_sha256": execution_packet_sha256},
+    )
+
+
+def _load_agreement_execution_packet(receipt_id: str) -> Optional[Dict[str, Any]]:
+    from backend.config.storage_runtime import unified_artifact_store_enabled
+    from backend.storage.artifact_repository import get_artifact_repository
+
+    rid = (receipt_id or "").strip()
+    if not rid or not unified_artifact_store_enabled():
+        return None
+    raw = get_artifact_repository().get_bytes_by_logical_ref(
+        artifact_type="agreement_execution_packet", logical_ref=rid
+    )
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _drafted_finalized_receipt_view(
+    rec: Dict[str, Any], packet: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "status": "bound",
+        "bound": True,
+        "receipt_id": rec.get("receipt_id"),
+        "receipt_hash_sha256": rec.get("receipt_hash_sha256"),
+        "timeline_id": rec.get("timeline_id"),
+    }
+    if isinstance(packet, dict):
+        out.update(
+            {
+                "agreement_id": packet.get("agreementId"),
+                "locked_version_id": packet.get("lockedVersionId") or packet.get("finalizedVersionId"),
+                "accepted_snapshot_id": packet.get("acceptedSnapshotId"),
+                "accepted_snapshot_digest": packet.get("acceptedSnapshotDigest"),
+                "required_participant_ids": list(packet.get("requiredParticipantIds") or []),
+                "completion_events": list(packet.get("completionEvents") or []),
+                "execution_packet_sha256": None,
+            }
+        )
+        try:
+            from backend.proof.execution_packet_digest import execution_packet_digest_sha256
+
+            out["execution_packet_sha256"] = execution_packet_digest_sha256(packet)
+        except Exception:
+            out["execution_packet_sha256"] = None
+    return out
+
+
+def _issue_or_reuse_drafted_finalized_receipt(
+    *,
+    agreement_id: str,
+    draft: AgreementDraft,
+    lock: Dict[str, Any],
+    finalized_at: str,
+) -> Optional[Dict[str, Any]]:
+    from backend.proof.execution_packet_digest import execution_packet_digest_sha256
+    from backend.services.accepted_review_snapshot import get_accepted_snapshot_record
+
+    accepted = get_accepted_snapshot_record(draft)
+    if not isinstance(accepted, dict):
+        return _pending_or_unavailable_receipt_view(
+            status="receipt_pending",
+            agreement_id=agreement_id,
+            locked_version_id=str((lock or {}).get("locked_version_id") or ""),
+            code="accepted_review_snapshot_required",
+        )
+    sid = str(accepted.get("snapshotId") or "").strip()
+    digest = str(accepted.get("corpusSha256") or "").strip().lower()
+    lv = str((lock or {}).get("locked_version_id") or "").strip()
+    required = _required_signing_participant_ids(draft)
+    stable_finalized_at = _finalized_at_from_draft(draft) or finalized_at
+    if not sid or len(digest) != 64 or not lv or not required or not stable_finalized_at:
+        return _pending_or_unavailable_receipt_view(
+            status="receipt_pending",
+            agreement_id=agreement_id,
+            locked_version_id=lv,
+        )
+    packet = build_drafted_ceremony_execution_packet(
+        agreement_id=agreement_id,
+        locked_version_id=lv,
+        accepted_snapshot_id=sid,
+        accepted_snapshot_digest=digest,
+        required_participant_ids=required,
+        completion_events=_signature_completion_event_bindings(draft.audit_log, lv),
+        finalized_at=stable_finalized_at,
+    )
+    packet_sha = execution_packet_digest_sha256(packet)
+    store = _agreements_timeline_store()
+    receipt, _artifact_body = create_agreement_receipt_response(
+        agreement_id=agreement_id,
+        finalized_version_id=lv,
+        finalized_at=stable_finalized_at,
+        content_sha256=digest,
+        execution_packet_sha256=packet_sha,
+        signer_count=len(required),
+        anchor_network="bitcoin-testnet",
+    )
+    packet_ok = False
+    try:
+        _persist_agreement_execution_packet_artifact(
+            agreement_id=agreement_id,
+            receipt_id=receipt["receipt_id"],
+            finalized_version_id=lv,
+            execution_packet_sha256=packet_sha,
+            execution_packet=packet,
+        )
+        packet_ok = True
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "drafted_finalized_receipt_packet_persist_failed agreement_id=%s", agreement_id
+        )
+    receipt_row = None
+    try:
+        receipt_row = store.get_receipt(receipt["receipt_id"])
+    except KeyError:
+        if not packet_ok:
+            return _pending_or_unavailable_receipt_view(
+                status="receipt_pending",
+                agreement_id=agreement_id,
+                locked_version_id=lv,
+                code="receipt_pending",
+            )
+        try:
+            store.create_receipt(
+                receipt_id=receipt["receipt_id"],
+                timeline_id=receipt["timeline_id"],
+                protocol_version=receipt["protocol_version"],
+                network=receipt["network"],
+                epoch_id=receipt.get("epoch_id"),
+                btc_txid=receipt["btc_txid"],
+                commitment=receipt["commitment"],
+                merkle_proof=receipt["merkle_proof"],
+                zk_proof_refs=receipt.get("zk_proof_refs"),
+                issued_at=receipt["issued_at"],
+                receipt_hash_sha256=receipt.get("receipt_hash_sha256"),
+            )
+            receipt_row = store.get_receipt(receipt["receipt_id"])
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "drafted_finalized_receipt_store_failed agreement_id=%s", agreement_id
+            )
+            receipt_row = None
+    if receipt_row and packet_ok:
+        ok, err = verify_drafted_finalized_receipt(
+            receipt=receipt_row,
+            packet=packet,
+            agreement_id=agreement_id,
+            lock=lock,
+            accepted_snapshot_id=sid,
+            accepted_snapshot_digest=digest,
+        )
+        if ok:
+            return _drafted_finalized_receipt_view(receipt_row, packet)
+        return _pending_or_unavailable_receipt_view(
+            status="receipt_unavailable",
+            agreement_id=agreement_id,
+            locked_version_id=lv,
+            receipt_id=str(receipt_row.get("receipt_id") or ""),
+            code=err,
+        )
+    if receipt_row and not packet_ok:
+        return _pending_or_unavailable_receipt_view(
+            status="receipt_unavailable",
+            agreement_id=agreement_id,
+            locked_version_id=lv,
+            receipt_id=str(receipt_row.get("receipt_id") or ""),
+            code="receipt_unavailable",
+        )
+    return _pending_or_unavailable_receipt_view(
+        status="receipt_pending",
+        agreement_id=agreement_id,
+        locked_version_id=lv,
+        receipt_id=str(receipt.get("receipt_id") or "") or None,
+        code="receipt_pending",
     )
 
 
@@ -13218,15 +14500,54 @@ def get_agreement_proof_status(agreement_id: str, request: Request):
     if subject_is_guest(subject):
         assert_guest_workflow_denied(subject_ref=subject, surface="proof")
     assert_agreement_full_draft_read_allowed(request, agreement_id)
+    draft = _load_or_404(agreement_id)
+    lock = read_signing_lock(agreement_id) or {}
     store = _agreements_timeline_store()
     timeline_id = f"agreement:{agreement_id}"
     rec = store.get_latest_receipt_for_timeline(timeline_id)
+    cadence = anchor_cadence_summary()
     if not rec:
-        return {"proof": None, "cadence_defaults": anchor_cadence_summary()}
+        if _agreement_draft_fully_executed(draft):
+            return {
+                "proof": None,
+                "cadence_defaults": cadence,
+                "finalized_receipt": _pending_or_unavailable_receipt_view(
+                    status="receipt_pending",
+                    agreement_id=agreement_id,
+                    locked_version_id=str(lock.get("locked_version_id") or ""),
+                    code="receipt_pending",
+                ),
+            }
+        return {"proof": None, "cadence_defaults": cadence, "finalized_receipt": None}
 
     batch = _batch_row_for_receipt(store, rec)
+    packet = _load_agreement_execution_packet(str(rec.get("receipt_id") or ""))
+    from backend.services.accepted_review_snapshot import get_accepted_snapshot_record
+
+    accepted = get_accepted_snapshot_record(draft)
+    ok, err = verify_drafted_finalized_receipt(
+        receipt=rec,
+        packet=packet,
+        agreement_id=agreement_id,
+        lock=lock,
+        accepted_snapshot_id=str((accepted or {}).get("snapshotId") or "") if accepted else None,
+        accepted_snapshot_digest=str((accepted or {}).get("corpusSha256") or "") if accepted else None,
+    )
+    if not ok:
+        return {
+            "proof": _agreement_anchor_proof_view(rec, batch),
+            "cadence_defaults": cadence,
+            "finalized_receipt": _pending_or_unavailable_receipt_view(
+                status="receipt_unavailable",
+                agreement_id=agreement_id,
+                locked_version_id=str(lock.get("locked_version_id") or ""),
+                receipt_id=str(rec.get("receipt_id") or ""),
+                code=err or "receipt_unavailable",
+            ),
+        }
 
     return {
         "proof": _agreement_anchor_proof_view(rec, batch),
-        "cadence_defaults": anchor_cadence_summary(),
+        "cadence_defaults": cadence,
+        "finalized_receipt": _drafted_finalized_receipt_view(rec, packet),
     }

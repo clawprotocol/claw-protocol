@@ -6,8 +6,40 @@ import { mergePaidProRecipientSetupEmailsIntoDraft } from "./agreementToVs01Sign
 
 const SIMPLE_SEND_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+function humanSignerNameOrEmpty(signerName: string | undefined, entityName: string): string {
+  const sn = String(signerName || "").trim();
+  const entity = String(entityName || "").trim();
+  if (!sn) return "";
+  if (entity && sn.toLowerCase() === entity.toLowerCase()) return "";
+  return sn;
+}
+
 function normalizeRole(role: string | undefined): string {
   return String(role ?? "").trim().toLowerCase();
+}
+
+function normalizeLegalPartyKey(name: string | undefined | null): string {
+  return String(name || "")
+    .replace(/\.$/, "")
+    .replace(/^\d+\s+/, "")
+    .trim()
+    .toLowerCase();
+}
+
+/** Keep confirmed legal parties that exist on only one of the two drafts. */
+export function unionNamedLegalParties(
+  primary: readonly AgreementParty[],
+  secondary: readonly AgreementParty[] = [],
+): AgreementParty[] {
+  const out = primary.map((party) => ({ ...party }));
+  const seen = new Set(out.map((party) => normalizeLegalPartyKey(party.name)).filter(Boolean));
+  for (const party of secondary) {
+    const key = normalizeLegalPartyKey(party.name);
+    if (!key || seen.has(key)) continue;
+    out.push({ ...party });
+    seen.add(key);
+  }
+  return out;
 }
 
 /**
@@ -127,18 +159,36 @@ export function mergeReviewLinkRecipientEmailsOntoHydratedDraft(
   const fetched = (Array.isArray(fetchedDraft.parties) ? [...fetchedDraft.parties] : []) as AgreementParty[];
   const primedList = (primedDraft && Array.isArray(primedDraft.parties) ? [...primedDraft.parties] : []) as AgreementParty[];
 
-  let next = fetched.map((fp, i) => {
-    const prim = primedList[i];
+  let next = fetched.map((fp) => {
+    const prim =
+      primedList.find((row) => {
+        const id = String(row.id ?? "").trim();
+        return Boolean(id && id === String(fp.id ?? "").trim());
+      }) ??
+      primedList.find((row) => {
+        const key = normalizeLegalPartyKey(row.name);
+        return Boolean(key && key === normalizeLegalPartyKey(fp.name));
+      });
     let email = plausibleSlotEmail(fp.email);
     if (!email && prim) email = plausibleSlotEmail(prim.email);
-    if (email) return { ...fp, email };
-    return { ...fp };
+    const entityName = String(fp.name || "").trim();
+    const signerName =
+      humanSignerNameOrEmpty(fp.signerName, entityName) ||
+      humanSignerNameOrEmpty(prim?.signerName, entityName);
+    const signerTitle = String(fp.signerTitle || "").trim() || String(prim?.signerTitle || "").trim();
+    return {
+      ...fp,
+      ...(email ? { email } : {}),
+      ...(signerName ? { signerName } : {}),
+      ...(signerTitle ? { signerTitle } : {}),
+    };
   });
 
   const handoff = readPremiumRecipientHandoff();
   if (handoff) {
     next = mergeHandoffOntoParties(next, handoff);
   }
+  next = unionNamedLegalParties(next, primedList);
 
   return { ...fetchedDraft, parties: next };
 }
@@ -174,6 +224,10 @@ export function mergeLiveDraftWithRecipientSetupForReviewLinks(
   for (let i = 0; i < legalNames.length && i < parties.length; i++) {
     const name = legalNames[i];
     if (!name || parties[i]?.name?.trim() === name) continue;
+    const siblingOwnsName = parties.some(
+      (party, index) => index !== i && normalizeLegalPartyKey(party.name) === normalizeLegalPartyKey(name),
+    );
+    if (siblingOwnsName) continue;
     parties[i] = { ...parties[i], name };
     changed = true;
   }

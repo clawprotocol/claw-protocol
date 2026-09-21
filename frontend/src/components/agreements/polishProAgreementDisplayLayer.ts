@@ -40,6 +40,7 @@ import { repairPaidProSignatureSectionOrdering, isStandaloneSignaturesHeadingLin
 import {
   buildCorpusRoleIdentitiesForExecutionReconcile,
   detectExecutionBlockRoleInversion,
+  overlayCorpusDeclaredRoleLabels,
 } from "./paidProAcceptedCorpusPartyRoles";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
@@ -684,12 +685,15 @@ export function polishProAgreementDisplayLayer(
 
   const partyNames = canonicalPartyNamesFromDraft(opts?.draft);
   const roleLabels = roleLabelsFromDraft(opts?.draft);
-  const records = resolveCanonicalPartyIdentitiesFromSources({
-    rawIntake: opts?.intakeText ?? null,
-    starterNames: partyNames,
-    roleLabels: roleLabels.length >= 2 ? roleLabels : undefined,
-    generatedBody: input,
-  });
+  const records = overlayCorpusDeclaredRoleLabels(
+    resolveCanonicalPartyIdentitiesFromSources({
+      rawIntake: opts?.intakeText ?? null,
+      starterNames: partyNames,
+      roleLabels: roleLabels.length >= 2 ? roleLabels : undefined,
+      generatedBody: input,
+    }),
+    input,
+  );
 
   const preserveBrandLicensingOpening = brandLicensingRecoveryOpeningIsPreserved(
     out,

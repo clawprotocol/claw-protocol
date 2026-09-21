@@ -76,6 +76,20 @@ function twoPartyAuthorityArgs() {
 }
 
 describe("signerCountAuthority", () => {
+  it("counts a confirmed added individual on a two-company Harbor intake as a third legal party", () => {
+    const resolution = resolveAuthoritativeSignerCount({
+      intakeText:
+        "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Alex Rivera, alex.rivera@advisor.test, is involved.",
+      draftParties: [
+        { name: "Harbor Peak Analytics LLC" },
+        { name: "Ironvale Manufacturing Inc." },
+        { name: "Alex Rivera" },
+      ],
+    });
+    expect(resolution.count).toBe(3);
+    expect(resolution.source).toBe("draft_parties");
+  });
+
   it("resolves signer count to 2 for role-labeled two-party intake", () => {
     const resolution = resolveAuthoritativeSignerCount(twoPartyAuthorityArgs());
     expect(resolution.count).toBe(2);

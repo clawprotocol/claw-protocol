@@ -28,6 +28,7 @@ import {
   matchesAdvancedCommercialStructureSignals,
   matchesAdvancedInstrumentPhrases,
   shouldInterceptAdvancedDocumentFamily,
+  shouldRunComplexityInterceptBeforePaidGeneration,
 } from "./agreementLaunchFamilies";
 import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
@@ -236,6 +237,41 @@ describe("Universal invariant 3: ordinary commercial terms never trip the comple
 });
 
 describe("Universal invariant 3: true advanced finance / securities deals still gate", () => {
+  it("independent-contractor joint-venture disclaimer does not gate four-party services intake", () => {
+    const intake =
+      "Draft a four-party precision medicine data platform agreement. Each Party performs as an independent contractor; nothing creates a partnership, joint venture, or employment relationship. Massachusetts law. 24 months.";
+    expect(matchesAdvancedInstrumentPhrases(intake)).toBe(false);
+    expect(shouldInterceptAdvancedDocumentFamily(intake, "consulting_agreement")).toBe(false);
+    expect(
+      shouldRunComplexityInterceptBeforePaidGeneration({
+        skipFreeStarterCreateSubmit: true,
+        intakeText: intake,
+        family: "consulting_agreement",
+      }),
+    ).toBe(false);
+  });
+
+  it("a real joint venture instrument still gates on the unpaid path", () => {
+    const intake =
+      "Draft a joint venture agreement among Alpha LLC, Beta Inc., and Gamma LLC to form a new JV entity. Delaware law.";
+    expect(matchesAdvancedInstrumentPhrases(intake)).toBe(true);
+    expect(shouldInterceptAdvancedDocumentFamily(intake, "services_agreement")).toBe(true);
+    expect(
+      shouldRunComplexityInterceptBeforePaidGeneration({
+        skipFreeStarterCreateSubmit: false,
+        intakeText: intake,
+        family: "services_agreement",
+      }),
+    ).toBe(true);
+    expect(
+      shouldRunComplexityInterceptBeforePaidGeneration({
+        skipFreeStarterCreateSubmit: true,
+        intakeText: intake,
+        family: "services_agreement",
+      }),
+    ).toBe(false);
+  });
+
   it("SAFE financing agreement gates", () => {
     const intake =
       "SAFE financing agreement between FoundCo Inc. and Acme Ventures Fund II LP. $500,000 SAFE with 20% discount and $5M valuation cap.";

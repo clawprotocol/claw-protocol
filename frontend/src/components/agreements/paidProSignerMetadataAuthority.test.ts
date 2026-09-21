@@ -19,6 +19,8 @@ import { signerMetadataDriftedFromSnapshot } from "./authoritativeSignerHydratio
 import { resolveCanonicalFinalPartyManifest } from "./guidedDealCompletion/canonicalFinalPartyManifest";
 import { resolvePaidProStickyCta } from "./paidProStickyCta";
 import { persistPremiumRecipientHandoff, readPremiumRecipientHandoff } from "./premiumPartyNamesHandoff";
+import { prepareReviewEmailPartyRowsForServer } from "../../launch/simpleProduct/reviewEmailPartyRoles";
+import type { AgreementDraft } from "../../agreement/agreementTypes";
 
 const BLUE = "Blue Canyon Analytics LLC";
 const IRON = "Iron Vale Systems Inc";
@@ -60,6 +62,101 @@ describe("paidProSignerMetadataAuthority", () => {
     clearAuthoritativeSigningSnapshot();
     storage.clear();
     vi.unstubAllGlobals();
+  });
+
+  it("does not let PARTIES AND ROLES steal Lumen's signer contact", () => {
+    const lumen = "Lumen Bioinformatics Inc.";
+    const thalassa = "Thalassa Data Systems LLC";
+    const coastal = "Coastal Meridian Analytics LLC";
+    const vanguard = "Vanguard Regulatory Sciences Ltd.";
+    const authority = buildLivePaidProSignerMetadataAuthority(
+      {
+        partyCount: 4,
+        recipient1Name: "PARTIES AND ROLES",
+        recipient2Name: lumen,
+        recipient1Email: "elena.vasquez@lumenbio.com",
+        recipient2Email: "marcus.webb@thalassadata.com",
+        extraPartyLegalNames: [coastal, vanguard],
+        extraPartyReviewEmails: ["priya.nair@coastalmeridian.com", "james.osullivan@vanguardregulatory.co"],
+        partySignerNames: ["Dr. Elena Vasquez", "Marcus Webb", "Priya Nair", "James O'Sullivan"],
+        partySignerTitles: ["Chief Science Officer", "President", "Vice President of Operations", "Managing Director"],
+        partyAddresses: ["", "", "", ""],
+      },
+      "live_ui",
+      {
+        preferCompleteUiLegalEntityAuthority: true,
+        draftPartyNames: [lumen, thalassa, coastal, vanguard],
+      },
+    );
+    expect(authority.parties.map((party) => party.partyLegalName)).toEqual([
+      lumen,
+      thalassa,
+      coastal,
+      vanguard,
+    ]);
+    expect(authority.parties[0]).toMatchObject({
+      signerName: "Dr. Elena Vasquez",
+      signerEmail: "elena.vasquez@lumenbio.com",
+    });
+    expect(authority.parties[1]).toMatchObject({
+      signerName: "Marcus Webb",
+      signerEmail: "marcus.webb@thalassadata.com",
+    });
+  });
+
+  it("keeps an added individual draft party when UI slots duplicate Ironvale", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc.";
+    const authority = buildLivePaidProSignerMetadataAuthority(
+      {
+        partyCount: 3,
+        recipient1Name: harbor,
+        recipient2Name: ironvale,
+        recipient1Email: "pat.harbor@harbor.test",
+        recipient2Email: "sam.ironvale@ironvale.test",
+        extraPartyReviewEmails: ["sam.ironvale@ironvale.test"],
+        extraPartyLegalNames: [ironvale],
+        partySignerNames: ["Pat Harbor", "Sam Ironvale", "Alex Rivera"],
+        partySignerTitles: ["", "", ""],
+        partyAddresses: ["", "", ""],
+      },
+      "live_ui",
+      {
+        preferCompleteUiLegalEntityAuthority: true,
+        draftPartyNames: [harbor, ironvale, "Alex Rivera"],
+      },
+    );
+    expect(authority.parties.map((party) => party.partyLegalName)).toEqual([
+      harbor,
+      ironvale,
+      "Alex Rivera",
+    ]);
+    expect(authority.parties[2]?.signerName).toBe("Alex Rivera");
+  });
+
+  it("does not copy a sibling signer onto Advisor when local slots duplicate Ironvale", () => {
+    const serverDraft = {
+      parties: [
+        { id: "p1", name: "Harbor Peak Analytics LLC", role: "Consultant", signerName: "Pat Harbor", email: "pat.harbor@harbor.test" },
+        { id: "p2", name: "Ironvale Manufacturing Inc.", role: "Client", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+        { id: "p3", name: "Alex Rivera", role: "Advisor", email: "alex.rivera@advisor.test" },
+      ],
+    } as AgreementDraft;
+    const localDraft = {
+      parties: [
+        { id: "p1", name: "Harbor Peak Analytics LLC", role: "Consultant", signerName: "Pat Harbor", email: "pat.harbor@harbor.test" },
+        { id: "p2", name: "Ironvale Manufacturing Inc.", role: "Client", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+        { id: "p2-dup", name: "Ironvale Manufacturing Inc.", role: "party", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+      ],
+    } as AgreementDraft;
+    const out = prepareReviewEmailPartyRowsForServer(serverDraft, localDraft);
+    expect(out.map((party) => party.name)).toEqual([
+      "Harbor Peak Analytics LLC",
+      "Ironvale Manufacturing Inc.",
+      "Alex Rivera",
+    ]);
+    expect(out.find((party) => party.name === "Alex Rivera")?.role).toBe("Advisor");
+    expect(out.find((party) => party.name === "Alex Rivera")?.signerName).toBeFalsy();
   });
 
   it("sanitizes polluted legal entity prose before persisting authority parties", () => {

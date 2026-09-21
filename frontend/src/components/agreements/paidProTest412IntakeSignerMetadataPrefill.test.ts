@@ -129,8 +129,26 @@ describe("TEST412_INTAKE_SIGNER_METADATA_PREFILL", () => {
       extraPartyReviewEmails: seed.emails.slice(2),
       extraPartyLegalNames: legalEntities.slice(2),
     });
+    expect(seed.names).toEqual([...TEST412_SIGNER_NAMES]);
+    for (const name of seed.names) {
+      expect(TEST412_LEGAL_ENTITIES.some((entity) => entity === name)).toBe(false);
+    }
     expect(gate.complete).toBe(true);
     expect(gate.blockers).toHaveLength(0);
+    expect(
+      resolvePaidProSignerDetailsGate({
+        partyCount: 4,
+        intakeText: TEST412_PRODUCTION_QUAD_PARTY_INTAKE,
+        draftPartyNames: draft.parties?.map((p) => String(p.name ?? "")) ?? [],
+        partySignerNames: ["", "", "", ""],
+        recipient1Name: legalEntities[0]!,
+        recipient2Name: legalEntities[1]!,
+        recipient1Email: seed.emails[0]!,
+        recipient2Email: seed.emails[1]!,
+        extraPartyReviewEmails: seed.emails.slice(2),
+        extraPartyLegalNames: legalEntities.slice(2),
+      }).complete,
+    ).toBe(false);
 
     const authority = buildLivePaidProSignerMetadataAuthority(
       {
@@ -200,5 +218,20 @@ describe("TEST412_INTAKE_SIGNER_METADATA_PREFILL", () => {
     const aligned = alignIntakeSignerMetadataToLegalEntities(TEST412_REVENUE_SHARE_INTAKE, entities);
     expect(aligned.filter((s) => s.signerName.trim()).length).toBe(4);
     expect(aligned.filter((s) => s.signerEmail.trim()).length).toBe(4);
+  });
+
+  it("binds Consultant/Client signer emails to the matching parenthetical entities", () => {
+    const intake = [
+      "Draft a consulting services agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client).",
+      "Consultant signer Maya Chen, maya.chen@harborpeak.test. Client signer Jordan Hale, jordan.hale@ironvale.test.",
+    ].join(" ");
+    const aligned = alignIntakeSignerMetadataToLegalEntities(intake, [
+      "Harbor Peak Analytics LLC",
+      "Ironvale Manufacturing Inc.",
+    ]);
+    expect(aligned[0]?.signerName).toBe("Maya Chen");
+    expect(aligned[0]?.signerEmail).toBe("maya.chen@harborpeak.test");
+    expect(aligned[1]?.signerName).toBe("Jordan Hale");
+    expect(aligned[1]?.signerEmail).toBe("jordan.hale@ironvale.test");
   });
 });

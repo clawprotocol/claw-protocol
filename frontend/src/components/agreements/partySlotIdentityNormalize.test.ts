@@ -8,6 +8,7 @@ import {
   normalizeAgreementPartyName,
   repairDraftPartiesFromIntakeAuthority,
   resolveAuthoritativeIntakePartyNames,
+  resolveAuthoritativePartySlotCount,
   resolveDeclaredExplicitPartyCount,
   resolveHirerVersusHiredCompanySlots,
   splitCommaSeparatedPartyNames,
@@ -20,6 +21,20 @@ const TEST330_BETWEEN =
   'between Red Mesa Logistics, LLC ("party_a") and Harbor Peak Automation, LLC ("party_b")';
 
 describe("partySlotIdentityNormalize", () => {
+  it("counts a confirmed individual Advisor as the third signer-setup slot", () => {
+    expect(
+      resolveAuthoritativePartySlotCount({
+        intakeText:
+          "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Alex Rivera, alex.rivera@advisor.test, is involved.",
+        draftPartyNames: [
+          "Harbor Peak Analytics LLC",
+          "Ironvale Manufacturing Inc",
+          "Alex Rivera",
+        ],
+      }),
+    ).toBe(3);
+  });
+
   it("rejects standalone LLC as a legal entity", () => {
     expect(isStandaloneLegalEntitySuffix("LLC")).toBe(true);
     expect(isInvalidPartySlotLegalEntity("LLC")).toBe(true);
@@ -59,6 +74,66 @@ describe("partySlotIdentityNormalize", () => {
     ]);
   });
 
+  it("collapse keeps name-matched signer fields and does not copy a sibling email", () => {
+    const collapsed = collapseDraftPartyRows(
+      [
+        {
+          name: "Lumen Bioinformatics Inc.",
+          role: "Platform Developer",
+          email: "elena.vasquez@lumenbio.com",
+          signerName: "Dr. Elena Vasquez",
+          signerTitle: "CSO",
+        },
+        {
+          name: "Thalassa Data Systems LLC",
+          role: "Data Infrastructure Provider",
+          email: "marcus.webb@thalassadata.com",
+          signerName: "Marcus Webb",
+        },
+        {
+          name: "Coastal Meridian Analytics LLC",
+          role: "Analytics Integrator",
+          email: "priya.nair@coastalmeridian.com",
+          signerName: "Priya Nair",
+        },
+        {
+          name: "Vanguard Regulatory Sciences Ltd.",
+          role: "Regulatory Compliance Advisor",
+          email: "marcus.webb@thalassadata.com",
+          signerName: "James O'Sullivan",
+        },
+      ],
+      [
+        "Parties: Lumen Bioinformatics Inc., Thalassa Data Systems LLC,",
+        "Coastal Meridian Analytics LLC, and Vanguard Regulatory Sciences Ltd.",
+      ].join(" "),
+    );
+    expect(collapsed).toHaveLength(4);
+    expect(collapsed[0]?.signerName).toBe("Dr. Elena Vasquez");
+    expect(collapsed[0]?.email).toBe("elena.vasquez@lumenbio.com");
+    expect(collapsed[3]?.signerName).toBe("James O'Sullivan");
+    expect(collapsed[3]?.signerTitle).toBeUndefined();
+  });
+
+  it("four-party bullet intake does not promote list markers or drop Blue Harbor", () => {
+    const intake = [
+      "Draft a four-party Professional Services Agreement among:",
+      "* Redwood Biologics, Inc. (Client)",
+      "* Summit AI Consulting LLC (Lead Provider)",
+      "* Blue Harbor Systems LLC (Implementation Partner)",
+      "* Iron Gate Security LLC (Cybersecurity Auditor)",
+    ].join("\n");
+    const names = resolveAuthoritativeIntakePartyNames(intake);
+    expect(names.some((n) => /^\s*[-*•]/.test(n))).toBe(false);
+    expect(names.map((n) => n.toLowerCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim())).toEqual([
+      "redwood biologics inc",
+      "summit ai consulting llc",
+      "blue harbor systems llc",
+      "iron gate security llc",
+    ]);
+    expect(normalizeAgreementPartyName("* Summit AI Consulting LLC")).toBe("Summit AI Consulting LLC");
+  });
+
   it("four-party oxford comma between list", () => {
     const intake =
       "Services agreement between Acme LLC, Beta Inc, Gamma Studios, and Delta Holdings. Fee $7,500/month. Term 12 months.";
@@ -78,6 +153,46 @@ describe("partySlotIdentityNormalize", () => {
     expect(isInvalidPartySlotLegalEntity("configuration assistance")).toBe(true);
     expect(isInvalidPartySlotLegalEntity("training services")).toBe(true);
     expect(isInvalidPartySlotLegalEntity(RED_MESA)).toBe(false);
+    expect(
+      isInvalidPartySlotLegalEntity(
+        "No authority to bind: the service provider has no authority to bind the company",
+      ),
+    ).toBe(true);
+  });
+
+  it("collapseDraftPartyRows keeps a durable added individual when intake is still two-party", () => {
+    const collapsed = collapseDraftPartyRows(
+      [
+        {
+          id: "harbor-uuid",
+          name: "Harbor Peak Analytics LLC",
+          role: "Consultant",
+          email: "pat.harbor@harbor.test",
+          signerName: "Pat Harbor",
+        },
+        {
+          id: "ironvale-uuid",
+          name: "Ironvale Manufacturing Inc.",
+          role: "Client",
+          email: "sam.ironvale@ironvale.test",
+          signerName: "Sam Ironvale",
+        },
+        {
+          id: "alex-uuid",
+          name: "Alex Rivera",
+          role: "Advisor",
+          email: "alex.rivera@advisor.test",
+          signerName: "Alex Rivera",
+        },
+      ],
+      "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client).",
+    );
+    expect(collapsed.map((row) => row.name)).toEqual([
+      "Harbor Peak Analytics LLC",
+      "Ironvale Manufacturing Inc",
+      "Alex Rivera",
+    ]);
+    expect(collapsed[2]?.id).toBe("alex-uuid");
   });
 
   it("collapseDraftPartyRows repairs three-row draft with standalone LLC slot", () => {

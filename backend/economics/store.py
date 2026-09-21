@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import sqlite3
+import threading
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from backend.config.runtime_environment import data_dir
 
@@ -35,6 +38,54 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+_SCHEMA_THREAD_LOCK = threading.Lock()
+_CHECKOUT_PENDING_STATUSES = ("creating", "open", "complete", "reconciling")
+
+
+@contextmanager
+def _economics_schema_lock(db_path: str) -> Iterator[None]:
+    """Serialize schema init across threads and processes before serving traffic."""
+    with _SCHEMA_THREAD_LOCK:
+        lock_path = f"{db_path}.schema.lock"
+        os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+        with open(lock_path, "a+", encoding="utf-8") as handle:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            except OSError:
+                pass
+            try:
+                yield
+            finally:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+
+
+def _safe_add_column(con: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    cols = {str(row[1]) for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column in cols:
+        return
+    try:
+        con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column" not in str(exc).lower():
+            raise
+
+
+def _checkout_attempt_expired(value: Optional[str]) -> bool:
+    raw = str(value or "").strip()
+    if not raw:
+        return False
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) >= dt
+
+
 class EconomicsStore:
     def __init__(self, path: Optional[str] = None) -> None:
         self._path = path or economics_db_path()
@@ -47,6 +98,10 @@ class EconomicsStore:
         return c
 
     def init_schema(self) -> None:
+        with _economics_schema_lock(self._path):
+            self._init_schema_unlocked()
+
+    def _init_schema_unlocked(self) -> None:
         with self._conn() as con:
             con.executescript(
                 """
@@ -160,12 +215,7 @@ class EconomicsStore:
                 );
                 """
             )
-            cols = [
-                r[1]
-                for r in con.execute("PRAGMA table_info(affiliates)").fetchall()
-            ]
-            if "owner_org_id" not in cols:
-                con.execute("ALTER TABLE affiliates ADD COLUMN owner_org_id TEXT")
+            _safe_add_column(con, "affiliates", "owner_org_id", "TEXT")
             ucols = [r[1] for r in con.execute("PRAGMA table_info(usage_events)").fetchall()]
             if "keys_balance_before" not in ucols:
                 con.execute(
@@ -471,6 +521,7 @@ class EconomicsStore:
 
             ensure_genesis_referral_schema(con)
             self._ensure_subscription_authority_columns(con)
+            self._ensure_checkout_attempt_schema(con)
             self._backfill_key_ledger(con)
 
     def _ensure_subscription_authority_columns(self, con: sqlite3.Connection) -> None:
@@ -481,6 +532,47 @@ class EconomicsStore:
             con.execute("ALTER TABLE subscriptions ADD COLUMN stripe_customer_id TEXT")
         if "current_period_end" not in cols:
             con.execute("ALTER TABLE subscriptions ADD COLUMN current_period_end TEXT")
+        if "cancel_at_period_end" not in cols:
+            con.execute("ALTER TABLE subscriptions ADD COLUMN cancel_at_period_end INTEGER")
+        if "billing_interval" not in cols:
+            con.execute("ALTER TABLE subscriptions ADD COLUMN billing_interval TEXT")
+
+    def _ensure_checkout_attempt_schema(self, con: sqlite3.Connection) -> None:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS billing_checkout_attempts (
+              id TEXT PRIMARY KEY,
+              org_id TEXT NOT NULL,
+              user_id TEXT,
+              agreement_id TEXT NOT NULL,
+              cadence TEXT NOT NULL,
+              return_to TEXT,
+              price_id TEXT,
+              idempotency_key TEXT NOT NULL UNIQUE,
+              stripe_session_id TEXT,
+              checkout_url TEXT,
+              status TEXT NOT NULL,
+              expires_at TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        _safe_add_column(con, "billing_checkout_attempts", "provider_request_json", "TEXT")
+        con.execute("DROP INDEX IF EXISTS idx_billing_checkout_open")
+        con.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_checkout_pending_org
+              ON billing_checkout_attempts (org_id)
+              WHERE status IN ('creating', 'open', 'complete', 'reconciling')
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_billing_checkout_org
+              ON billing_checkout_attempts (org_id, created_at DESC)
+            """
+        )
 
     def _backfill_key_ledger(self, con: sqlite3.Connection) -> None:
         rows = con.execute("SELECT org_id, keys_available FROM key_balances").fetchall()
@@ -647,6 +739,8 @@ class EconomicsStore:
         stripe_customer_id: Optional[str],
         payment_id: Optional[str],
         renewed_at: Optional[str],
+        cancel_at_period_end: Optional[bool] = None,
+        billing_interval: Optional[str] = None,
     ) -> str:
         """Insert or update the canonical subscriptions row for an org."""
         oid = (org_id or "").strip()
@@ -654,6 +748,12 @@ class EconomicsStore:
             raise ValueError("org_id required")
         now = _utc_now()
         existing = self.get_subscription_by_org(oid)
+        cancel_flag: Optional[int]
+        if cancel_at_period_end is None:
+            cancel_flag = None
+        else:
+            cancel_flag = 1 if cancel_at_period_end else 0
+        interval = (billing_interval or "").strip().lower() or None
         with self._conn() as con:
             self._ensure_subscription_authority_columns(con)
             if existing is None:
@@ -663,8 +763,9 @@ class EconomicsStore:
                     INSERT INTO subscriptions (
                       id, org_id, user_id, plan_code, status, started_at,
                       renewed_at, expires_at, canceled_at, payment_id, created_at,
-                      stripe_subscription_id, stripe_customer_id, current_period_end
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      stripe_subscription_id, stripe_customer_id, current_period_end,
+                      cancel_at_period_end, billing_interval
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         sub_id,
@@ -681,6 +782,8 @@ class EconomicsStore:
                         stripe_subscription_id,
                         stripe_customer_id,
                         current_period_end,
+                        cancel_flag,
+                        interval,
                     ),
                 )
                 return sub_id
@@ -697,7 +800,9 @@ class EconomicsStore:
                   canceled_at = ?,
                   payment_id = COALESCE(?, payment_id),
                   stripe_subscription_id = COALESCE(?, stripe_subscription_id),
-                  stripe_customer_id = COALESCE(?, stripe_customer_id)
+                  stripe_customer_id = COALESCE(?, stripe_customer_id),
+                  cancel_at_period_end = COALESCE(?, cancel_at_period_end),
+                  billing_interval = COALESCE(?, billing_interval)
                 WHERE id = ?
                 """,
                 (
@@ -711,6 +816,8 @@ class EconomicsStore:
                     payment_id,
                     stripe_subscription_id,
                     stripe_customer_id,
+                    cancel_flag,
+                    interval,
                     sub_id,
                 ),
             )
@@ -1646,6 +1753,272 @@ class EconomicsStore:
                 (cid,),
             ).fetchone()
             return str(row[0]) if row else None
+
+    def get_stripe_customer_id_for_org(self, org_id: str) -> Optional[str]:
+        """Server-record customer id for an org. Never accepts a caller-supplied identity."""
+        oid = (org_id or "").strip()
+        if not oid:
+            return None
+        row = self.get_subscription_by_org(oid)
+        if row:
+            cid = str(row.get("stripe_customer_id") or "").strip()
+            if cid:
+                return cid
+        with self._conn() as con:
+            mapped = con.execute(
+                """
+                SELECT stripe_customer_id FROM stripe_customer_org
+                WHERE org_id = ?
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """,
+                (oid,),
+            ).fetchone()
+            if mapped and mapped[0]:
+                return str(mapped[0]).strip() or None
+        return None
+
+    def get_pending_checkout_attempt_for_org(self, org_id: str) -> Optional[Dict[str, Any]]:
+        oid = (org_id or "").strip()
+        if not oid:
+            return None
+        self.init_schema()
+        with self._conn() as con:
+            self._ensure_checkout_attempt_schema(con)
+            row = con.execute(
+                f"""
+                SELECT * FROM billing_checkout_attempts
+                WHERE org_id = ?
+                  AND status IN ({",".join("?" for _ in _CHECKOUT_PENDING_STATUSES)})
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (oid, *_CHECKOUT_PENDING_STATUSES),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def get_open_checkout_attempt(
+        self, *, org_id: str, agreement_id: str, cadence: str
+    ) -> Optional[Dict[str, Any]]:
+        pending = self.get_pending_checkout_attempt_for_org(org_id)
+        if not pending:
+            return None
+        aid = (agreement_id or "").strip()
+        cad = "annual" if str(cadence or "").strip().lower() == "annual" else "monthly"
+        if pending.get("agreement_id") == aid and pending.get("cadence") == cad:
+            return pending
+        return None
+
+    def persist_checkout_attempt_request(
+        self, attempt_id: str, request: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Persist the canonical Stripe request once. Later retries must reuse it."""
+        aid = (attempt_id or "").strip()
+        if not aid:
+            raise ValueError("attempt_id required")
+        payload = json.dumps(request, sort_keys=True, separators=(",", ":"))
+        self.init_schema()
+        con = self._conn()
+        try:
+            con.execute("BEGIN IMMEDIATE")
+            self._ensure_checkout_attempt_schema(con)
+            row = con.execute(
+                "SELECT provider_request_json FROM billing_checkout_attempts WHERE id = ?",
+                (aid,),
+            ).fetchone()
+            if row and row[0]:
+                con.commit()
+                return json.loads(str(row[0]))
+            now = _utc_now()
+            con.execute(
+                """
+                UPDATE billing_checkout_attempts
+                SET provider_request_json = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (payload, now, aid),
+            )
+            con.commit()
+            return json.loads(payload)
+        except Exception:
+            con.rollback()
+            raise
+        finally:
+            con.close()
+
+    def claim_or_reuse_checkout_attempt(
+        self,
+        *,
+        org_id: str,
+        user_id: Optional[str],
+        agreement_id: str,
+        cadence: str,
+        return_to: Optional[str] = None,
+        price_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Claim the single pending checkout attempt for this org."""
+        oid = (org_id or "").strip()
+        aid = (agreement_id or "").strip()
+        cad = "annual" if str(cadence or "").strip().lower() == "annual" else "monthly"
+        if not oid or not aid:
+            raise ValueError("org_id and agreement_id required")
+        self.init_schema()
+        dest = (return_to or "").strip() or None
+        price = (price_id or "").strip() or None
+        for _ in range(5):
+            con = self._conn()
+            try:
+                con.execute("BEGIN IMMEDIATE")
+                self._ensure_checkout_attempt_schema(con)
+                now = _utc_now()
+                row = con.execute(
+                    f"""
+                    SELECT * FROM billing_checkout_attempts
+                    WHERE org_id = ?
+                      AND status IN ({",".join("?" for _ in _CHECKOUT_PENDING_STATUSES)})
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (oid, *_CHECKOUT_PENDING_STATUSES),
+                ).fetchone()
+                if row:
+                    con.commit()
+                    return dict(row)
+                attempt_id = str(uuid.uuid4())
+                idem = f"claw:checkout:{oid}:{cad}:{aid}:{attempt_id}"[:255]
+                expires = (
+                    datetime.now(timezone.utc) + timedelta(hours=23)
+                ).isoformat().replace("+00:00", "Z")
+                try:
+                    con.execute(
+                        """
+                        INSERT INTO billing_checkout_attempts (
+                          id, org_id, user_id, agreement_id, cadence, return_to, price_id,
+                          idempotency_key, stripe_session_id, checkout_url, status,
+                          expires_at, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 'creating', ?, ?, ?)
+                        """,
+                        (
+                            attempt_id,
+                            oid,
+                            (user_id or "").strip() or None,
+                            aid,
+                            cad,
+                            dest,
+                            price,
+                            idem,
+                            expires,
+                            now,
+                            now,
+                        ),
+                    )
+                except sqlite3.IntegrityError:
+                    con.rollback()
+                    continue
+                con.commit()
+                return {
+                    "id": attempt_id,
+                    "org_id": oid,
+                    "user_id": (user_id or "").strip() or None,
+                    "agreement_id": aid,
+                    "cadence": cad,
+                    "return_to": dest,
+                    "price_id": price,
+                    "idempotency_key": idem,
+                    "stripe_session_id": None,
+                    "checkout_url": None,
+                    "status": "creating",
+                    "expires_at": expires,
+                    "created_at": now,
+                    "updated_at": now,
+                    "provider_request_json": None,
+                }
+            except Exception:
+                con.rollback()
+                raise
+            finally:
+                con.close()
+        existing = self.get_pending_checkout_attempt_for_org(oid)
+        if existing:
+            return existing
+        raise RuntimeError("checkout_attempt_claim_failed")
+
+    def record_checkout_attempt_session(
+        self,
+        attempt_id: str,
+        *,
+        stripe_session_id: str,
+        checkout_url: str,
+        expires_at: Optional[str] = None,
+        status: str = "open",
+    ) -> None:
+        aid = (attempt_id or "").strip()
+        sid = (stripe_session_id or "").strip()
+        url = (checkout_url or "").strip()
+        if not aid or not sid or not url:
+            return
+        now = _utc_now()
+        st = (status or "open").strip() or "open"
+        with self._conn() as con:
+            self._ensure_checkout_attempt_schema(con)
+            con.execute(
+                """
+                UPDATE billing_checkout_attempts SET
+                  stripe_session_id = ?,
+                  checkout_url = ?,
+                  status = ?,
+                  expires_at = COALESCE(?, expires_at),
+                  updated_at = ?
+                WHERE id = ?
+                """,
+                (sid, url, st, (expires_at or "").strip() or None, now, aid),
+            )
+
+    def mark_checkout_attempt_status(self, attempt_id: str, status: str) -> None:
+        aid = (attempt_id or "").strip()
+        st = (status or "").strip()
+        if not aid or not st:
+            return
+        now = _utc_now()
+        with self._conn() as con:
+            self._ensure_checkout_attempt_schema(con)
+            con.execute(
+                """
+                UPDATE billing_checkout_attempts
+                SET status = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (st, now, aid),
+            )
+
+    def mark_checkout_attempt_complete_by_session(
+        self, *, org_id: str, stripe_session_id: str
+    ) -> None:
+        oid = (org_id or "").strip()
+        sid = (stripe_session_id or "").strip()
+        if not sid:
+            return
+        now = _utc_now()
+        with self._conn() as con:
+            self._ensure_checkout_attempt_schema(con)
+            if oid:
+                con.execute(
+                    """
+                    UPDATE billing_checkout_attempts
+                    SET status = 'complete', updated_at = ?
+                    WHERE stripe_session_id = ? AND org_id = ?
+                    """,
+                    (now, sid, oid),
+                )
+            else:
+                con.execute(
+                    """
+                    UPDATE billing_checkout_attempts
+                    SET status = 'complete', updated_at = ?
+                    WHERE stripe_session_id = ?
+                    """,
+                    (now, sid),
+                )
 
     def upsert_stripe_subscription_org(
         self,

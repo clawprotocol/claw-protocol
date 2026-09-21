@@ -33,6 +33,7 @@ type OverflowNavItem = {
 export function AppShell(props: {
   children: ReactNode;
   title: string;
+  titleTestId?: string;
   /** Main intro line; may include a short second line for workspace guidance. */
   subtitle?: ReactNode;
   /** Paid Pro agreement → VS01 bridge: fewer distractions, no duplicate Home. */
@@ -49,7 +50,7 @@ export function AppShell(props: {
     useOperatorConsoleCapability();
   const showAdminConsoleNav =
     operatorCapabilityReady && operatorCapability.authorized;
-  const { children, title, subtitle, navMode = "default", compactFooter = false } = props;
+  const { children, title, titleTestId, subtitle, navMode = "default", compactFooter = false } = props;
   const showLegacyQuickPath = access.tier === "free";
   const esignBridgeNav = navMode === "esign_bridge_focused";
   const minimalNav = navMode === "minimal";
@@ -253,7 +254,7 @@ export function AppShell(props: {
 
         <header className="vs01-header">
           <div className="vs01-header-panel">
-            <h1 className="vs01-header-title">{title}</h1>
+            <h1 className="vs01-header-title" data-testid={titleTestId}>{title}</h1>
             {subtitle ? <div className="vs01-header-subtitle">{subtitle}</div> : null}
           </div>
         </header>

@@ -19,6 +19,7 @@ const IRONCLAD_PARTIES = [
   "Silver Mesa Analytics LP",
   "VertexGrid Technologies LLC",
 ] as const;
+import { alignIntakeSignerMetadataToLegalEntities } from "./intakeSignerMetadataAuthority";
 import {
   extractIntakeContacts,
   substitutePaidProIntakeContactPlaceholders,
@@ -45,6 +46,23 @@ describe("paidProIntakeContactSubstitution", () => {
   beforeEach(() => {
     resetPaidProPipelineTestIsolation();
     clearPaidProSourceOfTruth();
+  });
+
+  it("keeps a mid-sentence person email bound to that person, not the first company", () => {
+    const contacts = extractIntakeContacts(
+      "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Scope is AI workflow implementation. Fixed fee $48,000. Governing law Delaware. Alex Rivera, alex.rivera@advisor.test, is involved.",
+    );
+    expect(contacts).toHaveLength(1);
+    expect(contacts[0]?.email).toBe("alex.rivera@advisor.test");
+    expect(contacts[0]?.name).toBe("Alex Rivera");
+    expect(contacts[0]?.name).not.toMatch(/Delaware/);
+    expect(contacts[0]?.name).not.toMatch(/Harbor Peak Analytics LLC/);
+    const aligned = alignIntakeSignerMetadataToLegalEntities(
+      "Draft a consulting agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Alex Rivera, alex.rivera@advisor.test, is involved.",
+      ["Harbor Peak Analytics LLC", "Ironvale Manufacturing Inc."],
+    );
+    expect(aligned[0]?.signerEmail).toBeFalsy();
+    expect(aligned[1]?.signerEmail).toBeFalsy();
   });
 
   it("extracts five ordered contacts from Ironclad intake bullets", () => {

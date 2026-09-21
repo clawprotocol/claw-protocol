@@ -27,8 +27,10 @@ export function ConversionPricingTriad(props: {
   onPro: () => void;
   onEnterprise: () => void;
   bridge?: boolean;
+  proCtaLabel?: string;
+  proCtaDisabled?: boolean;
 }) {
-  const { cadence, onFree, onStarter: _onStarter, onPro, onEnterprise, bridge } = props;
+  const { cadence, onFree, onStarter: _onStarter, onPro, onEnterprise, bridge, proCtaLabel, proCtaDisabled } = props;
   void _onStarter;
   const pro = tierById("pro");
   const enterprise = tierById("enterprise");
@@ -104,8 +106,10 @@ export function ConversionPricingTriad(props: {
           type="button"
           className="vs01-btn vs01-btn--primary mt-6 w-full min-h-[3rem] px-6 text-base font-semibold shadow-[0_4px_24px_rgba(16,185,129,0.25)]"
           onClick={choosePro}
+          disabled={Boolean(proCtaDisabled)}
+          data-testid="billing-pro-cta"
         >
-          Upgrade to Pro
+          {proCtaLabel || "Upgrade to Pro"}
         </button>
       </section>
 

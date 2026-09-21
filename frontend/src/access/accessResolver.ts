@@ -66,13 +66,13 @@ export type ResolvedAccess = {
  * a Supabase JWT. After-pay e-sign stays on the existing Pro features via
  * checkoutCreatedLawdogEsignAllowed, not this create-path tier.
  */
-export function resolveAccess(): ResolvedAccess {
+export function resolveAccess(options?: { allowServerSubscription?: boolean }): ResolvedAccess {
   const sourcesTried: EntitlementSource[] = [
     { id: "future_backend", tier: null },
     { id: "future_wallet", tier: null },
   ];
 
-  if (featureFlags.serverBilling) {
+  if (featureFlags.serverBilling && options?.allowServerSubscription !== false) {
     const subTier = subscriptionTierForAccess();
     sourcesTried.unshift({ id: "server_subscription", tier: subTier });
     if (subTier) {

@@ -12,7 +12,7 @@ import { Document, Page, pdfjs } from "react-pdf";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
-import { fetchDocumentContent } from "./vs01Api";
+import { fetchDocumentContent, fetchRecipientDocumentContent } from "./vs01Api";
 import { setVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
 import { extractPdfPageLayoutsFromBlob } from "./vs01PdfPageLayout";
 import type { Vs01PageTextLayout } from "./vs01PageTextLayout";
@@ -22,6 +22,8 @@ import type {
   Vs01SenderSignatureRef,
 } from "./types";
 import {
+  ESIGN_CONSENT_CHECKBOX_LABEL,
+  ESIGN_CONSENT_INTENT_STATEMENT,
   ESIGN_INTENT_FINISH_SIGNING_ACTION,
   NOT_LEGAL_ADVICE,
   PRODUCT_NOT_LAW_FIRM,
@@ -68,6 +70,7 @@ import {
   logVs01CanonicalPacketSeedUse,
   logVs01RecipientCanonicalSource,
   wasVs01CanonicalPacketFromServer,
+  type Vs01CanonicalPacketPortableV1,
   type Vs01CanonicalPacketPortableRole,
 } from "./vs01CanonicalPacketSeed";
 
@@ -86,7 +89,8 @@ export type RecipientSigningViewProps = {
   senderSignatureRef: Vs01SenderSignatureRef | null;
   onRecipientFieldsChange: Dispatch<SetStateAction<Vs01RecipientPlacedField[]>>;
   onError: (message: string | null) => void;
-  onFinishSigning: () => void;
+  onFinishSigning: () => void | Promise<void>;
+  signingSubmitting?: boolean;
   /** When set, layout data in the link could not be read — do not show a false “no fields” empty state. */
   manifestDecodeError?: string | null;
   /** True when the URL included a signing-layout manifest query param (`vs01_rmanifest`). */
@@ -97,7 +101,15 @@ export type RecipientSigningViewProps = {
   authoritativeInitialsEnabled?: boolean | null;
   /** Prepare-time packet revision from signing URL (`{hash}_{0|1}_{count}`). */
   packetRevision?: string | null;
+  /** Server-attested portable from token + packet validation — not local/URL paper. */
+  serverPortablePacket?: Vs01CanonicalPacketPortableV1 | null;
+  /** Sign-mode token for token-bound PDF fetch on uploaded-final-PDF envelopes. */
+  recipientAccessToken?: string | null;
 };
+
+function isUploadedFinalPdfPacket(packet: unknown): boolean {
+  return Boolean(packet && typeof packet === "object" && (packet as { kind?: unknown }).kind === "uploaded_final_pdf");
+}
 
 function formatIsoDateDisplay(iso: string): string {
   const t = iso.trim();
@@ -183,11 +195,14 @@ export function RecipientSigningView({
   onRecipientFieldsChange,
   onError,
   onFinishSigning,
+  signingSubmitting = false,
   manifestDecodeError = null,
   manifestParamPresent = false,
   serverHydrationPending = false,
   authoritativeInitialsEnabled = null,
   packetRevision = null,
+  serverPortablePacket = null,
+  recipientAccessToken = null,
 }: RecipientSigningViewProps) {
   const cpById = useMemo(() => {
     const m = new Map<string, Vs01Counterparty>();
@@ -201,7 +216,12 @@ export function RecipientSigningView({
     const aid = (recipientAgreementId ?? "").trim();
     if (!aid) return null;
     const did = documentId?.trim() ?? "";
-    const portable = did ? loadVs01CanonicalPacketPortable(did) : null;
+    const portable =
+      serverPortablePacket && serverPortablePacket.seed.documentId.trim() === did
+        ? serverPortablePacket
+        : did
+          ? loadVs01CanonicalPacketPortable(did)
+          : null;
     if (portable && portable.roles.length >= 2) {
       return portable.roles.map((r: Vs01CanonicalPacketPortableRole) => ({
         roleId: r.roleId,
@@ -276,6 +296,7 @@ export function RecipientSigningView({
     cpById,
     lockedCp,
     lockedSignerRoleId,
+    serverPortablePacket,
   ]);
 
   const [portableHydrationTick, setPortableHydrationTick] = useState(0);
@@ -287,10 +308,12 @@ export function RecipientSigningView({
   }, [serverHydrationPending]);
 
   const portablePacket = useMemo(() => {
+    if (isUploadedFinalPdfPacket(serverPortablePacket)) return serverPortablePacket;
+    if ((serverPortablePacket?.seed.corpusPlain || "").trim()) return serverPortablePacket;
     const did = documentId?.trim() ?? "";
     return did ? loadVs01CanonicalPacketPortable(did) : null;
     // Re-read local portable after server authority bootstrap completes.
-  }, [documentId, portableHydrationTick]);
+  }, [documentId, portableHydrationTick, serverPortablePacket]);
 
   const initialsEnabledPending =
     serverHydrationPending || authoritativeInitialsEnabled === null;
@@ -329,6 +352,7 @@ export function RecipientSigningView({
         lockedSignerRoleId,
         canonicalModel: canonicalPacket?.model ?? null,
         packetRevision,
+        portablePacket,
       }),
     [
       documentId,
@@ -339,6 +363,7 @@ export function RecipientSigningView({
       lockedSignerRoleId,
       canonicalPacket?.model,
       packetRevision,
+      portablePacket,
     ],
   );
 
@@ -468,6 +493,43 @@ export function RecipientSigningView({
         return;
       }
 
+      const recipientAid = (recipientAgreementId ?? "").trim();
+      const portableCorpus = (portablePacket?.seed.corpusPlain ?? "").trim();
+      const uploadedFinalPdf = isUploadedFinalPdfPacket(portablePacket);
+      if (uploadedFinalPdf && documentId?.trim()) {
+        const token = (recipientAccessToken ?? "").trim();
+        if (!token) {
+          setPreviewLoading(false);
+          return;
+        }
+        setPreviewLoading(true);
+        setPreviewError(null);
+        try {
+          const blob = await fetchRecipientDocumentContent(documentId.trim(), token);
+          if (cancelled) return;
+          objectUrl = URL.createObjectURL(blob);
+          setPdfUrl(objectUrl);
+          setPdfDocReady(true);
+        } catch (e) {
+          if (!cancelled) {
+            setPdfUrl(null);
+            setPreviewError(e instanceof Error ? e.message : String(e));
+          }
+        } finally {
+          if (!cancelled) setPreviewLoading(false);
+        }
+        return;
+      }
+      if (recipientAid) {
+        setPdfUrl(null);
+        setPageLayouts(null);
+        setPreviewError(null);
+        setPdfDocReady(Boolean(portableCorpus));
+        setNumPages(portableCorpus ? 1 : 0);
+        setPreviewLoading(false);
+        return;
+      }
+
       setPreviewLoading(true);
       setPreviewError(null);
       if (import.meta.env.MODE !== "test") {
@@ -512,7 +574,7 @@ export function RecipientSigningView({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [documentId, useCanonicalDocument, canonicalPacket, recipientAgreementId, serverHydrationPending]);
+  }, [documentId, useCanonicalDocument, canonicalPacket, recipientAgreementId, serverHydrationPending, portablePacket, recipientAccessToken]);
 
   useEffect(() => {
     const did = documentId?.trim() ?? "";
@@ -732,6 +794,8 @@ export function RecipientSigningView({
     ? "Your signing fields could not be loaded from this link. Ask the sender to resend the signing link, or try opening it in the same browser the sender used."
     : "This link does not include field placement data. Ask the sender to share an updated signing link after placing fields.";
 
+  const [consentAccepted, setConsentAccepted] = useState(false);
+
   const handleFinish = useCallback(() => {
     if (initialsEnabledPending) {
       onError("Your signing fields are still loading. Please wait a moment and try again.");
@@ -747,6 +811,11 @@ export function RecipientSigningView({
           ? "Your signing fields could not be loaded. Ask the sender to resend your signing link."
           : "No fields are assigned to you. Ask the sender for an updated signing link."
       );
+      return;
+    }
+    if (signingSubmitting) return;
+    if (!consentAccepted) {
+      onError("Confirm the electronic-signature consent before selecting Agree and sign.");
       return;
     }
     if (!allComplete) {
@@ -773,8 +842,8 @@ export function RecipientSigningView({
       return;
     }
     onError(null);
-    onFinishSigning();
-  }, [allComplete, editableMyFields, hydrationMiss, initialsEnabled, initialsEnabledPending, lockedSignerRoleId, manifestDecodeError, myFields.length, onError, onFinishSigning]);
+    void onFinishSigning();
+  }, [allComplete, consentAccepted, editableMyFields, hydrationMiss, initialsEnabled, initialsEnabledPending, lockedSignerRoleId, manifestDecodeError, myFields.length, onError, onFinishSigning, signingSubmitting]);
 
   const updateFieldValue = useCallback(
     (id: string, value: string) => updateField(id, { value }),
@@ -868,6 +937,63 @@ export function RecipientSigningView({
           {docLoading ? (
             <div className="vs01-sign-preview-fallback" role="status">
               {serverHydrationPending ? "Loading signing fields…" : "Loading document…"}
+            </div>
+          ) : isUploadedFinalPdfPacket(portablePacket) && pdfUrl ? (
+            <div className="vs01-sign-doc-pages-wrap vs01-sign-doc-surface w-full min-w-0 overflow-x-clip">
+              <object
+                data={pdfUrl}
+                type="application/pdf"
+                className="h-[70vh] w-full min-w-0"
+                data-testid="quick-pdf-locked-document"
+                aria-label="Locked uploaded PDF"
+              />
+            </div>
+          ) : !useCanonicalDocument &&
+            !isUploadedFinalPdfPacket(portablePacket) &&
+            (portablePacket?.seed.corpusPlain || "").trim() ? (
+            <div
+              className="vs01-sign-doc-pages-wrap vs01-sign-doc-surface w-full min-w-0 overflow-x-clip"
+              data-testid="vs01-recipient-canonical-render"
+            >
+              <pre className="w-full min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed text-stone-800">
+                {portablePacket?.seed.corpusPlain}
+              </pre>
+              <div className="mt-6 space-y-3" data-testid="esign-field-list">
+                {documentFieldsForView.map((field) => {
+                  const mine = recipientFieldBelongsToLockedSigner(
+                    field,
+                    lockedCp,
+                    lockedSignerRoleId,
+                  );
+                  const editable = mine && isRecipientSigningEditableType(field.type);
+                  const value = typeof field.value === "string" ? field.value : "";
+                  return (
+                    <div
+                      key={field.id}
+                      data-testid={editable ? "esign-assigned-field" : "esign-other-signer-field"}
+                      className="rounded-md border border-stone-200 p-3"
+                    >
+                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-stone-500">
+                        {labelForFieldType(field.type)}
+                        {mine ? "" : " (other signer)"}
+                      </p>
+                      {editable ? (
+                        <input
+                          type="text"
+                          className="vs01-sign-field-inline-input min-h-11 w-full"
+                          value={value}
+                          placeholder={field.type === "signature" ? "Type signature" : labelForFieldType(field.type)}
+                          autoComplete="off"
+                          aria-label={labelForFieldType(field.type)}
+                          onChange={(ev) => updateFieldValue(field.id, ev.target.value)}
+                        />
+                      ) : (
+                        <p className="min-h-11 text-sm text-stone-600">{value.trim() || "—"}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ) : useCanonicalDocument && canonicalPacket ? (
             <div
@@ -1128,6 +1254,41 @@ export function RecipientSigningView({
           )}
         </div>
 
+        {isUploadedFinalPdfPacket(portablePacket) && !docLoading ? (
+          <div className="mt-6 space-y-3" data-testid="esign-field-list">
+            {documentFieldsForView.map((field) => {
+              const mine = recipientFieldBelongsToLockedSigner(field, lockedCp, lockedSignerRoleId);
+              const editable = mine && isRecipientSigningEditableType(field.type);
+              const value = typeof field.value === "string" ? field.value : "";
+              return (
+                <div
+                  key={`quick-pdf-${field.id}`}
+                  data-testid={editable ? "esign-assigned-field" : "esign-other-signer-field"}
+                  className="rounded-md border border-stone-200 p-3"
+                >
+                  <p className="mb-1 text-xs font-medium uppercase tracking-wide text-stone-500">
+                    {labelForFieldType(field.type)}
+                    {mine ? "" : " (other signer)"}
+                  </p>
+                  {editable ? (
+                    <input
+                      type="text"
+                      className="vs01-sign-field-inline-input min-h-11 w-full"
+                      value={value}
+                      placeholder={field.type === "signature" ? "Type signature" : labelForFieldType(field.type)}
+                      autoComplete="off"
+                      aria-label={labelForFieldType(field.type)}
+                      onChange={(ev) => updateFieldValue(field.id, ev.target.value)}
+                    />
+                  ) : (
+                    <p className="min-h-11 text-sm text-stone-600">{value.trim() || "—"}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+
         {showEmptyFieldsHint && placementSurface && !docLoading ? (
           <p className="vs01-recipient-signing-empty" role="status">
             {emptyFieldsMessage}
@@ -1144,13 +1305,25 @@ export function RecipientSigningView({
       </div>
 
       <div className="vs01-recipient-signing-footer-actions">
+        <label className="vs01-recipient-signing-consent" data-testid="esign-recipient-consent-label">
+          <input
+            type="checkbox"
+            data-testid="esign-recipient-consent"
+            checked={consentAccepted}
+            disabled={signingSubmitting}
+            onChange={(ev) => setConsentAccepted(ev.target.checked)}
+          />
+          <span>{ESIGN_CONSENT_CHECKBOX_LABEL}</span>
+        </label>
+        <p className="vs01-recipient-signing-consent-statement">{ESIGN_CONSENT_INTENT_STATEMENT}</p>
         <button
           type="button"
-          className="vs01-btn vs01-btn--primary"
-          disabled={!allComplete}
+          className="vs01-btn vs01-btn--primary min-h-11"
+          data-testid="esign-finish-signing"
+          disabled={!allComplete || !consentAccepted || signingSubmitting}
           onClick={handleFinish}
         >
-          Finish signing
+          {signingSubmitting ? "Signing…" : "Agree and sign"}
         </button>
         {editableMyFields.length > 0 && !allComplete ? (
           <p className="vs01-recipient-signing-progress">

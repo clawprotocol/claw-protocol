@@ -5,6 +5,7 @@ import {
   markWorkspaceProEntitlementResolvedForTests,
 } from "../../agreement/agreementProFunnelGate";
 import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
+import { setOrgId } from "../../launch/orgContext";
 import {
   clearCurrentSessionProEntitlementMarkers,
   markCurrentSessionFreeStarterIntent,
@@ -106,6 +107,7 @@ describe("TEST496 — paid acceptance hard invariant prevents split-brain starte
 
     markPaidProPipelineValidationPassed({ text: ACCEPTED_PAID_BODY, source: "server_full_draft" });
     markPaidProPipelineAcceptedCorpusHash(ACCEPTED_PAID_BODY);
+    setOrgId("user-test-496-paid");
     markWorkspaceProEntitlementResolvedForTests(true);
 
     const shellInput = { workspaceProEntitled: true };
@@ -242,5 +244,23 @@ describe("TEST496 — paid acceptance hard invariant prevents split-brain starte
         canonicalFirstReviewActive: false,
       }),
     ).toBe(true);
+  });
+
+  it("counts verified accepted review paper as first-review corpus without pipeline re-acceptance", () => {
+    clearPaidProSourceOfTruth();
+    const paper = `${ACCEPTED_PAID_BODY}\n${"Verified accepted snapshot. ".repeat(40)}`;
+    expect(paper.length).toBeGreaterThan(PAID_PRO_AUTHORITY_MIN_LEN);
+    const corpusLen = resolveCanonicalPaidCreateFlowReviewCorpusLen({
+      draft: test496Draft(),
+      agreementDocumentText: "",
+      verifiedReviewPaper: paper,
+    });
+    expect(corpusLen).toBe(paper.trim().length);
+    expect(
+      resolveCanonicalPaidCreateFlowReviewCorpusLen({
+        draft: test496Draft(),
+        agreementDocumentText: paper,
+      }),
+    ).not.toBe(paper.trim().length);
   });
 });

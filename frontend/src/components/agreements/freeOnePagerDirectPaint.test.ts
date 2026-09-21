@@ -21,6 +21,7 @@ import {
   isHollowPartyName,
   resolveFreeStarterReviewBody,
   shouldRedirectFreeToProForValidation,
+  unwrapFreeDocumentText,
 } from "./freeStarterReviewBodyResolver";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
@@ -116,6 +117,17 @@ describe("free one-pager validation", () => {
 
   it("isFreeOnePagerValid returns false for non-ok validation", () => {
     expect(isFreeOnePagerValid(MAYA_DIEGO_VALID_FREE_DOC, "missing_parties")).toBe(false);
+  });
+});
+
+describe("unwrapFreeDocumentText", () => {
+  it("extracts document_text from a stub JSON blob and ignores raw braces", () => {
+    const paper = "PRECISION MEDICINE DATA PLATFORM AGREEMENT\n\nThe parties are Lumen Bioinformatics Inc.";
+    expect(
+      unwrapFreeDocumentText(JSON.stringify({ title: "x", document_text: paper })),
+    ).toBe(paper);
+    expect(unwrapFreeDocumentText("{not json")).toBe("");
+    expect(unwrapFreeDocumentText(paper)).toBe(paper);
   });
 });
 

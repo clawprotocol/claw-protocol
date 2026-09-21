@@ -12,6 +12,7 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
     const block = intake.slice(handleIdx, handleEnd);
     expect(block).toContain("if (acceptedPaidProAuthorityActive || paidProAuthoritative)");
     expect(block).toContain('enterFinalReviewRecipientSetup("review_only")');
+    expect(block).toContain('assertGuidedTransitionReady("review_only")');
     expect(block).toContain('void completeGuidedPaidProReviewFirstHandoff("simple_pro_send_for_review")');
     expect(block).toContain(REVIEW_FIRST_SIMPLE_PRO_SOURCE);
     expect(block).toContain('selectedTrack: "review"');

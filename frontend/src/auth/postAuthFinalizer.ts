@@ -10,7 +10,7 @@ import {
   clearAuthContinuationContext,
   readAuthContinuationContext,
 } from "./authContinuationContext";
-import { resolvePostAuthDestination } from "./safeRedirectResolver";
+import { resolvePostAuthDestination, resolveServerAuthDestination } from "./safeRedirectResolver";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import {
   clearContinuationId,
@@ -18,7 +18,7 @@ import {
   readContinuationId,
 } from "./authContinuationApi";
 import { getAuthSession } from "./supabaseAuthService";
-import { setOrgId } from "../launch/orgContext";
+import { getOrgId, setOrgId } from "../launch/orgContext";
 import {
   readPaidCheckoutOrgId,
   resolveEntitlementRepairOrgCandidates,
@@ -29,22 +29,41 @@ import { readCreateReviewAgreementResumeId } from "../components/agreements/agre
 
 export type PostAuthFinalizeResult = {
   destinationPath: string;
+  orgId: string;
   migratedAgreementCount: number;
   migratedAgreementIds: string[];
   usedContinuation: boolean;
   usedFallback: boolean;
 };
 
+function agreementIdFromDestinationPath(dest: string | null | undefined): string | null {
+  const raw = String(dest || "").trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw, "http://lawdog.local");
+    const fromQuery = (url.searchParams.get("agreementId") || "").trim();
+    if (fromQuery) return fromQuery;
+    const fromPath = url.pathname.match(/\/app\/(?:done|create|send|checkout|ready)\/([^/]+)$/);
+    return fromPath ? decodeURIComponent(fromPath[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 function applyOwnershipMigrationFromServer(args: {
   migratedAgreementCount: number;
   migratedAgreementIds?: string[];
   continuationAgreementId?: string | null;
+  destinationPath?: string | null;
 }): void {
   const ids = (args.migratedAgreementIds ?? []).map((id) => id.trim()).filter(Boolean);
-  if (args.migratedAgreementCount <= 0 && ids.length === 0) return;
+  if (args.migratedAgreementCount <= 0 && ids.length === 0 && !args.continuationAgreementId && !args.destinationPath) {
+    return;
+  }
   commitPostAuthOwnershipMigration({
     migratedAgreementIds: ids,
-    continuationAgreementId: args.continuationAgreementId,
+    continuationAgreementId:
+      (args.continuationAgreementId || "").trim() || agreementIdFromDestinationPath(args.destinationPath),
     priorClientAgreementId: readCreateReviewAgreementResumeId(),
   });
 }
@@ -84,31 +103,39 @@ export async function finalizeAuthenticatedSession(args: {
         entitlementRepairCandidates: resolveEntitlementRepairOrgCandidates(),
       });
       setOrgId(server.org_id);
-      clearAnonymousSession();
-      await refreshSubscriptionEntitlement();
-      clearAuthContinuationContext();
-      clearContinuationId();
-      logProductEvent("authentication_completed", {
-        claim_method: args.claimMethod,
-        migrated_agreement_count: server.migrated_agreement_count,
-        continuation_restored: true,
-        continuation_fallback: false,
-        server_authoritative: true,
-      });
-      if (server.migrated_agreement_count > 0) {
-        logProductEvent("anonymous_draft_claim_completed", {
-          claim_method: args.claimMethod,
-          migrated_agreement_count: server.migrated_agreement_count,
-        });
-      }
-      logProductEvent("continuation_restored", { surface: "server_finalize" });
+      const continuationAgreementId =
+        readAuthContinuationContext()?.agreementId || agreementIdFromDestinationPath(server.destination_path);
       applyOwnershipMigrationFromServer({
         migratedAgreementCount: server.migrated_agreement_count,
         migratedAgreementIds: server.migrated_agreement_ids,
-        continuationAgreementId: readAuthContinuationContext()?.agreementId,
-      });
-      return {
+        continuationAgreementId,
         destinationPath: server.destination_path,
+      });
+      try {
+        clearAnonymousSession();
+        await refreshSubscriptionEntitlement();
+        clearAuthContinuationContext();
+        clearContinuationId();
+        logProductEvent("authentication_completed", {
+          claim_method: args.claimMethod,
+          migrated_agreement_count: server.migrated_agreement_count,
+          continuation_restored: true,
+          continuation_fallback: false,
+          server_authoritative: true,
+        });
+        if (server.migrated_agreement_count > 0) {
+          logProductEvent("anonymous_draft_claim_completed", {
+            claim_method: args.claimMethod,
+            migrated_agreement_count: server.migrated_agreement_count,
+          });
+        }
+        logProductEvent("continuation_restored", { surface: "server_finalize" });
+      } catch {
+        /* Secondary restore work must not undo a successful server finalize. */
+      }
+      return {
+        destinationPath: resolveServerAuthDestination(server.destination_path, "/app"),
+        orgId: String(server.org_id || "").trim(),
         migratedAgreementCount: server.migrated_agreement_count,
         migratedAgreementIds: server.migrated_agreement_ids ?? [],
         usedContinuation: true,
@@ -116,10 +143,10 @@ export async function finalizeAuthenticatedSession(args: {
       };
     } catch (e) {
       logAuthDiagnostic("auth_finalize_failed", {
-        reason: e instanceof Error ? e.message : "unknown",
+        reason: "finalize_failed",
       });
       logProductEvent("authentication_failed", {
-        reason: e instanceof Error ? e.message : "finalize_failed",
+        reason: "finalize_failed",
       });
       throw e;
     }
@@ -166,6 +193,7 @@ export async function finalizeAuthenticatedSession(args: {
 
   return {
     destinationPath,
+    orgId: String(bind.org_id || getOrgId()).trim(),
     migratedAgreementCount: bind.migrated_agreement_count,
     migratedAgreementIds: bind.migrated_agreement_ids ?? [],
     usedContinuation,

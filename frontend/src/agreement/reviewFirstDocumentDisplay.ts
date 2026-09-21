@@ -6,6 +6,8 @@ import {
   repairExecutionBlockEntityHeadingLines,
 } from "../components/agreements/paidProExecutionBlockEntityHeading";
 import { polishProAgreementDisplayLayer } from "../components/agreements/polishProAgreementDisplayLayer";
+import { repairProtectedLegalEntitySuffixes } from "../components/agreements/paidProProtectedEntityRepair";
+import { restoreDeclaredConsultantClientPaper } from "../components/agreements/paidProDeclaredConsultantClientPaper";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "../components/agreements/paidProSignerMetadataCommitPolicy";
 import { readConsumedPaidProSignerMetadataAuthority } from "../components/agreements/paidProSignerMetadataAuthority";
 import { repairDuplicatedEntityPunctuationInDisplay } from "./partyPlaceholderDisplay";
@@ -78,10 +80,13 @@ export function buildReviewFirstDocumentDisplayHtml(args: {
     args.draft &&
     isReviewTrackHydrationSurface(surface)
   ) {
-    corpus = applyReviewReadyMetadataBackfill(corpus, args.draft, {
-      surface,
-      selectedSource: args.selectedCorpusSource ?? "review_first_document_display",
-    });
+    corpus = restoreDeclaredConsultantClientPaper(
+      applyReviewReadyMetadataBackfill(corpus, args.draft, {
+        surface,
+        selectedSource: args.selectedCorpusSource ?? "review_first_document_display",
+      }),
+      inputCorpus,
+    );
   }
 
   const authorityParties = readConsumedPaidProSignerMetadataAuthority()?.parties;
@@ -144,7 +149,13 @@ export function buildReviewFirstDocumentDisplayHtml(args: {
 
     // Review track: render the same backfilled corpus as copy/export. Display polish can drop
     // integration clauses (§9 miscellaneous) that mention "between the parties".
-    const displayCorpus = reviewTrack ? corpusBeforePolish : polished;
+    let displayCorpus = reviewTrack ? corpusBeforePolish : polished;
+    if (surface === "owner_done" && passedCorpus.length >= 80) {
+      const names = (args.partyNames || [])
+        .map((n) => String(n ?? "").trim())
+        .filter((n) => n.length >= 2);
+      displayCorpus = repairProtectedLegalEntitySuffixes(displayCorpus, names, passedCorpus).text;
+    }
 
     const names = (args.partyNames || [])
       .map((n) => repairDuplicatedEntityPunctuationInDisplay(String(n ?? "").trim()))

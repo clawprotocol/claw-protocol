@@ -5,8 +5,13 @@ import { resolveAccess, type ResolvedAccess } from "./accessResolver";
 import type { AccessFeature, AccessTier, AiModelClass, GateContext, GateResult, UsageKind } from "./types";
 import { loadUsageTotals, peekUsageTotals, recordUsage as persistUsage } from "./usageMeter";
 import { featureFlags } from "../config/featureFlags";
-import { refreshSubscriptionEntitlement } from "./subscriptionEntitlementCache";
-import { getOrgId } from "../launch/orgContext";
+import {
+  clearCachedSubscriptionEntitlement,
+  refreshSubscriptionEntitlement,
+  subscribeToSubscriptionEntitlementChanges,
+} from "./subscriptionEntitlementCache";
+import { getOrgId, subscribeToOrgContextChanges } from "../launch/orgContext";
+import { useAuth } from "../auth/AuthProvider";
 
 export type AccessContextValue = {
   tier: AccessTier;
@@ -16,6 +21,7 @@ export type AccessContextValue = {
   entitlements: ReturnType<typeof tierEntitlements>;
   usage: ReturnType<typeof peekUsageTotals>;
   refreshUsage: () => void;
+  refreshAccess: () => Promise<void>;
   recordUsage: (kind: UsageKind, delta?: number) => void;
   check: (feature: AccessFeature, ctx?: GateContext) => GateResult;
   allowanceRows: ReturnType<typeof getUsageAllowanceSnapshot>;
@@ -38,18 +44,43 @@ function devToolsUnlocked(): boolean {
 
 export function AccessProvider({ children }: { children: React.ReactNode }) {
   const [tick, setTick] = useState(0);
+  const [orgId, setActiveOrgId] = useState(getOrgId);
+  const { enabled: authEnabled, loading: authLoading, user, session } = useAuth();
+  const sessionAllowsCachedSubscription = !authEnabled || (!authLoading && Boolean(user));
 
   const refreshUsage = useCallback(() => setTick((n) => n + 1), []);
 
   useEffect(() => {
-    if (!featureFlags.serverBilling) return;
-    void refreshSubscriptionEntitlement(getOrgId()).then(() => setTick((n) => n + 1));
+    const unsubscribeOrg = subscribeToOrgContextChanges(setActiveOrgId);
+    const unsubscribeEntitlement = subscribeToSubscriptionEntitlementChanges(() => setTick((n) => n + 1));
+    return () => {
+      unsubscribeOrg();
+      unsubscribeEntitlement();
+    };
   }, []);
+
+  const refreshAccess = useCallback(async () => {
+    if (!featureFlags.serverBilling) {
+      setTick((n) => n + 1);
+      return;
+    }
+    if (authEnabled && (authLoading || !user)) {
+      if (!authLoading) clearCachedSubscriptionEntitlement();
+      setTick((n) => n + 1);
+      return;
+    }
+    await refreshSubscriptionEntitlement(orgId);
+    setTick((n) => n + 1);
+  }, [authEnabled, authLoading, orgId, user]);
+
+  useEffect(() => {
+    void refreshAccess();
+  }, [refreshAccess, session?.access_token]);
 
   const resolved = useMemo((): ResolvedAccess => {
     void tick;
-    return resolveAccess();
-  }, [tick]);
+    return resolveAccess({ allowServerSubscription: sessionAllowsCachedSubscription });
+  }, [sessionAllowsCachedSubscription, tick]);
 
   const tier = resolved.tier;
 
@@ -90,13 +121,14 @@ export function AccessProvider({ children }: { children: React.ReactNode }) {
       entitlements: ent,
       usage,
       refreshUsage,
+      refreshAccess,
       recordUsage,
       check,
       allowanceRows: getUsageAllowanceSnapshot(tier, usage),
       showDevTierSwitcher: devToolsUnlocked(),
       setDevOverrideTier,
     };
-  }, [tier, resolved, usage, refreshUsage, recordUsage, check, setDevOverrideTier]);
+  }, [tier, resolved, usage, refreshUsage, refreshAccess, recordUsage, check, setDevOverrideTier]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -116,6 +148,7 @@ export function useAccess(): AccessContextValue {
     entitlements: tierEntitlements(tier),
     usage,
     refreshUsage: noop,
+    refreshAccess: async () => {},
     recordUsage: noop,
     check: (feature, ctx) => canUseFeature(tier, usage, feature, ctx),
     allowanceRows: getUsageAllowanceSnapshot(tier, usage),

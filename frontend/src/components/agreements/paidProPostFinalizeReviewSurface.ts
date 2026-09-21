@@ -72,6 +72,16 @@ export function isPaidProSigningReadyHydratedCorpus(plain: string): boolean {
   return true;
 }
 
+/** Reviewed/accepted apply paper may keep blank Name lines; do not rebuild it to hydrate signers. */
+export function shouldRollbackSignerFinalizeUnreadyCorpus(args: {
+  reusedAcceptedSnapshot: boolean;
+  signingReadyPlain: string;
+  hydratedRejected: boolean;
+}): boolean {
+  if (args.reusedAcceptedSnapshot) return false;
+  return !isPaidProSigningReadyHydratedCorpus(args.signingReadyPlain) || args.hydratedRejected;
+}
+
 /**
  * Pick the first signing-ready corpus after finalize hydrate + snapshot write.
  * Never prefer a non-empty but non-ready post-finalize plain over a ready hydrated body

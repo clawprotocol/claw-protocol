@@ -40,6 +40,8 @@ export type ProSemanticBlock = {
   archetype: ProSemanticArchetype;
   ownerSection: "purpose" | "fees" | "support" | "ownership" | "termination" | "misc" | "notices";
   requiredPhrases: string[];
+  /** Catalog extras the customer did not supply — never treated as agreed obligations. */
+  suggestedPhrases?: string[];
   forbiddenSections: string[];
   renderPriority: number;
   source: ProSemanticBlockSource;
@@ -82,6 +84,11 @@ function hasAll(blob: string, phrases: readonly string[]): boolean {
   return phrases.every((phrase) => normalizeText(phrase).split(/[^a-z0-9$%]+/).filter(Boolean).every((term) => normalized.includes(term)));
 }
 
+function phrasesPresentIn(blob: string, catalog: readonly string[]): string[] {
+  const normalized = normalizeText(blob);
+  return catalog.filter((phrase) => normalized.includes(normalizeText(phrase)));
+}
+
 function sourceFor(intakeText: string | null | undefined, draftText: string | null | undefined, phrases: readonly string[]): ProSemanticBlockSource {
   if (hasAll(intakeText ?? "", phrases)) return "intake";
   if (hasAll(draftText ?? "", phrases)) return "pro_draft";
@@ -110,6 +117,7 @@ function block(args: {
   archetype: ProSemanticBlock["archetype"];
   ownerSection: ProSemanticBlock["ownerSection"];
   requiredPhrases: string[];
+  suggestedPhrases?: string[];
   forbiddenSections?: string[];
   renderPriority: number;
   source: ProSemanticBlockSource;
@@ -120,6 +128,24 @@ function block(args: {
     atomic: true,
     ...args,
   };
+}
+
+function suppliedScopeBlock(
+  catalog: readonly string[],
+  intakeText: string | null | undefined,
+  draftText: string | null | undefined,
+  args: Omit<Parameters<typeof block>[0], "requiredPhrases" | "suggestedPhrases" | "source">,
+): ProSemanticBlock | null {
+  const intakeSupplied = phrasesPresentIn(intakeText ?? "", catalog);
+  const draftSupplied = phrasesPresentIn(draftText ?? "", catalog);
+  const required = intakeSupplied.length > 0 ? intakeSupplied : draftSupplied;
+  if (required.length === 0) return null;
+  return block({
+    ...args,
+    requiredPhrases: required,
+    suggestedPhrases: catalog.filter((phrase) => !required.includes(phrase)),
+    source: sourceFor(intakeText, draftText, required),
+  });
 }
 
 export function extractProtectedCommercialClusters(
@@ -137,19 +163,15 @@ export function extractProtectedCommercialClusters(
     "onboarding assistance",
     "light ongoing maintenance",
   ];
-  if (archetype === "ai_automation_services" && aiScope.some((phrase) => normalizeText(blob).includes(normalizeText(phrase)))) {
-    pushBlock(
-      blocks,
-      block({
-        id: "scope_block",
-        archetype,
-        ownerSection: "purpose",
-        requiredPhrases: aiScope,
-        forbiddenSections: ["fees", "misc", "notices"],
-        renderPriority: 10,
-        source: sourceFor(intakeText, draftText, aiScope),
-      }),
-    );
+  if (archetype === "ai_automation_services") {
+    const scope = suppliedScopeBlock(aiScope, intakeText, draftText, {
+      id: "scope_block",
+      archetype,
+      ownerSection: "purpose",
+      forbiddenSections: ["fees", "misc", "notices"],
+      renderPriority: 10,
+    });
+    if (scope) pushBlock(blocks, scope);
   }
 
   const marketingScope = [
@@ -160,19 +182,15 @@ export function extractProtectedCommercialClusters(
     "creative strategy",
     "campaign optimization",
   ];
-  if (archetype === "marketing_services" && marketingScope.some((phrase) => normalizeText(blob).includes(normalizeText(phrase)))) {
-    pushBlock(
-      blocks,
-      block({
-        id: "scope_block",
-        archetype,
-        ownerSection: "purpose",
-        requiredPhrases: marketingScope,
-        forbiddenSections: ["fees", "misc", "notices"],
-        renderPriority: 10,
-        source: sourceFor(intakeText, draftText, marketingScope),
-      }),
-    );
+  if (archetype === "marketing_services") {
+    const scope = suppliedScopeBlock(marketingScope, intakeText, draftText, {
+      id: "scope_block",
+      archetype,
+      ownerSection: "purpose",
+      forbiddenSections: ["fees", "misc", "notices"],
+      renderPriority: 10,
+    });
+    if (scope) pushBlock(blocks, scope);
   }
 
   const consultingScope = [
@@ -182,24 +200,15 @@ export function extractProtectedCommercialClusters(
     "vendor coordination",
     "monthly reporting support",
   ];
-  if (
-    archetype === "consulting_support" &&
-    (consultingScope.some((phrase) => normalizeText(blob).includes(normalizeText(phrase))) ||
-      /\badvisory calls\b/i.test(blob) ||
-      /\bmonthly reporting\b/i.test(blob))
-  ) {
-    pushBlock(
-      blocks,
-      block({
-        id: "scope_block",
-        archetype,
-        ownerSection: "purpose",
-        requiredPhrases: consultingScope,
-        forbiddenSections: ["fees", "misc", "notices"],
-        renderPriority: 10,
-        source: sourceFor(intakeText, draftText, consultingScope),
-      }),
-    );
+  if (archetype === "consulting_support") {
+    const scope = suppliedScopeBlock(consultingScope, intakeText, draftText, {
+      id: "scope_block",
+      archetype,
+      ownerSection: "purpose",
+      forbiddenSections: ["fees", "misc", "notices"],
+      renderPriority: 10,
+    });
+    if (scope) pushBlock(blocks, scope);
   }
 
   if (/\$120,?000|\$18,?000|\btotal (?:project )?fee\b/i.test(blob)) {
@@ -219,23 +228,17 @@ export function extractProtectedCommercialClusters(
   }
 
   const aiMilestones = ["40% build/configuration", "30% rollout/onboarding", "30% support/acceptance"];
-  if (
-    archetype !== "consulting_support" &&
-    (aiMilestones.some((phrase) => normalizeText(blob).includes(normalizeText(phrase))) || /\b40\s*%/.test(blob))
-  ) {
-    pushBlock(
-      blocks,
-      block({
-        id: "milestone_block",
-        archetype,
-        ownerSection: "fees",
-        requiredPhrases: aiMilestones,
-        forbiddenSections: ["purpose", "support", "misc"],
-        renderPriority: 30,
-        source: sourceFor(intakeText, draftText, aiMilestones),
-      }),
-    );
-  } else if (/\b(?:even thirds|one[-\s]?third|evenly across build|build-heavy)\b/i.test(blob)) {
+  if (archetype !== "consulting_support") {
+    const milestones = suppliedScopeBlock(aiMilestones, intakeText, draftText, {
+      id: "milestone_block",
+      archetype,
+      ownerSection: "fees",
+      forbiddenSections: ["purpose", "support", "misc"],
+      renderPriority: 30,
+    });
+    if (milestones) pushBlock(blocks, milestones);
+  }
+  if (!blocks.some((existing) => existing.id === "milestone_block") && /\b(?:even thirds|one[-\s]?third|evenly across build|build-heavy)\b/i.test(blob)) {
     const phrases = /\bbuild-heavy\b/i.test(blob)
       ? ["build-heavy fee allocation"]
       : ["evenly across build, rollout, and support/acceptance phases"];
@@ -403,7 +406,10 @@ export function renderSemanticBlock(block: ProSemanticBlock, context: ProCommerc
     return `Service Provider will provide ${phraseList(block.requiredPhrases)} for Client.`;
   }
   if (block.id === "milestone_block") {
-    if (block.requiredPhrases.some((phrase) => /^40\s*%/i.test(phrase))) {
+    const hasFullAiSplit = ["40% build/configuration", "30% rollout/onboarding", "30% support/acceptance"].every(
+      (phrase) => block.requiredPhrases.some((required) => normalizeText(required) === normalizeText(phrase)),
+    );
+    if (hasFullAiSplit) {
       return "The project milestone allocation is (a) 40% build/configuration; (b) 30% rollout/onboarding; and (c) 30% support/acceptance.";
     }
     if (block.requiredPhrases.some((phrase) => /evenly across build|even thirds|one-third|build-heavy/i.test(phrase))) {
@@ -514,6 +520,28 @@ function malformedFragment(line: string, owner: SemanticOwnerSection | "unknown"
   return numberedClauseMismatch(t, sectionNumber);
 }
 
+export function stripUnsuppliedSuggestedPhrases(text: string, blocks: readonly ProSemanticBlock[]): string {
+  let out = text;
+  for (const block of blocks) {
+    for (const phrase of block.suggestedPhrases ?? []) {
+      const cleaned = phrase.trim();
+      if (!cleaned) continue;
+      const escaped = cleaned.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      out = out.replace(new RegExp(`(?:,\\s*(?:and\\s+)?)?${escaped}`, "gi"), "");
+    }
+  }
+  const lines = out.split("\n");
+  const deduped: string[] = [];
+  for (const line of lines) {
+    const normalized = line.replace(/,\s*,/g, ",").replace(/,\s+and\s+/gi, " and ").replace(/\s+and\s+for\b/gi, " for").replace(/,\s+for\b/gi, " for").replace(/[ \t]{2,}/g, " ");
+    if (deduped.length && normalizeText(deduped[deduped.length - 1]!) === normalizeText(normalized) && normalized.trim()) {
+      continue;
+    }
+    deduped.push(normalized);
+  }
+  return deduped.join("\n").replace(/\n{3,}/g, "\n\n");
+}
+
 function lineCoveredByRenderedBlocks(line: string, renderedBlocks: readonly string[]): boolean {
   const low = normalizeText(line);
   return renderedBlocks.some((rendered) => {
@@ -606,7 +634,10 @@ export function reconstructProSectionsFromSemanticBlocks(
     .flatMap((section) => [...(section.heading && section.body.some((line) => line.trim()) ? [section.heading] : []), ...section.body])
     .filter((line) => line.trim());
   if (signatureLines.length) output.push([...new Set(signatureLines)].join("\n").trim());
-  const reconstructed = output.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+  const reconstructed = stripUnsuppliedSuggestedPhrases(
+    output.join("\n\n").replace(/\n{3,}/g, "\n\n").trim(),
+    blocks,
+  );
   if (reconstructed && reconstructed !== text.trim()) repairs.push("semantic_reconstruct:sections_rebuilt");
   return { text: reconstructed || text, repairs: [...new Set(repairs)], blocks };
 }

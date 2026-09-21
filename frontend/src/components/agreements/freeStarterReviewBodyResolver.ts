@@ -71,6 +71,21 @@ export function shouldRedirectFreeToProForValidation(validation: string | null |
   return true;
 }
 
+export function unwrapFreeDocumentText(raw: string | null | undefined): string {
+  const text = String(raw ?? "").trim();
+  if (!text.startsWith("{")) return text;
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    for (const key of ["document_text", "updated_document_text", "free_document_text"]) {
+      const value = parsed[key];
+      if (typeof value === "string" && value.trim().length >= 40) return value.trim();
+    }
+  } catch {
+    /* raw JSON without a document field is not paint-ready paper */
+  }
+  return "";
+}
+
 /**
  * Role-only placeholder names that are NOT real legal parties.
  * These should never appear as the actual party name in a painted free page.
@@ -195,6 +210,17 @@ function cleanPartyName(name: string): string {
  */
 function extractNamedPartiesFromIntake(intake: string): string[] {
   const names: string[] = [];
+
+  // "Marcus Thompson from Apex Consulting Group is engaging Elena Rodriguez of Brightwave..."
+  const engagingFromMatch = intake.match(
+    /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(?:from|of)\s+([A-Z][A-Za-z][A-Za-z\s&.-]+?)\s+is\s+(?:engaging|retaining|hiring)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(?:of|from)\s+([A-Z][A-Za-z][A-Za-z\s&.-]+?)(?:\.|,|$)/i,
+  );
+  if (engagingFromMatch) {
+    const p1 = cleanPartyName(`${cleanPartyName(engagingFromMatch[1])} of ${cleanPartyName(engagingFromMatch[2])}`);
+    const p2 = cleanPartyName(`${cleanPartyName(engagingFromMatch[3])} of ${cleanPartyName(engagingFromMatch[4])}`);
+    if (p1 && !isHollowPartyName(p1)) names.push(p1);
+    if (p2 && !isHollowPartyName(p2)) names.push(p2);
+  }
   
   // Pattern: "Name of Company is hiring Name from Company"
   // Capture: "Priya Shah of Northline Studio" + "Diego Alvarez" (stop at "from")
@@ -304,7 +330,7 @@ export function evaluateSimpleHollowBodyGate(
     jurisdiction?: string | null;
   },
 ): { isHollow: boolean; reason: string | null } {
-  const text = (body ?? "").trim();
+  const text = unwrapFreeDocumentText(body);
   if (!text || text.length < 200) {
     return { isHollow: true, reason: "body_too_short" };
   }
@@ -679,6 +705,12 @@ function resolveRebuildBilateralPartyNames(
   draft: ParsedDraftShape | null,
 ): [string | null, string | null] {
   const intake = intakeText.trim();
+  // Recovery identity prefers human+entity units from the visitor dump so
+  // "Marcus Thompson from Apex…" remains visible. Entity-only authority is fallback.
+  const namedParties = extractNamedPartiesFromIntake(intake).filter(
+    (n) => n.length >= 2 && !isHollowPartyName(n),
+  );
+  if (namedParties.length >= 2) return [namedParties[0]!, namedParties[1]!];
   const repairedDraft =
     draft && intake ? repairCheckoutBackRestoreDraftParties(draft, intake) : draft;
   const fromRepair = (repairedDraft?.parties ?? [])
@@ -689,7 +721,6 @@ function resolveRebuildBilateralPartyNames(
     (n) => n.length >= 2 && !isHollowPartyName(n),
   );
   if (fromAuthority.length >= 2) return [fromAuthority[0]!, fromAuthority[1]!];
-  const namedParties = extractNamedPartiesFromIntake(intake);
   return [namedParties[0] ?? null, namedParties[1] ?? null];
 }
 
@@ -1207,7 +1238,7 @@ export function resolveFreeStarterReviewBody(
   const repairedPaymentTerms = extractFreeStarterPaymentTermsLine(repairedPreview);
 
   // Check for direct OpenAI one-pager (highest priority when validation is "ok")
-  const freeDocText = String(args.freeDocumentText ?? draft?.free_document_text ?? "").trim();
+  const freeDocText = unwrapFreeDocumentText(args.freeDocumentText ?? draft?.free_document_text);
   const freeDocValidation = String(args.freeDocumentValidation ?? draft?.free_document_validation ?? "").trim();
   
   // If we have a valid free document from OpenAI, use it directly

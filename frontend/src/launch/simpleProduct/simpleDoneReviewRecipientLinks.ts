@@ -15,6 +15,7 @@ import {
   fetchReviewLinkMintAuthority,
   hydrateReviewPartyIdsFromAuthority,
   mergeReviewLinkRowsByPartyId,
+  reviewPartyIdentityLogRow,
   stableReviewRecipientPartyId,
   tryBeginReviewLinkPartyMint,
 } from "./reviewLinkMintIdempotency";
@@ -218,7 +219,8 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
     (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env?.VITE_RECIPIENT_LINK_MINT_KEY ||
     "";
   const authority = await fetchReviewLinkMintAuthority(args.agreementId);
-  const parties = hydrateReviewPartyIdsFromAuthority(args.draft.parties || [], authority.parties);
+  const clientParties = args.draft.parties || [];
+  const parties = hydrateReviewPartyIdsFromAuthority(clientParties, authority.parties);
   const list = parties as AgreementParty[];
   const existingRows = mergeReviewLinkRowsByPartyId(
     readSimpleDoneReviewRecipientLinks(args.agreementId)?.recipients,
@@ -252,6 +254,18 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
     readyIndexes.push(i);
   }
   const missingReadyPartyId = readyIndexes.some((i) => !stableReviewRecipientPartyId(list[i]?.id));
+  const firstMissingReadyIndex = readyIndexes.find((i) => !stableReviewRecipientPartyId(list[i]?.id));
+  // eslint-disable-next-line no-console
+  console.info("[review-link-mint-hydrate]", {
+    agreementIdShort: shortAgreementId(args.agreementId),
+    authorityPartyCount: authority.parties.length,
+    clientReady: readyIndexes.map((i) => reviewPartyIdentityLogRow(clientParties[i], i)),
+    hydratedReady: readyIndexes.map((i) => reviewPartyIdentityLogRow(list[i], i)),
+    firstUnrecoverableIndex: firstMissingReadyIndex ?? null,
+    firstUnrecoverableName:
+      firstMissingReadyIndex == null ? null : String(list[firstMissingReadyIndex]?.name ?? "").trim(),
+    abortKind: missingReadyPartyId ? "local_validation" : "none",
+  });
   if (missingReadyPartyId) {
     firstErrorStatus = 400;
     lastMintErrorDetail = "recipient_party_id_required";

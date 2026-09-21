@@ -45,6 +45,70 @@ describe("Test374 Pro agreement professional-grade regression", () => {
     expect(out).not.toMatch(/configured AI workflow setup/i);
   });
 
+  it("restores ClearSpring LLC in the opening even when notices still have the full name", () => {
+    const stone = "Stonebridge Wellness LLC";
+    const nova = "NovaPath Learning Inc.";
+    const clear = "ClearSpring Distribution LLC";
+    const body = [
+      `This Agreement is entered into by and among ${stone} ("Content Owner / Licensor"), ${nova} ("Platform Adapter / Host"), and ClearSpring Distribution ("Distributor").`,
+      `${stone}'s authorized signer is Sandra Wells. ${nova}'s authorized signer is Caleb Price. ClearSpring Distribution 's authorized signer is Maya Coleman.`,
+      `${clear} will market and sell subscriptions.`,
+      `Subscription revenue is split 20% to ClearSpring Distribution .`,
+      `If to ${clear}:`,
+      clear,
+      "IN WITNESS WHEREOF",
+      clear,
+    ].join("\n");
+    const { text, repairs } = repairProtectedLegalEntitySuffixes(body, [stone, nova, clear], body);
+    expect(repairs).toBeGreaterThan(0);
+    expect(text).toContain(`${clear} ("Distributor")`);
+    expect(text).toContain(`${clear}'s authorized signer is Maya Coleman`);
+    expect(text).toContain(`20% to ${clear}.`);
+    expect(text).not.toMatch(/ClearSpring Distribution \("Distributor"\)/);
+    expect(text).not.toMatch(/ClearSpring Distribution 's authorized signer/);
+    expect(text).not.toMatch(/20% to ClearSpring Distribution \./);
+  });
+
+  it("restores Coastal Meridian Analytics LLC in unquoted role appositives", () => {
+    const lumen = "Lumen Bioinformatics Inc.";
+    const thalassa = "Thalassa Data Systems LLC";
+    const coastal = "Coastal Meridian Analytics LLC";
+    const vanguard = "Vanguard Regulatory Sciences Ltd.";
+    const body = [
+      `The parties are ${lumen} (Platform Developer), ${thalassa} (Data Infrastructure Provider), Coastal Meridian Analytics (Analytics Integrator), and ${vanguard} (Regulatory Compliance Advisor).`,
+      `Coastal Meridian Analytics delivers analytics modules.`,
+      `If to ${coastal}:`,
+      coastal,
+      "IN WITNESS WHEREOF",
+      coastal,
+    ].join("\n");
+    const { text, repairs } = repairProtectedLegalEntitySuffixes(
+      body,
+      [lumen, thalassa, coastal, vanguard],
+      body,
+    );
+    expect(repairs).toBeGreaterThan(0);
+    expect(text).toContain(`${coastal} (Analytics Integrator)`);
+    expect(text).toContain(`${coastal} delivers`);
+    expect(text).not.toMatch(/Coastal Meridian Analytics \(Analytics Integrator\)/);
+  });
+
+  it("does not double an already-suffixed Ironvale Inc. on the signed view", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc.";
+    const body = `This Services Agreement is entered into by and between ${harbor} ("Service Provider") and ${ironvale} ("Client").`;
+    const { text } = repairProtectedLegalEntitySuffixes(body, [harbor, ironvale], body);
+    expect(text).toContain(`${ironvale} ("Client")`);
+    expect(text).not.toMatch(/Ironvale Manufacturing Inc\. Inc\./);
+    const doubledParty = repairProtectedLegalEntitySuffixes(
+      body,
+      [harbor, "Ironvale Manufacturing Inc. Inc."],
+      body,
+    ).text;
+    expect(doubledParty).toContain(`${ironvale} ("Client")`);
+    expect(doubledParty).not.toMatch(/Ironvale Manufacturing Inc\. Inc\./);
+  });
+
   it("repairs truncated legal entity suffix in recital", () => {
     const body = `This Agreement is between ${BLUE} ("Client") and Harbor Peak Automation ("Service Provider").`;
     const { text } = repairProtectedLegalEntitySuffixes(body, [BLUE, HARBOR], TEST372_FREE_STACKED_PARTY_INTAKE);

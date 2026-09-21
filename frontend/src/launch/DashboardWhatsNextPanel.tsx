@@ -163,6 +163,7 @@ export function DashboardWhatsNextPanel(props: Props) {
       data-testid="dashboard-whats-next-panel"
       data-creator-dashboard-primary="true"
       data-agreement-id={row.id}
+      data-delivery-track={presentation.deliveryTrack}
       aria-label="What's next"
     >
       <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">

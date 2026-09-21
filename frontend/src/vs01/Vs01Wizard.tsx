@@ -20,6 +20,7 @@ import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared } from "./v
 import { fetchDocumentContent, fetchDocumentEsignHandoff, getReceipt } from "./vs01Api";
 import { useAuth } from "../auth/AuthProvider";
 import { shouldDeferVs01SeedDocumentLoad } from "./vs01SeedDocumentAuthGate";
+import { ESIGN_UNAVAILABLE_MESSAGE } from "../launch/esignDocumentAccess";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 import { stashHeroIntakePrefill } from "../launch/heroIntakePrefill";
 import { prepareFreshMarketingEntry } from "../launch/marketingSession";
@@ -45,7 +46,12 @@ import {
   vs01PaidSessionWorkspaceHydrateMinCorpusLen,
 } from "../components/agreements/paidProPaidSessionLanding";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
-import { buildVs01CanonicalPacketSeed, hasVs01CanonicalPacketCached, storeVs01CanonicalPacketSeed } from "./vs01CanonicalPacketSeed";
+import {
+  buildVs01CanonicalPacketSeed,
+  hasVs01CanonicalPacketCached,
+  storeVs01CanonicalPacketSeed,
+  type Vs01CanonicalPacketPortableV1,
+} from "./vs01CanonicalPacketSeed";
 import { buildVs01RecipientSigningUrl } from "./StepReceipt";
 import {
   clearPaidProVs01PostSignHandoff,
@@ -84,6 +90,12 @@ import type { Vs01RecipientIdentityAuthority } from "./vs01RecipientIdentityAuth
 import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
 import { readSigningPacketStatus } from "./vs01SigningPacketStatusStore";
 import { recordVs01SignerCompletion } from "./vs01SignerCompletionSync";
+import {
+  recipientCompletionUserMessage,
+  versionedRecipientConsentIntent,
+} from "./vs01RecipientCompletionContract";
+import { JourneyActionBanner } from "../components/agreements/JourneyActionBanner";
+import { resolveUserActionFeedback } from "../components/agreements/userActionFeedback";
 import {
   clearVs01DraftState,
   loadVs01DraftState,
@@ -242,6 +254,13 @@ export function Vs01Wizard({
     boolean | null | undefined
   >(() => (RECIPIENT_NEEDS_SERVER_HYDRATION ? null : undefined));
   const [recipientSigningFinished, setRecipientSigningFinished] = useState(false);
+  const [recipientSigningSubmitting, setRecipientSigningSubmitting] = useState(false);
+  const [signerAlreadyCompleteOnOpen, setSignerAlreadyCompleteOnOpen] = useState(false);
+  const [recipientAuthorityReady, setRecipientAuthorityReady] = useState(false);
+  const [recipientServerPortable, setRecipientServerPortable] =
+    useState<Vs01CanonicalPacketPortableV1 | null>(null);
+  const [recipientRetryable, setRecipientRetryable] = useState(false);
+  const [recipientRetryNonce, setRecipientRetryNonce] = useState(0);
   const [senderPlacedFields, setSenderPlacedFields] = useState<PlacedSigningField[]>([]);
   const [senderSignatureRef, setSenderSignatureRef] = useState<Vs01SenderSignatureRef | null>(null);
   const [loading, setLoading] = useState<Vs01LoadingState>("idle");
@@ -330,18 +349,26 @@ export function Vs01Wizard({
   }, [seedDocumentId, hideStepper]);
 
   useEffect(() => {
-    if (!RECIPIENT_SIGNER_DEEP_LINK || !recipientLockedCpId) return;
+    if (!RECIPIENT_SIGNER_DEEP_LINK) return;
     if (recipientAuthorityResolvedRef.current) return;
     const agreementId = RECIPIENT_AGREEMENT_ID;
     const did = (documentId ?? VS01_URL_BOOT?.documentId ?? "").trim();
     if (!agreementId || !did) {
       setRecipientServerHydrationPending(false);
       setRecipientAuthoritativeInitialsEnabled(null);
+      setError(ESIGN_UNAVAILABLE_MESSAGE);
+      return;
+    }
+    if (!RECIPIENT_ACCESS_TOKEN) {
+      setRecipientServerHydrationPending(false);
+      setRecipientAuthoritativeInitialsEnabled(null);
+      setError(ESIGN_UNAVAILABLE_MESSAGE);
       return;
     }
     let cancelled = false;
     setRecipientServerHydrationPending(true);
-    const lockedCp = recipientLockedCpId;
+    setRecipientRetryable(false);
+    const lockedCp = (recipientLockedCpId ?? "").trim();
     const recipientName =
       (VS01_URL_BOOT?.counterparties.find((c) => c.id === lockedCp)?.name ?? "").trim() ||
       (counterparties.find((c) => c.id === lockedCp)?.name ?? "").trim();
@@ -364,6 +391,8 @@ export function Vs01Wizard({
       if (result.ok) {
         recipientAuthorityResolvedRef.current = true;
         recipientAuthorityIdentityRef.current = result.identity;
+        setRecipientAuthorityReady(true);
+        setRecipientServerPortable(result.portable);
         setRecipientLockedSignerRoleId(result.identity.lockedSignerRoleId);
         setRecipientLockedCpId(result.identity.lockedCounterpartyId);
         setRecipientPlacedFields(result.fields);
@@ -374,32 +403,38 @@ export function Vs01Wizard({
         if (!vs01LinkedAgreementId) {
           setVs01LinkedAgreementId(agreementId);
         }
-        // eslint-disable-next-line no-console
-        console.info("[vs01-recipient-server-hydration]", {
-          agreementIdShort: agreementId.slice(0, 16),
-          documentIdShort: did.slice(0, 8),
-          fieldCount: result.fields.length,
-          source: "server_packet",
-          signerCount: result.signerCount,
-          initialsEnabled: result.initialsEnabled,
-          identitySource: result.identity.source,
-        });
+        setError(null);
+        if (result.signerAlreadyCompleted) {
+          setRecipientSigningFinished(true);
+          setSignerAlreadyCompleteOnOpen(true);
+        }
+        return;
+      }
+      if ("retryable" in result && result.retryable) {
+        setRecipientAuthoritativeInitialsEnabled(null);
+        setRecipientServerPortable(null);
+        setRecipientRetryable(true);
+        setError(result.message);
         return;
       }
       if ("mismatch" in result && result.mismatch) {
         setRecipientAuthoritativeInitialsEnabled(null);
+        setRecipientServerPortable(null);
         setError(result.mismatch.message);
         return;
       }
       if ("inviteSuperseded" in result && result.inviteSuperseded) {
         setRecipientAuthoritativeInitialsEnabled(null);
+        setRecipientServerPortable(null);
         setError(
           result.message?.trim() || "This invite was replaced. Ask the sender for the latest link.",
         );
         return;
       }
       // Path rule: do not stay on “Loading signing fields…” after the packet miss.
-      setRecipientAuthoritativeInitialsEnabled(undefined);
+      setRecipientAuthoritativeInitialsEnabled(null);
+      setRecipientServerPortable(null);
+      setError(ESIGN_UNAVAILABLE_MESSAGE);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.warn("[vs01-recipient-server-hydration-miss]", {
@@ -411,7 +446,7 @@ export function Vs01Wizard({
     return () => {
       cancelled = true;
     };
-  }, [documentId, recipientLockedCpId]);
+  }, [documentId, recipientLockedCpId, recipientRetryNonce]);
 
   useEffect(() => {
     bridgeHandoffSnapshotRef.current = null;
@@ -869,19 +904,6 @@ export function Vs01Wizard({
         const fs = (saved ? Math.max(nextStep, saved.furthestStep) : nextStep) as Vs01Step;
         setFurthestStep((prev) => ((fs > prev ? fs : prev) as Vs01Step));
         goToStep(nextStep);
-        bridgeParams.delete("agreement_bridge");
-        const qs = bridgeParams.toString();
-        window.setTimeout(() => {
-          try {
-            window.history.replaceState(
-              window.history.state,
-              "",
-              qs ? `${window.location.pathname}?${qs}` : window.location.pathname,
-            );
-          } catch {
-            /* ignore */
-          }
-        }, 0);
         return true;
       };
 
@@ -1062,19 +1084,6 @@ export function Vs01Wizard({
           const fs = (saved ? Math.max(nextStep, saved.furthestStep) : nextStep) as Vs01Step;
           setFurthestStep((prev) => ((fs > prev ? fs : prev) as Vs01Step));
           goToStep(nextStep);
-          bridgeParams.delete("agreement_bridge");
-          const qs = bridgeParams.toString();
-          window.setTimeout(() => {
-            try {
-              window.history.replaceState(
-                window.history.state,
-                "",
-                qs ? `${window.location.pathname}?${qs}` : window.location.pathname,
-              );
-            } catch {
-              /* ignore */
-            }
-          }, 0);
           return;
         }
 
@@ -1110,9 +1119,9 @@ export function Vs01Wizard({
           goToStep(1);
         }
       } catch (e) {
-        if (hydrateLocalPaidProBridge()) return;
+        if (sid.startsWith("local_doc_") && hydrateLocalPaidProBridge()) return;
         console.error("[Vs01Wizard] seed document load failed", e);
-        if (!cancelled) setError("Could not load this document. Check the link or start a new packet.");
+        if (!cancelled) setError("Could not load this document");
       }
     })();
     return () => {
@@ -1292,34 +1301,76 @@ export function Vs01Wizard({
   const esignGate = access.check("esign_flow");
   const signatureGate = access.check("signature_request");
 
-  if (RECIPIENT_SIGNER_DEEP_LINK && recipientLockedCpId) {
+  if (RECIPIENT_SIGNER_DEEP_LINK) {
+    if (!recipientAuthorityReady) {
+      return (
+        <div
+          className="mx-auto w-full min-w-0 max-w-lg px-4 py-16 text-center"
+          data-testid={error ? "esign-unavailable" : "esign-recipient-pending"}
+        >
+          <h1 className="text-xl font-semibold text-stone-900">
+            {error ? "Unavailable" : "Loading signing page"}
+          </h1>
+          <p className="mt-2 text-sm text-stone-600">{error || "Confirming your signing link…"}</p>
+          {recipientRetryable ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--primary mt-6 min-h-11"
+              data-testid="esign-retry"
+              onClick={() => {
+                setError(null);
+                setRecipientRetryable(false);
+                setRecipientServerHydrationPending(true);
+                setRecipientRetryNonce((n) => n + 1);
+              }}
+            >
+              Try again
+            </button>
+          ) : null}
+        </div>
+      );
+    }
     return (
       <>
         {error ? (
           <div className="vs01-error-banner" role="alert">
-            {error}
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--secondary"
-              style={{ marginTop: "0.5rem", width: "auto" }}
-              onClick={() => setError(null)}
-            >
-              Dismiss
-            </button>
+            <JourneyActionBanner
+              feedback={resolveUserActionFeedback({
+                actor: "signer",
+                action: "complete_signature",
+                outcome: /could not be verified|different party|not your/i.test(error) ? "blocked" : "failed",
+                remainder: error,
+              })}
+              onDismiss={() => setError(null)}
+            />
           </div>
         ) : null}
 
         <div
           className="vs01-card vs01-card--envelope vs01-recipient-signing-shell"
+          data-testid="esign-recipient-shell"
           data-vs01-receipt-id={receiptId ?? ""}
           data-vs01-receipt-hash={receiptHashSha256 ?? ""}
           data-vs01-receipt-present={receipt != null ? "1" : "0"}
         >
           {recipientSigningFinished ? (
-            <section className="vs01-recipient-signing-done" aria-labelledby="vs01-recipient-done-title">
+            <section
+              className="vs01-recipient-signing-done"
+              aria-labelledby="vs01-recipient-done-title"
+              data-testid="esign-recipient-complete"
+            >
               <h2 id="vs01-recipient-done-title" className="vs01-card-title">
                 {JOY_COPY.signLockedIn}
               </h2>
+              <div className="mb-3">
+                <JourneyActionBanner
+                  feedback={resolveUserActionFeedback({
+                    actor: "signer",
+                    action: "complete_signature",
+                    outcome: signerAlreadyCompleteOnOpen ? "already_complete" : "succeeded",
+                  })}
+                />
+              </div>
               <p className="vs01-card-help">
                 You're all set. A copy of the signed record will be available to the sender, and email
                 delivery will be used when enabled. The sender will be notified when all signatures are
@@ -1330,7 +1381,7 @@ export function Vs01Wizard({
             <RecipientSigningView
               documentId={documentId}
               counterparties={counterparties}
-              lockedCounterpartyId={recipientLockedCpId}
+              lockedCounterpartyId={recipientLockedCpId || ""}
               recipientAgreementId={RECIPIENT_AGREEMENT_ID || null}
               lockedSignerRoleId={recipientLockedSignerRoleId}
               packetRevision={VS01_URL_BOOT?.packetRevision ?? null}
@@ -1339,6 +1390,7 @@ export function Vs01Wizard({
               senderSignatureRef={senderSignatureRef}
               onRecipientFieldsChange={setRecipientPlacedFields}
               onError={setError}
+              signingSubmitting={recipientSigningSubmitting}
               onFinishSigning={() => {
                 if (!recipientAuthorityResolvedRef.current || !recipientAuthorityIdentityRef.current) {
                   setError(
@@ -1347,65 +1399,92 @@ export function Vs01Wizard({
                   return;
                 }
                 const authority = recipientAuthorityIdentityRef.current;
-                setRecipientSigningFinished(true);
                 const aid = RECIPIENT_AGREEMENT_ID.trim();
                 const roleKey = authority.lockedSignerRoleId.trim();
-                if (aid && roleKey) {
-                  void recordVs01SignerCompletion({
+                if (!aid || !roleKey) {
+                  setError(
+                    "Your signing session could not be verified. Open the link from your email or ask the sender to resend.",
+                  );
+                  return;
+                }
+                setRecipientSigningSubmitting(true);
+                setError(null);
+                void recordVs01SignerCompletion({
+                  agreementId: aid,
+                  documentId: documentId ?? "",
+                  signerRoleId: roleKey,
+                  partyIndex: authority.partyIndex,
+                  participantId: authority.lockedCounterpartyId,
+                  displayName:
+                    counterparties.find((c) => c.id === authority.lockedCounterpartyId)?.signerName ??
+                    authority.recipientName ??
+                    null,
+                  recipientFields: recipientPlacedFields,
+                  recipientAccessToken: RECIPIENT_ACCESS_TOKEN || null,
+                  consent: versionedRecipientConsentIntent(),
+                  packetRevision: VS01_URL_BOOT?.packetRevision ?? null,
+                }).then((result) => {
+                  setRecipientSigningSubmitting(false);
+                  if (!result.serverSynced) {
+                    setRecipientSigningFinished(false);
+                    setError(
+                      recipientCompletionUserMessage(
+                        result.status ?? 0,
+                        result.errorCode ?? "",
+                        result.error,
+                      ),
+                    );
+                    return;
+                  }
+                  setRecipientSigningFinished(true);
+                  const rid = result.receipt?.receipt_id?.trim();
+                  const rhash = result.receipt?.receipt_hash_sha256?.trim();
+                  if (rid) setReceiptId(rid);
+                  if (rhash) setReceiptHashSha256(rhash);
+                  const snap = result.localSnapshot ?? readSigningPacketStatus(aid);
+                  const remainingSigners = snap
+                    ? Object.entries(snap.bySignerKey).filter(([, status]) => status !== "signed").length
+                    : null;
+                  logVs01LifecycleEvent({
+                    event: "vs01_signer_completed",
                     agreementId: aid,
-                    documentId: documentId ?? "",
+                    documentId: documentId ?? undefined,
                     signerRoleId: roleKey,
                     partyIndex: authority.partyIndex,
-                    participantId: authority.lockedCounterpartyId,
-                    displayName:
-                      counterparties.find((c) => c.id === authority.lockedCounterpartyId)?.signerName ??
-                      authority.recipientName ??
-                      null,
-                    recipientFields: recipientPlacedFields,
-                    recipientAccessToken: RECIPIENT_ACCESS_TOKEN || null,
-                  }).then((result) => {
-                    const snap = result.localSnapshot ?? readSigningPacketStatus(aid);
-                    const remainingSigners = snap
-                      ? Object.entries(snap.bySignerKey).filter(([, status]) => status !== "signed").length
-                      : null;
+                    fieldType: "signature",
+                    status: "signed",
+                  });
+                  if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
+                    // eslint-disable-next-line no-console
+                    console.info("[vs01_signer_completed]", {
+                      agreement_id: aid.slice(0, 16),
+                      document_id: documentId?.slice(0, 16) ?? null,
+                      signer_role_id: roleKey.slice(0, 24),
+                      party_index: authority.partyIndex,
+                      field_type: "signature",
+                      signed_by: roleKey.slice(0, 24),
+                      remaining_signers: remainingSigners,
+                      server_synced: result.serverSynced,
+                      fully_signed: result.fullySigned,
+                      completion_emails_sent: result.completionEmailsSent,
+                      receipt_id: rid ? rid.slice(0, 12) : null,
+                    });
+                  }
+                  if (result.fullySigned) {
                     logVs01LifecycleEvent({
-                      event: "vs01_signer_completed",
+                      event: "vs01_packet_fully_signed",
                       agreementId: aid,
                       documentId: documentId ?? undefined,
-                      signerRoleId: roleKey,
-                      partyIndex: authority.partyIndex,
-                      fieldType: "signature",
-                      status: "signed",
                     });
-                    if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
-                      // eslint-disable-next-line no-console
-                      console.info("[vs01_signer_completed]", {
-                        agreement_id: aid.slice(0, 16),
-                        document_id: documentId?.slice(0, 16) ?? null,
-                        signer_role_id: roleKey.slice(0, 24),
-                        party_index: authority.partyIndex,
-                        field_type: "signature",
-                        signed_by: roleKey.slice(0, 24),
-                        remaining_signers: remainingSigners,
-                        server_synced: result.serverSynced,
-                        fully_signed: result.fullySigned,
-                        completion_emails_sent: result.completionEmailsSent,
-                      });
-                    }
-                    if (result.fullySigned) {
-                      logVs01LifecycleEvent({
-                        event: "vs01_packet_fully_signed",
-                        agreementId: aid,
-                        documentId: documentId ?? undefined,
-                      });
-                    }
-                  });
-                }
+                  }
+                });
               }}
               manifestDecodeError={VS01_URL_BOOT?.recipientManifestDecodeError ?? null}
               manifestParamPresent={VS01_URL_BOOT?.recipientManifestParamPresent ?? false}
               serverHydrationPending={recipientServerHydrationPending}
               authoritativeInitialsEnabled={recipientAuthoritativeInitialsEnabled}
+              serverPortablePacket={recipientServerPortable}
+              recipientAccessToken={RECIPIENT_ACCESS_TOKEN || null}
             />
           )}
         </div>
@@ -1413,8 +1492,17 @@ export function Vs01Wizard({
     );
   }
 
+  if (error === ESIGN_UNAVAILABLE_MESSAGE && !contentSha256) {
+    return (
+      <div className="mx-auto w-full min-w-0 max-w-lg px-4 py-16 text-center" data-testid="esign-unavailable">
+        <h1 className="text-xl font-semibold text-stone-900">Unavailable</h1>
+        <p className="mt-2 text-sm text-stone-600">{ESIGN_UNAVAILABLE_MESSAGE}</p>
+      </div>
+    );
+  }
+
   return (
-    <>
+    <div data-testid={hideStepper ? "esign-owner-prepare" : undefined}>
       {error ? (
         <div className="vs01-error-banner" role="alert">
           {error}
@@ -1862,6 +1950,6 @@ export function Vs01Wizard({
           updatedAtMs={vs01DocumentsUpdatedMs}
         />
       ) : null}
-    </>
+    </div>
   );
 }

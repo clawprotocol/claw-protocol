@@ -101,6 +101,9 @@ export function isLikelyCategoryOrTradeLabel(s: string): boolean {
   const low = t.toLowerCase();
   if (/\bniche\b|\bvertical\b|\bcategory\b|\bsegment\b/.test(low)) return true;
   if (/^(cleaning|marketing|fitness|consulting|design|logistics|analytics)\s+services?$/i.test(t)) return true;
+  if (/\b(ai|artificial intelligence|workflow|implementation|hosted platform|software development)\b/i.test(t)) {
+    return false;
+  }
   const words = t.split(/\s+/).filter(Boolean);
   if (words.length <= 4 && !/\b(between|party|shall|will|must|llc|inc|ltd)\b/i.test(t) && !US_STATE_TOKEN.test(t)) {
     if (t.length <= 48 && !/\d/.test(t)) return true;
@@ -185,8 +188,14 @@ export function synthesizePremiumScopeAndOperativeFields(parsed: ParsedDraftShap
   const clauseGradePremiumPurpose =
     !dump && purposeWas.length >= 160 && looksClauseGradePremiumPurpose(purposeWas);
 
-  if (scopeLine.length >= 12 && !isLikelyCategoryOrTradeLabel(scopeLine)) {
-    paragraphs.push(`Commercial scope (summary): ${scopeLine.replace(/^commercial\s+scope\s*\(?summary\)?\s*:\s*/i, "")}`);
+  const industryInferenceBoilerplate =
+    /biotech,\s*manufacturing,\s*supply-chain,\s*and\s*regulatory services/i.test(scopeLine);
+  if (scopeLine.length >= 12 && !industryInferenceBoilerplate) {
+    const explicitCustomerScope = !structured.scopeInferred && structured.scopeConfidence >= 0.88;
+    if (explicitCustomerScope || !isLikelyCategoryOrTradeLabel(scopeLine)) {
+      const summary = scopeLine.replace(/^commercial\s+scope\s*\(?summary\)?\s*:\s*/i, "").trim();
+      paragraphs.push(`Commercial scope (summary): ${summary.length > 180 ? `${summary.slice(0, 177)}…` : summary}`);
+    }
   }
 
   const filler =
@@ -345,12 +354,12 @@ export function detectPremiumCommercialSignals(text: string): PremiumCommercialS
     ownershipData:
       /\b(work\s+product|inventions?|intellectual\s+property\s+(?:assignment|ownership)|assign(?:ed)?\s+(?:all\s+)?rights|customer\s+list|crm|lead\s+data|background\s+ip)\b/.test(
         low,
-      ) || /\bowns?\s+(?:the\s+)?(?:crm|list|data|deliverables|work\s+product)\b/.test(low),
+      ) || /\bowns?\s+(?:the\s+)?(?:crm|list|data|work\s+product)\b/.test(low),
     adCompliance: /\b(ad\s+claims?|misleading\s+claims?|fake\s+promises?|compliance|approval(?:\s+rights?)?|ftc|brand\s+safety|publishing\s+any\s+claims?)\b/.test(low),
     exclusivity: /\b(exclusive|exclusivity|territory|qualified\s+leads?)\b/.test(low),
     nonsolicit: /\b(?:non[-\s]?solicit|anti[-\s]?solicit|no\s+solicitation|no[-\s]?hire|solicitation\s+of\s+(?:staff|team|employees?|contractors?))\b/.test(low),
     noncircumvent: /\b(?:non[-\s]?circumvent|anti[-\s]?bypass|bypass|no\s+circumvention|anti[-\s]?circumvention)\b/.test(low),
-    termRenewal: /\b(auto[-\s]?renew|renewal|12\s*month|term)\b/.test(low),
+    termRenewal: /\b(auto[-\s]?renew|renewal)\b/.test(low),
     terminationCause: /\b(termination|terminate|for\s+cause|fraud|brand\s+damage|criminal|material\s+breach)\b/.test(low),
     disputeArbitration:
       /\b(arbitration|arbitrator|arbitrate|arbitrated|binding\s+arbitration|aaa\b|jams|mediation|mediate|litigation\s+in\s+the\s+courts|dispute\s+resolution\s+(?:clause|process))\b/.test(
@@ -358,7 +367,7 @@ export function detectPremiumCommercialSignals(text: string): PremiumCommercialS
       ),
     confidentiality: /\b(nda|confidential|non[-\s]?disclosure)\b/.test(low),
     referralChannel: /\b(referral|channel\s+partner|introduced?\s+accounts?|sourced\s+deals?|growth\s+partner|business\s+development)\b/.test(low),
-    contractorServices: /\b(independent\s+contractor|contractor|1099|statement\s+of\s+work|deliverables?)\b/.test(low),
+    contractorServices: /\b(independent\s+contractor|1099|statement\s+of\s+work)\b/.test(low) || /\bcontractor\b/.test(low),
     collaborationPilot: /\b(collaboration|pilot|trial|evaluation|proof[-\s]?of[-\s]?concept)\b/.test(low),
   };
 }
@@ -469,8 +478,13 @@ function appendMarketingAgencyPremiumClausePack(parsed: ParsedDraftShape, rawInt
   return out;
 }
 
-function buildCommercialSignalClauses(signals: PremiumCommercialSignals): string[] {
+function intakeMentionsCrmCampaignOrSales(raw: string): boolean {
+  return /\b(?:crm|campaign|lead\s+data|customer\s+list|sales\s+representative|salesperson)\b/i.test(raw || "");
+}
+
+function buildCommercialSignalClauses(signals: PremiumCommercialSignals, rawIntake = ""): string[] {
   const out: string[] = [];
+  const crmCampaign = intakeMentionsCrmCampaignOrSales(rawIntake);
   if (signals.commission)
     out.push(
       "Commission mechanics: variable compensation applies only to qualified transactions and is calculated from defined net receipts after cleared funds, less documented refunds/chargebacks and taxes unless otherwise stated in the fee schedule.",
@@ -485,7 +499,9 @@ function buildCommercialSignalClauses(signals: PremiumCommercialSignals): string
     );
   if (signals.ownershipData)
     out.push(
-      "Ownership and data: client ownership of deliverables, lead/CRM records, and campaign data is preserved except for provider pre-existing tools and know-how, which remain provider property under a limited use license.",
+      crmCampaign
+        ? "Ownership and data: client ownership of deliverables, lead/CRM records, and campaign data is preserved except for provider pre-existing tools and know-how, which remain provider property under a limited use license."
+        : "Ownership and data: client ownership of deliverables is preserved except for provider pre-existing tools and know-how, which remain provider property.",
     );
   if (signals.adCompliance)
     out.push(
@@ -493,7 +509,9 @@ function buildCommercialSignalClauses(signals: PremiumCommercialSignals): string
     );
   if (signals.contractorServices)
     out.push(
-      "No authority to bind: contractor or sales representative has no authority to bind the company, alter approved pricing/terms, or make guarantees/promises outside written authorization.",
+      crmCampaign
+        ? "No authority to bind: contractor or sales representative has no authority to bind the company, alter approved pricing/terms, or make guarantees/promises outside written authorization."
+        : "No authority to bind: the service provider has no authority to bind the company, alter approved pricing/terms, or make guarantees/promises outside written authorization.",
     );
   if (signals.exclusivity)
     out.push(
@@ -521,7 +539,9 @@ function buildCommercialSignalClauses(signals: PremiumCommercialSignals): string
       "Independent contractor status and deliverables: provider performs services as an independent contractor, controls work methods, and delivers the milestones, reports, and handoff artifacts described in the scope.",
     );
     out.push(
-      "Authority, representations, and access controls: provider may not make false or misleading promises, and company systems/CRM access may be revoked immediately upon suspension or termination.",
+      crmCampaign
+        ? "Authority, representations, and access controls: provider may not make false or misleading promises, and company systems/CRM access may be revoked immediately upon suspension or termination."
+        : "Authority, representations, and access controls: provider may not make false or misleading promises, and company systems access may be revoked immediately upon suspension or termination.",
     );
     out.push(
       "Execution and signatures: the Parties execute through authorized signers with printed name, title, and date lines in the signature block.",
@@ -562,14 +582,17 @@ function buildReferralPack(signals: PremiumCommercialSignals, rawIntake: string)
   return out;
 }
 
-function buildContractorPack(signals: PremiumCommercialSignals): string[] {
+function buildContractorPack(signals: PremiumCommercialSignals, rawIntake = ""): string[] {
   if (!signals.contractorServices) return [];
+  const crmCampaign = intakeMentionsCrmCampaignOrSales(rawIntake);
   const out: string[] = [
     "Contractor scope and deliverables: deliverables, acceptance checkpoints, and revision windows are defined in the statement of work and incorporated by reference.",
   ];
   if (signals.ownershipData)
     out.push(
-      "Work product and account ownership: client owns final deliverables, campaign assets, and CRM/lead data generated for the engagement, with contractor retaining pre-existing tools and know-how.",
+      crmCampaign
+        ? "Work product and account ownership: client owns final deliverables, campaign assets, and CRM/lead data generated for the engagement, with contractor retaining pre-existing tools and know-how."
+        : "Work product and account ownership: client owns final deliverables generated for the engagement, with contractor retaining pre-existing tools and know-how.",
     );
   if (signals.adCompliance)
     out.push(
@@ -715,9 +738,9 @@ export function injectCoreClausesConservative(parsed: ParsedDraftShape, rawIntak
   const scenario = detectPremiumScenarioCategory(rawIntake, fam);
   const leanScenario = premiumScenarioPrefersLeanPacks(scenario.category);
   const signalClauses = [
-    ...buildCommercialSignalClauses(signals),
+    ...buildCommercialSignalClauses(signals, rawIntake),
     ...buildReferralPack(signals, rawIntake),
-    ...buildContractorPack(signals),
+    ...buildContractorPack(signals, rawIntake),
     ...buildHybridConfidentialityPack(signals, rawIntake),
   ];
   const prioritizedSignalClauses = signalClauses.filter((c) =>
@@ -757,7 +780,7 @@ export function reinforcePremiumSignalPersistence(parsed: ParsedDraftShape, rawI
   }
   if (!missing.length) return parsed;
   const add = nz(parsed.additional_terms);
-  const repairs = buildCommercialSignalClauses(signals)
+  const repairs = buildCommercialSignalClauses(signals, rawIntake)
     .filter((c) => {
       const k = c.toLowerCase();
       if (missing.includes("noncircumvent") && /non-circumvent|anti-circumvention|bypass/.test(k)) return true;
@@ -771,7 +794,11 @@ export function reinforcePremiumSignalPersistence(parsed: ParsedDraftShape, rawI
     repairs.push("• No-hire / non-solicit: neither Party will solicit, recruit, or hire the other Party’s employees, contractors, or key team members during the term and agreed tail period.");
   }
   if (missing.includes("ownership_data") && !repairs.some((r) => /ownership|work product|intellectual property|data|crm/i.test(r))) {
-    repairs.push("• Ownership and data: discloser ownership of work product, inventions, CRM/lead records, and customer-list information is preserved unless expressly licensed in writing.");
+    repairs.push(
+      intakeMentionsCrmCampaignOrSales(rawIntake)
+        ? "• Ownership and data: discloser ownership of work product, inventions, CRM/lead records, and customer-list information is preserved unless expressly licensed in writing."
+        : "• Ownership and data: discloser ownership of work product and inventions is preserved unless expressly licensed in writing.",
+    );
   }
   if (!repairs.length) return parsed;
   const block = `Signal persistence safeguards:\n\n${repairs.join("\n")}`;

@@ -16,6 +16,10 @@ import {
   type AgreementTitleScopeDecision,
 } from "./paidProAgreementTitleScope";
 import { repairPaidProDocumentTitleOpening } from "./paidProDocumentTitleOpeningRepair";
+import {
+  declaredRoleParentheticalForEntity,
+  overlayDeclaredOpeningRoleParentheticals,
+} from "./paidProOpeningRoleLabelConsistency";
 
 export const PAID_PRO_MUTUAL_CONSULTING_TITLE = "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT";
 export const PAID_PRO_CONSULTING_TITLE = "CONSULTING AND IMPLEMENTATION AGREEMENT";
@@ -59,19 +63,36 @@ export function paidProTitleScopeDecision(intakeText?: string | null): Agreement
   return resolveAgreementTitleFromIntakeScope(intakeText);
 }
 
+const MONTH =
+  "(?:January|February|March|April|May|June|July|August|September|October|November|December)";
+const LABELED_EFFECTIVE_DATE_RE = new RegExp(
+  `(?:as of|effective as of)\\s+(${MONTH}\\s+\\d{1,2},\\s+\\d{4})\\s+\\(\\s*the\\s+["']Effective Date["']\\s*\\)`,
+  "i",
+);
+
+function labeledEffectiveDateFromOpening(text: string): string | null {
+  const match = (text || "").slice(0, 2_500).match(LABELED_EFFECTIVE_DATE_RE);
+  return match?.[1] ? match[1].replace(/\s+/g, " ").trim() : null;
+}
+
 export function buildCanonicalPaidProServicesOpeningRecital(
   client: CanonicalPartyIdentityRecord,
   provider: CanonicalPartyIdentityRecord,
   intakeText?: string | null,
+  labeledEffectiveDate?: string | null,
 ): string {
   const clientName = client.fullLegalName.trim();
   const providerName = provider.fullLegalName.trim();
   const title = resolvePaidProServicesAgreementTitle(intakeText);
   const phrase = recitalAgreementPhrase(title);
+  const clientRole = client.roleLabel.replace(/\s+/g, " ").trim() || "Client";
+  const providerRole = provider.roleLabel.replace(/\s+/g, " ").trim() || "Service Provider";
+  const date = (labeledEffectiveDate || "").replace(/\s+/g, " ").trim();
+  const asOf = date ? ` as of ${date} (the "Effective Date")` : "";
   return [
     title,
     "",
-    `This ${phrase} (this "Agreement") is entered into as of the Effective Date by and between ${clientName} ("Client") and ${providerName} ("Service Provider"). Client and Service Provider may be referred to individually as a "Party" and collectively as the "Parties."`,
+    `This ${phrase} (this "Agreement") is entered into${asOf} by and between ${clientName} ("${clientRole}") and ${providerName} ("${providerRole}"). ${clientRole} and ${providerRole} may be referred to individually as a "Party" and collectively as the "Parties."`,
     "",
   ].join("\n");
 }
@@ -129,23 +150,61 @@ function escapeOpeningRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function roleBindingAlternation(roleLabel: string): string {
+  const role = roleLabel.replace(/\s+/g, " ").trim();
+  if (/^service\s+provider$/i.test(role) || /^provider$/i.test(role)) {
+    return "(?:Service\\s+Provider|Provider)";
+  }
+  return escapeOpeningRegex(role);
+}
+
 /** A role label is valid only when it is bound directly to the authority name for that slot. */
 function openingHasExactAuthorityRoleBindings(
   opening: string,
-  client: string,
-  provider: string,
+  records: readonly CanonicalPartyIdentityRecord[],
 ): boolean {
-  if (!client || !provider) return false;
+  const pair = records.slice(0, 2);
+  if (pair.length < 2) return false;
   const quote = `["'“”‘’]?`;
-  const clientBinding = new RegExp(
-    `${escapeOpeningRegex(client)}\\s*\\(\\s*${quote}Client${quote}\\s*\\)`,
-    "i",
+  return pair.every((rec) => {
+    const name = rec.fullLegalName.trim();
+    const role = rec.roleLabel.replace(/\s+/g, " ").trim();
+    if (!name || !role) return false;
+    return new RegExp(
+      `${escapeOpeningRegex(name)}\\s*\\(\\s*${quote}${roleBindingAlternation(role)}${quote}\\s*\\)`,
+      "i",
+    ).test(opening);
+  });
+}
+
+function openingHasDeclaredCommercialRoleBindings(
+  opening: string,
+  records: readonly CanonicalPartyIdentityRecord[],
+): boolean {
+  const quote = `["'“”‘’]?`;
+  return records.slice(0, 2).every((rec) => {
+    const name = rec.fullLegalName.trim();
+    if (!name) return false;
+    return new RegExp(
+      `${escapeOpeningRegex(name)}\\s*\\(\\s*${quote}[A-Za-z][A-Za-z\\s-]{1,40}${quote}\\s*\\)`,
+      "i",
+    ).test(opening);
+  });
+}
+
+/** Index-default Client/SP (or missing labels) must not rewrite an already-declared Consultant/Client opening. */
+function openingRecordsAreIndexDefaultOrUnspecified(
+  records: readonly CanonicalPartyIdentityRecord[],
+): boolean {
+  const explicitRoles = records
+    .slice(0, 2)
+    .map((r) => r.roleLabel.replace(/\s+/g, " ").trim())
+    .filter((r) => r && !/^party(?:\s+\d+)?$/i.test(r));
+  if (explicitRoles.length < 2) return true;
+  return (
+    /^client$/i.test(explicitRoles[0] ?? "") &&
+    /^(?:service\s+provider|provider)$/i.test(explicitRoles[1] ?? "")
   );
-  const providerBinding = new RegExp(
-    `${escapeOpeningRegex(provider)}\\s*\\(\\s*${quote}(?:Service\\s+Provider|Provider)${quote}\\s*\\)`,
-    "i",
-  );
-  return clientBinding.test(opening) && providerBinding.test(opening);
 }
 
 /**
@@ -309,15 +368,29 @@ export function detectPaidProMalformedServicesOpening(
   if (provider && !preSec1.includes(provider)) {
     return true;
   }
-  if (client && provider && !openingHasExactAuthorityRoleBindings(preSec1, client, provider)) {
-    return true;
-  }
-  if (!/\(\s*["']?Client["']?\s*\)/i.test(preSec1)) {
-    return true;
-  }
-  // Accept intake role aliases (Provider / Service Provider) — commercial role-alias preserve.
-  if (!/\(\s*["']?(?:Service\s+Provider|Provider)["']?\s*\)/i.test(preSec1)) {
-    return true;
+  if (records && records.length >= 2) {
+    if (openingHasExactAuthorityRoleBindings(preSec1, records)) {
+      // Declared party-to-role bindings already match the manifest.
+    } else if (openingHasDeclaredCommercialRoleBindings(preSec1, records)) {
+      // Preserve Consultant/Client openings when slots are empty or still
+      // index-default Client/Service Provider. Ordinary Client/SP openings
+      // still repair when they disagree with a non-default manifest.
+      const preserveDeclaredNonDefault =
+        openingRecordsAreIndexDefaultOrUnspecified(records) &&
+        /\(\s*["']?Consultant["']?\s*\)/i.test(preSec1);
+      if (!preserveDeclaredNonDefault) {
+        return true;
+      }
+    } else {
+      return true;
+    }
+  } else {
+    if (!/\(\s*["']?Client["']?\s*\)/i.test(preSec1)) {
+      return true;
+    }
+    if (!/\(\s*["']?(?:Service\s+Provider|Provider)["']?\s*\)/i.test(preSec1)) {
+      return true;
+    }
   }
   if (/Effective\s+Date\s+This\s+Agreement\s+is\s+between/i.test(preSec1)) {
     return true;
@@ -349,17 +422,30 @@ export function isPaidProOpeningStructurallyValid(
   if (!PAID_PRO_CANONICAL_TITLE_RE.test(head)) {
     return false;
   }
-  if (!/entered\s+into\s+as\s+of/i.test(head)) {
+  if (!/entered\s+into\b/i.test(head)) {
     return false;
   }
   if (!head.includes(client) || !head.includes(provider)) {
     return false;
   }
-  if (!openingHasExactAuthorityRoleBindings(head, client, provider)) {
-    return false;
-  }
-  if (!/\(\s*["']?Client["']?\s*\)/i.test(head) || !/\(\s*["']?Service Provider["']?\s*\)/i.test(head)) {
-    return false;
+  if (!openingHasExactAuthorityRoleBindings(head, records)) {
+    if (
+      !openingHasDeclaredCommercialRoleBindings(head, records) ||
+      !openingRecordsAreIndexDefaultOrUnspecified(records) ||
+      !/\(\s*["']?Consultant["']?\s*\)/i.test(head)
+    ) {
+      return false;
+    }
+  } else {
+    const firstRole = records[0]!.roleLabel.replace(/\s+/g, " ").trim() || "Client";
+    const secondRole = records[1]!.roleLabel.replace(/\s+/g, " ").trim() || "Service Provider";
+    const quote = `["'“”‘’]?`;
+    if (
+      !new RegExp(`\\(\\s*${quote}${roleBindingAlternation(firstRole)}${quote}\\s*\\)`, "i").test(head) ||
+      !new RegExp(`\\(\\s*${quote}${roleBindingAlternation(secondRole)}${quote}\\s*\\)`, "i").test(head)
+    ) {
+      return false;
+    }
   }
 
   const first = meaningfulLines(body, 1)[0] ?? "";
@@ -433,6 +519,18 @@ export function repairPaidProServicesAgreementOpening(
   if (isPaidProOpeningStructurallyValid(body, records)) {
     return { text: body, repairs };
   }
+  const clientName = client.fullLegalName.trim();
+  const providerName = provider.fullLegalName.trim();
+  if (
+    clientName &&
+    providerName &&
+    body.includes(clientName) &&
+    body.includes(providerName) &&
+    /entered\s+into(?:\s+as\s+of\s+[A-Za-z]+\s+\d{1,2},\s+\d{4})?\s+by\s+and\s+between/i.test(body.slice(0, 2_500)) &&
+    !/as\s+of\s+the\s+Effective\s+Date/i.test(body.slice(0, 2_500))
+  ) {
+    return { text: body, repairs };
+  }
 
   const { operative, executionTail } = splitOperativeAndExecutionTail(body);
   const sec1Idx = findOpeningSectionOneIndex(operative);
@@ -444,7 +542,12 @@ export function repairPaidProServicesAgreementOpening(
   const remainder = executionTail
     ? `${remainderBody}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trim()
     : remainderBody;
-  const opening = buildCanonicalPaidProServicesOpeningRecital(client, provider, intakeText);
+  const opening = buildCanonicalPaidProServicesOpeningRecital(
+    client,
+    provider,
+    intakeText,
+    labeledEffectiveDateFromOpening(body),
+  );
   repairs.push("opening:prepend_canonical_services_recital");
   if (preservedPrefix) repairs.push("opening:preserve_pre_section_one_operative_blocks");
   return { text: `${opening}${remainder}`, repairs };
@@ -479,8 +582,19 @@ export function detectPaidProMalformedMultiPartyOpening(
   const amongCount = (openingScan.match(/\bby\s+and\s+among\b/gi) ?? []).length;
   const betweenCount = (openingScan.match(/\bby\s+and\s+between\b/gi) ?? []).length;
   if (enteredCount > 1 || (amongCount > 0 && betweenCount > 0)) return true;
-  if (records.some((r) => !openingScan.includes(r.fullLegalName.trim()))) return true;
+  const openingScanIdentity = openingScan.replace(/,/g, "");
+  if (
+    records.some((r) => {
+      const name = r.fullLegalName.trim();
+      if (!name) return true;
+      if (openingScan.includes(name)) return false;
+      return !openingScanIdentity.includes(name.replace(/,/g, ""));
+    })
+  ) {
+    return true;
+  }
   const roleMarks = records.filter((r) => {
+    if (declaredRoleParentheticalForEntity(openingScan, r.fullLegalName)) return true;
     const role = r.roleLabel.trim();
     if (!role || role.toLowerCase() === r.fullLegalName.trim().toLowerCase()) return false;
     return new RegExp(`\\(\\s*["']?${role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']?\\s*\\)`, "i").test(
@@ -531,15 +645,16 @@ export function repairPaidProMultiPartyAgreementOpening(
     body = titleRepair.text;
     repairs.push(...titleRepair.repairs);
   }
-  const adjacent = repairAdjacentDuplicatePartyNamesInOpening(body, records);
+  const boundRecords = overlayDeclaredOpeningRoleParentheticals(records, body);
+  const adjacent = repairAdjacentDuplicatePartyNamesInOpening(body, boundRecords);
   body = adjacent.text;
   repairs.push(...adjacent.repairs);
 
-  if (!detectPaidProMalformedMultiPartyOpening(body, records)) {
+  if (!detectPaidProMalformedMultiPartyOpening(body, boundRecords)) {
     return { text: body, repairs };
   }
 
-  const legalNames = new Set(records.map((r) => r.fullLegalName.trim().toLowerCase()).filter(Boolean));
+  const legalNames = new Set(boundRecords.map((r) => r.fullLegalName.trim().toLowerCase()).filter(Boolean));
   const stripped = stripLeadingStandalonePartyLines(body, legalNames);
   if (stripped.stripped > 0) {
     body = stripped.text;
@@ -557,7 +672,7 @@ export function repairPaidProMultiPartyAgreementOpening(
     ? `${remainderBody}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trim()
     : remainderBody;
   const preservedTitle = readCorpusDocumentTitleUpper(body);
-  const opening = buildCanonicalPaidProMultiPartyOpeningRecital(records, intakeText, preservedTitle);
+  const opening = buildCanonicalPaidProMultiPartyOpeningRecital(boundRecords, intakeText, preservedTitle);
   repairs.push("opening:prepend_canonical_multiparty_recital");
   if (preservedPrefix) repairs.push("opening:preserve_pre_section_one_operative_blocks");
   return { text: `${opening}${remainder}`, repairs };
@@ -569,10 +684,11 @@ export function ensurePaidProMultiPartyAgreementOpening(
   intakeText?: string | null,
 ): { text: string; repairs: string[] } {
   if (records.length < 3) return { text, repairs: [] };
-  if (!detectPaidProMalformedMultiPartyOpening(text, records)) {
+  const boundRecords = overlayDeclaredOpeningRoleParentheticals(records, text);
+  if (!detectPaidProMalformedMultiPartyOpening(text, boundRecords)) {
     return { text, repairs: [] };
   }
-  return repairPaidProMultiPartyAgreementOpening(text, records, intakeText);
+  return repairPaidProMultiPartyAgreementOpening(text, boundRecords, intakeText);
 }
 
 /**
@@ -596,6 +712,22 @@ export function needsPaidProServicesOpeningTitleRepair(text: string): boolean {
   return false;
 }
 
+/** Competing leftover titles / recitals still need one pre-freeze repair. */
+function hasCompetingPaidProOpeningResidue(text: string): boolean {
+  const body = (text || "").replace(/\r\n/g, "\n").trim();
+  const sec1Idx = findOpeningSectionOneIndex(body);
+  const openingScanRegion = sec1Idx >= 0 ? openingSliceBeforeSection1(body) : body.slice(0, 4_000);
+  const titleCount = (openingScanRegion.match(PAID_PRO_CANONICAL_TITLE_RE) ?? []).length;
+  const enteredCount = (openingScanRegion.match(/\bentered\s+into\b/gi) ?? []).length;
+  const betweenCount = (openingScanRegion.match(/\bis\s+between\b/gi) ?? []).length;
+  if (titleCount > 1 || enteredCount > 1 || betweenCount > 1) return true;
+  if (/\bSERVICES\s+AGREEMENT\s+This\s+Agreement\b/i.test(openingScanRegion)) return true;
+  if (/This\s+[\w\s]+Agreement[\s\S]{0,160}?This\s+Agreement\s+is\s+between/i.test(openingScanRegion)) {
+    return true;
+  }
+  return false;
+}
+
 export function ensurePaidProServicesAgreementOpening(
   text: string,
   records: readonly CanonicalPartyIdentityRecord[],
@@ -614,17 +746,18 @@ export function ensurePaidProServicesAgreementOpening(
   if (!detectPaidProMalformedServicesOpening(working, records)) {
     return { text: working, repairs };
   }
-  // Preserve already-titled Pro corpora unless the canonical entered-into recital is absent.
-  // Title-only short-circuit previously left "is between" openers frozen as SoT.
+  // Already-titled corpora with a single canonical entered-into recital are byte-idempotent.
+  // Missing role appositives are not a reason to prepend a second opening.
+  // Competing leftover titles / "is between" residue still repair once before freeze.
   const head = working.slice(0, 4_000);
   const hasCanonicalEnteredInto =
-    /entered\s+into\s+as\s+of\s+the\s+Effective\s+Date\s+by\s+and\s+between/i.test(head);
-  const client = records[0]?.fullLegalName.trim() ?? "";
-  const provider = records[1]?.fullLegalName.trim() ?? "";
+    /entered\s+into(?:\s+as\s+of\s+(?:the\s+Effective\s+Date|[A-Za-z]+\s+\d{1,2},\s+\d{4}(?:\s+\(\s*the\s+["']Effective Date["']\s*\))?))?\s+by\s+and\s+between/i.test(
+      head,
+    );
   if (
     !needsPaidProServicesOpeningTitleRepair(working) &&
     hasCanonicalEnteredInto &&
-    openingHasExactAuthorityRoleBindings(head, client, provider)
+    !hasCompetingPaidProOpeningResidue(working)
   ) {
     return { text: working, repairs };
   }

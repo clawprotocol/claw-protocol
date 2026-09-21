@@ -1,3 +1,5 @@
+import type { AgreementParty } from "./agreementTypes";
+import { signingPartiesFromDraft } from "./partyRequiresSignature";
 import type { PaidProVs01PostSignHandoffV1 } from "../vs01/vs01PaidProPostSignHandoff";
 
 export type ResolveRequiredSignerCountArgs = {
@@ -50,4 +52,11 @@ export function countRequiredSignersFromPortableRoles(
 ): number {
   if (!roles?.length) return 0;
   return roles.filter((r) => r.requiresSignature !== false).length;
+}
+
+/** Independent required-signer count from legal-party rows. Never uses completed signatures. */
+export function countRequiredSignersFromParties(
+  parties: readonly AgreementParty[] | null | undefined,
+): number {
+  return signingPartiesFromDraft(parties).length;
 }

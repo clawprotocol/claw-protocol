@@ -9,7 +9,10 @@ import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { extractLineSeparatedLegalEntityParties } from "./partySlotIdentityNormalize";
 import { shortFormsFromLegalName } from "./paidProPartyNamePreserve";
-import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
+import {
+  isolateLegalEntityFromContaminatedName,
+  isStackedPartyIdentityContamination,
+} from "./starterPartyIdentityIsolation";
 import { isSignerTitleLikeRole } from "./starterRoleLabelGuard";
 import {
   resolveCanonicalPartyRoleLabel,
@@ -17,6 +20,7 @@ import {
 } from "./canonicalPartyRoleAuthority";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { repairDraftPartiesFromIntakeAuthority } from "./partySlotIdentityNormalize";
+import { applyExplicitIntakeRolesToParties } from "./legalPartyRepresentativeBind";
 
 const GENERIC_STARTER_PARTY_ROLE = new Set(["", "party", "parties", "signer", "signatory"]);
 
@@ -51,6 +55,19 @@ export function inferStarterCommercialPartyRoles(
   const parties = Array.isArray(draft.parties) ? [...draft.parties] : [];
   if (parties.length !== 2) return draft;
   if (!isStarterServicesAgreementLike(draft, intakeText)) return draft;
+
+  const withExplicitRoles = applyExplicitIntakeRolesToParties(parties, intakeText);
+  const explicitRolesHeld = withExplicitRoles.some((party, index) => {
+    const before = String(parties[index]?.role ?? "").trim();
+    const after = String(party.role ?? "").trim();
+    return after && after !== before && !GENERIC_STARTER_PARTY_ROLE.has(after.toLowerCase());
+  }) || withExplicitRoles.every((party) => {
+    const role = String(party.role ?? "").trim().toLowerCase();
+    return Boolean(role && !GENERIC_STARTER_PARTY_ROLE.has(role) && !isSignerTitleLikeRole(role));
+  });
+  if (explicitRolesHeld) {
+    return { ...draft, parties: withExplicitRoles };
+  }
 
   const authority = resolveStarterTwoPartyCommercialAuthority(
     intakeText,
@@ -127,6 +144,14 @@ function preferStarterPreviewPartyDisplayName(draftName: string, candidate: stri
   const cand = String(candidate || "").replace(/\s+/g, " ").trim();
   if (!draft) return cand;
   if (!cand) return draft;
+  const isolatedDraft = isolateLegalEntityFromContaminatedName(draft);
+  const isolatedCand = isolateLegalEntityFromContaminatedName(cand);
+  if (isStackedPartyIdentityContamination(draft)) {
+    return isolatedDraft || isolatedCand || cand;
+  }
+  if (isStackedPartyIdentityContamination(cand)) {
+    return isolatedCand || isolatedDraft || draft;
+  }
   const draftNorm = normalizeCompare(draft);
   const candNorm = normalizeCompare(cand);
   if (draftNorm === candNorm) {

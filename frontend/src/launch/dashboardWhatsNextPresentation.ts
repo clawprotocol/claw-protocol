@@ -21,6 +21,7 @@ import {
   isAgreementPacketPrepared,
 } from "../vs01/vs01WorkspaceSigningStatus";
 import { formatCreatorReviewProgressLabel } from "./creatorDashboardReviewGate";
+import { rememberOwnerDeliveryTrack } from "../components/agreements/paidProOwnerDeliveryTrack";
 
 export type AgreementTimelineStepId =
   | "draft_created"
@@ -37,15 +38,32 @@ export type AgreementTimelineStep = {
   state: AgreementTimelineStepState;
 };
 
+export type DashboardDeliveryTrack = "review" | "signature" | "draft";
+
 export type DashboardWhatsNextPresentation = {
   agreementId: string;
   agreementTitle: string;
   status: CreatorDashboardStatus;
+  deliveryTrack: DashboardDeliveryTrack;
   headline: string;
   progressLine: string | null;
   nextStepLabel: string;
   timeline: AgreementTimelineStep[];
 };
+
+/** Review track if review links were sent; signature track if signing started without review. */
+export function resolveDashboardDeliveryTrack(row: WorkspaceIndexAgreement): DashboardDeliveryTrack {
+  const persisted = String(row.owner_delivery_track || "").trim().toLowerCase();
+  if (persisted === "review" || persisted === "signature") {
+    rememberOwnerDeliveryTrack(row.id, persisted);
+    return persisted;
+  }
+  if ((row.review_sent_at || "").trim()) return "review";
+  if (row.completed_signed || row.has_server_signing_lock || isAgreementPacketPrepared(row.id)) {
+    return "signature";
+  }
+  return "draft";
+}
 
 const TIMELINE_LABELS: Record<AgreementTimelineStepId, string> = {
   draft_created: "Draft Created",
@@ -96,6 +114,9 @@ export function deriveWhatsNextHeadline(
     return "Waiting for signatures";
   }
   if (status === "ready_for_signing" || status === "review_approved") {
+    if (resolveDashboardDeliveryTrack(row) === "signature") {
+      return "Prepare and send signing links";
+    }
     return "All reviews complete";
   }
   if (status === "in_review") {
@@ -177,16 +198,20 @@ export function deriveAgreementProgressTimeline(
   row: WorkspaceIndexAgreement,
   reviewGate: CreatorDashboardReviewGate,
 ): AgreementTimelineStep[] {
-  const order: AgreementTimelineStepId[] = [
-    "draft_created",
-    "review_sent",
-    "reviews_approved",
-    "signature_links_prepared",
-    "signed",
-  ];
+  const track = resolveDashboardDeliveryTrack(row);
+  const order: AgreementTimelineStepId[] =
+    track === "signature"
+      ? ["draft_created", "signature_links_prepared", "signed"]
+      : track === "review"
+        ? ["draft_created", "review_sent", "reviews_approved", "signature_links_prepared", "signed"]
+        : ["draft_created", "review_sent", "signature_links_prepared", "signed"];
   const completed = order.map((id) => stepComplete(id, row, reviewGate));
   let currentIndex = completed.findIndex((done) => !done);
-  if (currentIndex < 0) currentIndex = order.length - 1;
+  if (track === "draft") {
+    currentIndex = -1;
+  } else if (currentIndex < 0) {
+    currentIndex = order.length - 1;
+  }
 
   return order.map((id, index) => {
     let state: AgreementTimelineStepState = "upcoming";
@@ -205,6 +230,7 @@ export function deriveDashboardWhatsNextPresentation(
     agreementId: row.id,
     agreementTitle: displayCreatorAgreementTitle(row.title),
     status: effectiveStatus(row, reviewGate),
+    deliveryTrack: resolveDashboardDeliveryTrack(row),
     headline: deriveWhatsNextHeadline(row, reviewGate, serverProgress),
     progressLine: deriveWhatsNextProgressLine(row, reviewGate, serverProgress),
     nextStepLabel: deriveWhatsNextNextStep(row, reviewGate),

@@ -1,4 +1,5 @@
 import { apiUrl, errorMessageFromResponse, logClawClientWarning, readJson } from "../lib/clawApi";
+import { ownerApiFetch } from "../lib/ownerApiClient";
 
 export type UsageReceiptPayload = {
   usage_event_id?: string;
@@ -14,7 +15,8 @@ export async function fetchUsageReceipt(usageId: string): Promise<UsageReceiptFe
   const id = (usageId || "").trim();
   if (!id) return { data: null, error: "Missing usage receipt id." };
   try {
-    const res = await fetch(apiUrl(`/v1/usage/${encodeURIComponent(id)}/receipt`), {
+    const res = await ownerApiFetch(`/v1/usage/${encodeURIComponent(id)}/receipt`, {
+      method: "GET",
       headers: { Accept: "application/json" },
     });
     if (!res.ok) {
@@ -36,8 +38,9 @@ export async function fetchUsageBundle(usageId: string): Promise<UsageBundleFetc
   const id = (usageId || "").trim();
   if (!id) return { data: null, error: "Missing usage id." };
   try {
-    const res = await fetch(apiUrl(`/v1/usage/${encodeURIComponent(id)}/bundle`), {
-      headers: { Accept: "application/json" },
+    const res = await ownerApiFetch(`/v1/usage/${encodeURIComponent(id)}/bundle`, {
+      method: "GET",
+      headers: { Accept: "application/json, application/zip" },
     });
     if (!res.ok) {
       const msg = await errorMessageFromResponse(res, `Could not load bundle (HTTP ${res.status}).`);

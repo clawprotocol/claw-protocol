@@ -1,8 +1,11 @@
 /**
  * RC Journey 7 Authority Certification — production API contracts with deterministic service mocks.
  *
- * Status: core ownership path verified; interruption/adversarial cases + full signing chain.
+ * Auth/claim (same canonical ID) is NOT certified here. Playwright finalize-auth
+ * mocks that return a canned different owned ID are not production authority.
+ * Run: pytest backend/tests/test_j7_auth_claim_authority.py -q
  *
+ * This file keeps checkout-order / adversarial / signing-chain cases.
  * Run: npx playwright test e2e/rc-journey-7-authority.spec.ts
  */
 import { expect, test } from "@playwright/test";
@@ -45,7 +48,7 @@ import {
 import { createAuthoritySigningChainState } from "./helpers/rcAuthorityCertificationChain";
 
 const CORE_SCENARIOS: OwnershipMigrationScenario[] = [
-  { id: "A", label: "auth before checkout settlement", anonAgreementId: "ag_own_a_anon", ownedAgreementId: "ag_own_a_owned" },
+  // Case A (auth-before-checkout claim) lives in backend/tests/test_j7_auth_claim_authority.py.
   {
     id: "B",
     label: "checkout settlement before auth",

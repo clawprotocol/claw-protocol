@@ -10,8 +10,33 @@ import { getOrgId } from "../launch/orgContext";
 import { readE2eAuthSessionForDev } from "../auth/e2eAuthSessionBridge";
 import { isPublicProductionHostname } from "../launch/devPaymentBypass";
 import { readDemoSessionUser } from "../launch/guestCheckoutAuthority";
+import { matchAppRoute, routeRequiresAuthenticatedSession } from "../launch/routes";
 
 export type CurrentUserSource = "supabase_session" | "e2e_test_bridge" | "demo_checkout" | "anonymous";
+
+export type AuthLifecycleStatus = "loading" | "authenticated" | "signed_out" | "refresh_failed";
+
+export type ResolvedAuthLifecycle = {
+  status: AuthLifecycleStatus;
+  accessToken?: string | null;
+  userId?: string | null;
+  email?: string | null;
+  displayName?: string | null;
+};
+
+let resolvedAuthLifecycle: ResolvedAuthLifecycle | null = null;
+
+export function bindResolvedAuthLifecycle(next: ResolvedAuthLifecycle | null): void {
+  resolvedAuthLifecycle = next;
+}
+
+export function readResolvedAuthLifecycle(): ResolvedAuthLifecycle | null {
+  return resolvedAuthLifecycle;
+}
+
+export function isJwtAccessToken(token: string): boolean {
+  return /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token.trim());
+}
 
 export type CurrentUser = {
   id: string;
@@ -72,8 +97,52 @@ export function resolveCurrentUser(args?: {
   supabaseUserId?: string | null;
   supabaseEmail?: string | null;
   supabaseDisplayName?: string | null;
+  lifecycle?: ResolvedAuthLifecycle | null;
 }): CurrentUser {
   const displayName = readStoredDisplayName();
+  const lifecycle = args?.lifecycle === undefined ? resolvedAuthLifecycle : args.lifecycle;
+  if (lifecycle?.status === "signed_out" || lifecycle?.status === "refresh_failed") {
+    void getOrgId();
+    return {
+      id: "anonymous",
+      displayName: displayName || "Guest",
+      email: null,
+      isAuthenticated: false,
+      source: "anonymous",
+    };
+  }
+  if (lifecycle?.status === "authenticated") {
+    const token = String(lifecycle.accessToken || "").trim();
+    const id = String(lifecycle.userId || "").trim();
+    if (id && isJwtAccessToken(token)) {
+      return {
+        id,
+        displayName: (lifecycle.displayName || "").trim() || displayName || lifecycle.email || "Signed-in user",
+        email: (lifecycle.email || "").trim() || null,
+        isAuthenticated: true,
+        source: "supabase_session",
+      };
+    }
+    void getOrgId();
+    return {
+      id: "anonymous",
+      displayName: displayName || "Guest",
+      email: null,
+      isAuthenticated: false,
+      source: "anonymous",
+    };
+  }
+  if (lifecycle?.status === "loading") {
+    void getOrgId();
+    return {
+      id: "anonymous",
+      displayName: displayName || "Guest",
+      email: null,
+      isAuthenticated: false,
+      source: "anonymous",
+    };
+  }
+
   const supabaseUserId = (args?.supabaseUserId || "").trim();
   if (supabaseUserId) {
     return {
@@ -117,7 +186,8 @@ export function resolveCurrentUser(args?: {
     };
   }
 
-  // Org header / local-org is workspace context only — never authentication.
+  // Stored identity or arbitrary token text is never authentication.
+  // Org header / local-org is workspace context only.
   void getOrgId();
   return {
     id: "anonymous",
@@ -128,39 +198,31 @@ export function resolveCurrentUser(args?: {
   };
 }
 
+function currentLocationSearch(pathname: string, explicitSearch?: string): string | undefined {
+  if (explicitSearch !== undefined) return explicitSearch;
+  if (pathname.includes("?")) return undefined;
+  if (typeof window !== "undefined") return window.location.search || "";
+  return "";
+}
+
 /** Dashboard/account routes that require a validated session. */
-export function isAuthenticatedDashboardSurface(pathname: string): boolean {
-  const p = (pathname || "").replace(/\/$/, "") || "/";
-  if (p === "/app" || p === "/dashboard") return true;
-  if (p === "/app/create") return true;
-  if (p === "/app/billing" || p === "/app/settings" || p === "/app/signatures") return true;
-  if (p === "/app/affiliate" || p === "/app/opportunity" || p === "/app/agreement-memory") return true;
-  if (p === "/app/integrations" || p === "/app/work-product") return true;
-  if (p === "/app/genesis-referral") return true;
-  if (p.startsWith("/app/ops/")) return true;
-  if (p === "/app/admin" || p === "/app/founder" || p === "/founder" || p === "/admin") return true;
-  if (p === "/app/agreements" || p.startsWith("/app/agreements/")) return true;
-  if (p.startsWith("/app/done/") || p.startsWith("/app/ready/") || p.startsWith("/app/send/")) return true;
-  if (p.startsWith("/app/checkout/") || p.startsWith("/app/review-changes/")) return true;
-  if (p.startsWith("/app/agreements/") && p.includes("/signing-status")) return true;
-  return false;
+export function isAuthenticatedDashboardSurface(pathname: string, search?: string): boolean {
+  const route = matchAppRoute(pathname, currentLocationSearch(pathname, search));
+  return route ? routeRequiresAuthenticatedSession(route.access) : false;
 }
 
 /** @deprecated Use isAuthenticatedDashboardSurface — kept for older call sites. */
-export function isDashboardAccountSurface(pathname: string): boolean {
-  return isAuthenticatedDashboardSurface(pathname);
+export function isDashboardAccountSurface(pathname: string, search?: string): boolean {
+  return isAuthenticatedDashboardSurface(pathname, search);
 }
 
 /** Reviewer and signer links stay public — no login redirect. */
-export function isPublicTokenAgreementSurface(pathname: string): boolean {
-  const p = (pathname || "").replace(/\/$/, "") || "/";
-  if (/^\/agreements\/[^/]+\/review$/i.test(p)) return true;
+export function isPublicTokenAgreementSurface(pathname: string, search?: string): boolean {
+  const rawPath = (pathname || "").split("?")[0];
+  const p = rawPath.replace(/\/$/, "") || "/";
+  if (/^\/agreements\/[^/]+\/(review|sign)$/i.test(p)) return true;
   if (/^\/verify\//i.test(p)) return true;
-  if (/^\/app\/esign\/[^/]+$/i.test(p) && p !== "/app/esign/new") return true;
-  if (typeof window !== "undefined") {
-    if (/^\/app\/agreements\/[^/]+$/i.test(p) && /\?.*(?:^|&)(?:t|token)=/i.test(window.location.search)) {
-      return true;
-    }
-  }
-  return false;
+  if (/^\/app\/verify\/[^/]+$/i.test(p)) return true;
+  const route = matchAppRoute(pathname, currentLocationSearch(pathname, search));
+  return route?.access === "recipient_token";
 }

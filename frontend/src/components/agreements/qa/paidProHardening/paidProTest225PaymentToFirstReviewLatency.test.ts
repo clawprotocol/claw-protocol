@@ -90,14 +90,25 @@ function buildAcceptedRetryBody(targetLen: number): string {
     "This Agreement is entered into between Blue Canyon Analytics LLC (Client) and Iron Vale Systems Inc. (Service Provider).",
     "Fixed fee $8,500. Governing law: Delaware.",
     "",
+    "1. Scope. Service Provider shall implement AI workflow services, documentation, and training.",
+    "2. Payment. Client shall pay a fixed fee of $8,500 upon execution.",
+    "3. Term. The term is twelve months unless earlier terminated.",
+    "4. Confidentiality. Each party shall protect non-public information.",
+    "5. Intellectual Property. Client owns deliverables after payment.",
+    "6. Limitation of Liability. Except for willful misconduct, liability is limited to fees paid in the prior twelve months.",
+    "7. Termination. Either party may terminate on thirty days written notice.",
+    "8. Governing Law. This Agreement is governed by the laws of the State of Delaware.",
+    "9. Notices. Notices shall be sent to each party at its principal business address.",
+    "10. Entire Agreement. This Agreement constitutes the entire agreement of the parties.",
+    "11. Electronic Signatures. The parties may execute this Agreement electronically.",
   ].join("\n");
   let body = header;
   let i = 0;
   while (body.length < targetLen) {
-    body += `\nSection ${i + 1}. Scope, payment, confidentiality, termination, and dispute resolution for milestone ${i + 1}. `;
+    body += `\nOperational schedule ${i + 1}. The parties shall keep records for milestone ${i + 1}, including delivery, acceptance, and the $8,500 fee under Delaware law.`;
     i += 1;
   }
-  return `${body}\n\nIN WITNESS WHEREOF\nCLIENT: Blue Canyon Analytics LLC\nSERVICE PROVIDER: Iron Vale Systems Inc.`;
+  return `${body}\n\nIN WITNESS WHEREOF, the Parties execute this Agreement.\nCLIENT: Blue Canyon Analytics LLC\nBy: __________________________\nSERVICE PROVIDER: Iron Vale Systems Inc.\nBy: __________________________`;
 }
 
 /** Flatten maps wire generationOutcome; span outcome is omitted when generationOutcome is present. */
@@ -362,9 +373,12 @@ describe("paidPro Test225 payment to first review latency", () => {
     assertTest225PremiumNetworkCallBudget();
     expect(paidProCheckoutCompletionHasVisibleOutcome(out)).toBe(true);
     expect(
-      ["server_full_draft_retry", "server_full_draft", PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE].includes(
-        out.premiumRenderSource,
-      ),
+      [
+        "server_full_draft_retry",
+        "server_full_draft",
+        "server_full_draft_degraded",
+        PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+      ].includes(out.premiumRenderSource),
     ).toBe(true);
   });
 

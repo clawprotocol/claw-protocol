@@ -14,6 +14,7 @@ import { resolveCanonicalPartyRoleLabel, isGenericCanonicalRole } from "./canoni
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import {
   collapsePartySlotCandidates,
+  isInternalPartyAliasRole,
   isInvalidPartySlotLegalEntity,
   normalizeAgreementPartyName,
   resolveHirerVersusHiredCompanySlots,
@@ -21,11 +22,13 @@ import {
 import { extractAgreementEntityCandidates, dedupeEntityCandidatesToLegalParties } from "../../agreement/partyPlaceholderDisplay";
 import { logPaidProEntityMap } from "./paidProPlaceholderAttributionLog";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
-import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
+import { repairOpeningRecitalRoleLabelsFromManifest, declaredRoleParentheticalForEntity } from "./paidProOpeningRoleLabelConsistency";
 import {
+  isAgreementSectionHeadingPartyName,
   isAuthoritativeLegalEntityName,
   preserveFullLegalPartyNamesInOpeningAndSignatures,
   shortFormsFromLegalName,
+  shouldPreservePartyShortFormMatch,
 } from "./paidProPartyNamePreserve";
 import { definedShortNameFromLegalEntity } from "./paidProAgreementPolish";
 import type { CanonicalPartyIdentity as SignerCanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
@@ -46,9 +49,6 @@ export const PARTY_ENTITY_SUFFIX_RE =
 
 const INVALID_CANONICAL_PARTY_PHRASE_RE =
   /\b(?:effective\s+date|services?\s+term|governing\s+law|this\s+agreement|agreement|payment\s+terms?|electronic\s+signatures?|confidentiality|miscellaneous|termination|scope|purpose|ownership|notices?|dispute|venue|jurisdiction|signature|execution)\b/i;
-
-const SECTION_HEADING_PARTY_PREFIX_RE =
-  /^(?:INDEPENDENT CONTRACTOR AND ACCESS|SCOPE OF SERVICES|WARRANTIES AND COMPLIANCE|LIMITATION OF LIABILITY|INTELLECTUAL PROPERTY|CONFIDENTIALITY|GOVERNING LAW|NOTICES|TERMINATION|ELECTRONIC SIGNATURES|ENTIRE AGREEMENT|MISCELLANEOUS|FEES AND PAYMENT|TERM\b|CLIENT\.)/i;
 
 const ADDRESS_PLACEHOLDER_LINE_RE =
   /(?:,\s*)?(?:a\s+\[[^\]]+\]\s+)?(?:with\s+(?:its\s+)?(?:principal\s+place\s+of\s+business|principal\s+office|mailing\s+address|notice\s+address)|(?:principal\s+place\s+of\s+business|principal\s+office|mailing\s+address|notice\s+address)\s*(?:at|:)?|located\s+at)\s+\[?(?:client\s+address|service\s+provider\s+address|address|principal\s+place\s+of\s+business|principal\s+office|mailing\s+address|notice\s+address)[^\]\n.,;]*\]?/gi;
@@ -153,17 +153,47 @@ function norm(s: string): string {
   return s.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function roleLabelForIndex(index: number, explicit?: string, intakeRaw?: string | null): string {
+function roleLabelForIndex(
+  index: number,
+  explicit?: string,
+  intakeRaw?: string | null,
+  partyCount = 2,
+): string {
   const t = (explicit || "").trim();
+  if (t && !isGenericCanonicalRole(t) && !isInternalPartyAliasRole(t)) {
+    return resolveCanonicalPartyRoleLabel({
+      partyIndex: index,
+      partyCount,
+      explicitRole: t,
+      preserveIntakeRole: true,
+    });
+  }
   if (intakeRaw && isTripartiteLabeledPartiesIntake(intakeRaw)) {
     return tripartiteRoleLabelForPartyIndex(index);
   }
   return resolveCanonicalPartyRoleLabel({
     partyIndex: index,
-    partyCount: 2,
+    partyCount,
     explicitRole: t,
     preserveIntakeRole: Boolean(t && !isGenericCanonicalRole(t)),
   });
+}
+
+function mergeRoleLabelsFromCorpus(
+  text: string,
+  partyNames: readonly string[] | null | undefined,
+  roleLabels?: readonly string[] | null,
+): string[] | undefined {
+  const names = (partyNames || []).map((n) => String(n || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+  if (names.length < 2) return roleLabels ? [...roleLabels] : undefined;
+  const merged = names.map((name, index) => {
+    const explicit = String(roleLabels?.[index] || "").trim();
+    if (explicit && !isGenericCanonicalRole(explicit) && !isInternalPartyAliasRole(explicit)) {
+      return explicit;
+    }
+    return declaredRoleParentheticalForEntity(text, name) || explicit;
+  });
+  return merged.some((role) => role.length >= 2) ? merged : roleLabels ? [...roleLabels] : undefined;
 }
 
 function normalizedName(s: string): string {
@@ -224,7 +254,7 @@ function isInvalidCanonicalPartyName(name: string, knownPartyTokens?: readonly s
   if (isInvalidPartySlotLegalEntity(t)) return true;
   if (/^(?:party|parties|client|service provider|provider|contractor|company)$/i.test(t)) return true;
   if (INVALID_CANONICAL_PARTY_PHRASE_RE.test(t)) return true;
-  if (SECTION_HEADING_PARTY_PREFIX_RE.test(t)) return true;
+  if (isAgreementSectionHeadingPartyName(t)) return true;
   if (/^(?:this\s+(?:mutual\s+[\w\s]+?\s+)?agreement|agreement|entered\s+into|between)\b/i.test(t)) {
     return true;
   }
@@ -372,7 +402,7 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
       const signer = signerBySlot[index];
       return {
         fullLegalName: full,
-        roleLabel: roleLabelForIndex(index, hireRoleLabels[index], args.rawIntake),
+        roleLabel: roleLabelForIndex(index, hireRoleLabels[index], args.rawIntake, manifestNames.length),
         displayAlias: definedShortNameFromLegalEntity(full),
         signerName: signer?.signerName?.trim() || null,
         signerTitle: signer?.signerTitle?.trim() || null,
@@ -403,7 +433,7 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
       const signer = signerBySlot[index];
       return {
         fullLegalName: full,
-        roleLabel: roleLabelForIndex(index, lineSeparatedRoleLabels[index], args.rawIntake),
+        roleLabel: roleLabelForIndex(index, lineSeparatedRoleLabels[index], args.rawIntake, manifestNames.length),
         displayAlias: definedShortNameFromLegalEntity(full),
         signerName: signer?.signerName?.trim() || null,
         signerTitle: signer?.signerTitle?.trim() || null,
@@ -466,7 +496,7 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
         const signer = signerBySlot[index];
         return {
           fullLegalName: full,
-          roleLabel: roleLabelForIndex(index, roleLabelsIn[index], args.rawIntake),
+          roleLabel: roleLabelForIndex(index, roleLabelsIn[index], args.rawIntake, manifestNames.length),
           displayAlias: displayAlias === full ? full.split(/\s+/).slice(0, 2).join(" ") : displayAlias,
           signerName: signer?.signerName?.trim() || null,
           signerTitle: signer?.signerTitle?.trim() || null,
@@ -538,7 +568,7 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
     const signer = signerBySlot[index];
     return {
       fullLegalName: full,
-      roleLabel: roleLabelForIndex(index, args.roleLabels?.[index], args.rawIntake),
+      roleLabel: roleLabelForIndex(index, args.roleLabels?.[index], args.rawIntake, fullNames.length),
       displayAlias: displayAlias === full ? full.split(/\s+/).slice(0, 2).join(" ") : displayAlias,
       signerName: signer?.signerName?.trim() || null,
       signerTitle: signer?.signerTitle?.trim() || null,
@@ -576,7 +606,7 @@ export function resolveCommercialPartyRecordsForOpeningRepair(
   if (names.length < 2) return [];
   return names.slice(0, 12).map((fullLegalName, index) => ({
     fullLegalName,
-    roleLabel: roleLabelForIndex(index, roleLabels?.[index], intakeRaw),
+    roleLabel: roleLabelForIndex(index, roleLabels?.[index], intakeRaw, names.length),
     displayAlias: definedShortNameFromLegalEntity(fullLegalName),
     signerName: null,
     signerTitle: null,
@@ -599,7 +629,12 @@ export function canonicalPartyRecordsFromSignerIdentities(
       });
       return {
         fullLegalName,
-        roleLabel: id.blockHeading?.trim() || roleLabelForIndex(index),
+        roleLabel: roleLabelForIndex(
+          index,
+          id.blockHeading?.replace(/:$/, "").trim(),
+          null,
+          identities.length,
+        ),
         displayAlias: definedShortNameFromLegalEntity(fullLegalName),
         signerName: id.representativeName?.trim() || null,
         signerTitle: id.title?.trim() || null,
@@ -957,6 +992,7 @@ export function replaceTruncatedPartyRefsWithRoleLabels(
     );
     const next = body.replace(re, (match, offset) => {
       if (typeof offset !== "number") return role;
+      if (shouldPreservePartyShortFormMatch(body, offset, match.length)) return match;
       const window = body.slice(Math.max(0, offset - 12), offset + match.length + full.length);
       if (full.toLowerCase().startsWith(match.toLowerCase()) && window.toLowerCase().includes(full.toLowerCase())) {
         return match;
@@ -970,6 +1006,81 @@ export function replaceTruncatedPartyRefsWithRoleLabels(
   }
 
   return { text: body + tail, repairs };
+}
+
+/**
+ * Recital-start through `between` / `by and between`. Does not include the party list.
+ * Subsequent operative sentences are located by {@link locateDefinedOpeningRecitalBoundary}.
+ */
+const DEFINED_OPENING_START_RE =
+  /(?:this\s+(?:[\w/&'.-]+\s+){0,6}?agreement\s*(?:\([^)]*\))?\s*is\s+)?(?:entered\s+into\s+)?(?:by\s+and\s+)?between\b/i;
+
+/** True when this period is inside Inc./L.L.C./U.S./street-style abbreviations, not a sentence end by itself. */
+function definedOpeningPeriodIsAbbreviation(text: string, periodIndex: number): boolean {
+  const next = text[periodIndex + 1] ?? "";
+  if (/[A-Za-z]/.test(next)) return true;
+  const before = text.slice(0, periodIndex);
+  if (
+    /(?:^|[^A-Za-z])(?:Inc|Incorporated|Ltd|Corp|Co|LLC|LLP|LP|PLLC|PC|Jr|Sr|Mr|Ms|Mrs|Dr|St|Ste|Ave|Blvd|Rd|Mt|Ft|No|vs|etc|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)$/i.test(
+      before,
+    )
+  ) {
+    return true;
+  }
+  if (/(?:^|[^A-Za-z])[A-Z]$/.test(before)) return true;
+  return false;
+}
+
+function definedOpeningContinuesAfterPeriod(text: string, periodIndex: number): boolean {
+  const rest = text.slice(periodIndex + 1);
+  const trimmed = rest.replace(/^[ \t]+/, "").replace(/^\s+/, "");
+  if (!trimmed) return false;
+  if (/^(?:\(|["“]|,)/.test(trimmed)) return true;
+  if (/^(?:a|an|with|and|or|nor)\b/i.test(trimmed) && /^[a-z(]/.test(trimmed)) return true;
+  if (definedOpeningPeriodIsAbbreviation(text, periodIndex)) {
+    if (/^(?:\(|["“]|,)/.test(trimmed)) return true;
+    if (/^a\s+/i.test(trimmed)) return true;
+    if (/^with\s+/i.test(trimmed)) return true;
+    if (/^and\b/.test(trimmed)) return true;
+  }
+  return false;
+}
+
+/**
+ * Inclusive [start, end) span of the two-party defined opening only.
+ * Returns null when the recital cannot be bounded without swallowing later text.
+ */
+export function locateDefinedOpeningRecitalBoundary(head: string): { start: number; end: number } | null {
+  const source = (head || "").replace(/\r\n/g, "\n");
+  const startMatch = DEFINED_OPENING_START_RE.exec(source);
+  if (!startMatch || startMatch.index == null) return null;
+  const start = startMatch.index;
+  const afterBetween = start + startMatch[0].length;
+  let depth = 0;
+  let seenJoiner = false;
+  for (let i = afterBetween; i < source.length; i += 1) {
+    const ch = source[i]!;
+    if (ch === "(") {
+      depth += 1;
+      continue;
+    }
+    if (ch === ")") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth !== 0) continue;
+    if (
+      (i === afterBetween || /\s/.test(source[i - 1]!)) &&
+      /^and\b/i.test(source.slice(i, i + 4))
+    ) {
+      seenJoiner = true;
+    }
+    if (ch !== ".") continue;
+    if (definedOpeningContinuesAfterPeriod(source, i)) continue;
+    if (!seenJoiner) continue;
+    return { start, end: i + 1 };
+  }
+  return null;
 }
 
 /** Paid Pro mutual consulting recitals must never be replaced with generic definedOpeningLine(). */
@@ -1041,30 +1152,28 @@ export function repairCanonicalPartyIdentityInCorpus(
   let head = out.slice(0, headLen);
   const rest = out.slice(headLen);
   const openingLine = definedOpeningLine(client, provider);
-  // Allow "This Services Agreement is between…" (words between This and Agreement).
-  // Stop before numbered sections OR unnumbered commercial headings so Scope/Fees are
-  // never swallowed when blank lines were collapsed.
-  const openingRe =
-    /(?:this\s+(?:[\w/&'.-]+\s+){0,6}?agreement\s*(?:\([^)]*\))?\s*is\s+)?(?:entered\s+into\s+)?(?:by\s+and\s+)?between\b[\s\S]*?\.\s*(?=\n\n|\n\s*\d+\.\s+|\n\s*(?:Scope|Fees?|Payment|Compensation|Term|Governing|Confidential(?:ity)?|Execution|Ownership|Work\s+Product|Termination|Notices?|Intellectual)\b|\(collectively|\[SIGNATURE|$)/i;
   const preservePaidProOpening = shouldPreservePaidProMutualConsultingOpening(head, records);
   const twoPartyCommercialOpening = records.length === 2;
-  if (!preservePaidProOpening && twoPartyCommercialOpening && openingRe.test(head)) {
-    const openingMatch = head.match(openingRe);
-    const matched = openingMatch?.[0] ?? "";
+  const openingSpan = locateDefinedOpeningRecitalBoundary(head);
+  if (!preservePaidProOpening && twoPartyCommercialOpening && openingSpan) {
+    const matched = head.slice(openingSpan.start, openingSpan.end);
     const crossedOperativeHeading =
       /\n\s*(?:Scope|Fees?|Payment|Compensation|Term|Governing|Confidential(?:ity)?|Execution|Ownership|Work\s+Product|Termination|Notices?)\b/i.test(
         matched,
       );
     if (
-      openingMatch &&
+      matched.length > 0 &&
       matched.length <= 380 &&
       !crossedOperativeHeading &&
-      !/\d+\.\s+[A-Za-z]/.test(matched)
+      !/\d+\.\s+[A-Za-z]/.test(matched) &&
+      !(
+        /\n/.test(matched) &&
+        matched.includes(client.fullLegalName) &&
+        matched.includes(provider.fullLegalName)
+      )
     ) {
-      head = head.replace(openingRe, () => {
-        repairs.push("party_identity:defined_opening");
-        return openingLine;
-      });
+      head = `${head.slice(0, openingSpan.start)}${openingLine}${head.slice(openingSpan.end)}`;
+      repairs.push("party_identity:defined_opening");
     }
   } else if (
     !preservePaidProOpening &&
@@ -1097,6 +1206,7 @@ export function repairFullAgreementPartyIdentity(args: {
     args.signerIdentities && args.signerIdentities.length >= 2
       ? canonicalPartyRecordsFromSignerIdentities(args.signerIdentities)
       : [];
+  const mergedRoles = mergeRoleLabelsFromCorpus(args.text || "", args.partyNames, args.roleLabels);
   const records =
     fromSigner.length >= 2
       ? fromSigner
@@ -1104,7 +1214,7 @@ export function repairFullAgreementPartyIdentity(args: {
           rawIntake: args.intakeRaw,
           generatedBody: null,
           starterNames: args.partyNames,
-          roleLabels: args.roleLabels,
+          roleLabels: mergedRoles ?? args.roleLabels,
         });
   return repairCanonicalPartyIdentityInCorpus(args.text, records, {
     intakeRaw: args.intakeRaw,

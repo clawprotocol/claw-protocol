@@ -189,4 +189,26 @@ describe("synthesizePremiumScopeAndOperativeFields", () => {
     expect(out.purpose).toContain("FTC");
     expect(out.purpose.length).toBeGreaterThan(320);
   });
+
+  it("does not carry manufacturing inference or CRM packs for explicit AI workflow scope", () => {
+    const intake =
+      "Draft a consulting services agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client). Scope is AI workflow implementation. Fixed fee $48,000. Term twelve months starting October 1, 2026. Governing law Delaware. Consultant owns pre-existing tools; Client owns deliverables after payment.";
+    const d = base({
+      purpose:
+        "Harbor Peak Analytics LLC will provide consulting services to Ironvale Manufacturing Inc focused on AI workflow implementation during the twelve-month term starting October 1, 2026.",
+      payment_terms: "Ironvale Manufacturing Inc will pay Harbor Peak Analytics LLC a fixed fee of $48,000.",
+      duration: "twelve months starting October 1, 2026",
+      effective_date: "October 1, 2026",
+    });
+    const synthesized = synthesizePremiumScopeAndOperativeFields(d, intake);
+    expect(synthesized.purpose).toMatch(/AI workflow implementation/i);
+    expect(synthesized.purpose).not.toMatch(/Biotech, manufacturing/i);
+    const signals = detectPremiumCommercialSignals(intake);
+    expect(signals.contractorServices).toBe(false);
+    expect(signals.termRenewal).toBe(false);
+    const injected = injectCoreClausesConservative(synthesized, intake);
+    expect(injected.additional_terms || "").not.toMatch(/\bCRM\b/i);
+    expect(injected.additional_terms || "").not.toMatch(/campaign/i);
+    expect(injected.additional_terms || "").not.toMatch(/sales representative/i);
+  });
 });

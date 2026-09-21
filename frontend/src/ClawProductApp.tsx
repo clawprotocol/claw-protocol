@@ -6,7 +6,8 @@ import { AppDashboard } from "./launch/AppDashboard";
 import { BillingPage } from "./launch/BillingPage";
 import { LaunchHomePage } from "./launch/LaunchHomePage";
 import { useLaunchNav } from "./launch/LaunchNavContext";
-import { matchAppPath } from "./launch/routes";
+import { matchAppRoute } from "./launch/routes";
+import { canonicalizeEsignNewAliasPath } from "./launch/quickAliasCanonicalize";
 import { AgreementMemoryPage } from "./launch/AgreementMemoryPage";
 import { FieldReviewPage } from "./launch/documentLayout/FieldReviewPage";
 import { QuickSendPage } from "./launch/simpleProduct/QuickSendPage";
@@ -55,6 +56,7 @@ import {
 import { AgreementWizardShell } from "./agreement/AgreementWizardShell";
 import {
   fetchRecipientAccessPolicy,
+  isRecipientAccessRetryableCode,
   validateRecipientAccessToken,
 } from "./agreement/recipientAccessApi";
 import {
@@ -80,6 +82,7 @@ import {
 } from "./launch/simpleProduct/agreementToVs01SigningBridge";
 import { logVs01CopyContext, resolveVs01EsignShellCopy } from "./vs01/vs01EsignShellCopy";
 import { isRecipientSigningPublicSurface } from "./launch/completedAgreementViewContext";
+import { ESIGN_UNAVAILABLE_MESSAGE, resolveEsignDocumentMode } from "./launch/esignDocumentAccess";
 import { ClawPublicFeedView } from "./feed/ClawPublicFeedView";
 import { parseClawPublicFeedPath } from "./feed/clawPublicFeed";
 import { TermsPage } from "./launch/legal/TermsPage";
@@ -87,6 +90,7 @@ import { PrivacyPage } from "./launch/legal/PrivacyPage";
 import { AffiliateTermsPage } from "./launch/legal/AffiliateTermsPage";
 import { PaidProReviewUxVisualPage } from "./qa/PaidProReviewUxVisualPage";
 import { handleCheckoutReturnEntitlement } from "./launch/checkoutReturnEntitlement";
+import { RecipientLinkGateNotice } from "./components/agreements/JourneyActionBanner";
 
 const RECIPIENT_SIGNING_HERO: Vs01LayoutHero = {
   title: "Review and sign",
@@ -120,14 +124,24 @@ function AgreementSignGate(props: {
   const [phase, setPhase] = useState<"loading" | "ready" | "bad">("loading");
   const [lockedVersionId, setLockedVersionId] = useState("");
   const [resolvedPartyId, setResolvedPartyId] = useState<string | undefined>(undefined);
+  const [resolvedSignerRoleId, setResolvedSignerRoleId] = useState("");
+  const [validatedAccessToken, setValidatedAccessToken] = useState("");
   const [badMessage, setBadMessage] = useState<string | null>(null);
+  const [retryable, setRetryable] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     let cancel = false;
     void (async () => {
       const policy = await fetchRecipientAccessPolicy();
-      if (token) {
-        const vr = await validateRecipientAccessToken(token, agreementId);
+      const urlTok = (token || "").trim();
+      const sessionForAgreement = urlTok
+        ? loadRecipientMagicLinkSession(agreementId, urlTok)
+        : loadAnyRecipientMagicLinkSessionForAgreement(agreementId);
+      const effectiveToken = urlTok || sessionForAgreement?.token?.trim() || "";
+
+      if (effectiveToken) {
+        const vr = await validateRecipientAccessToken(effectiveToken, agreementId);
         if (cancel) return;
         if (
           vr.ok &&
@@ -135,80 +149,109 @@ function AgreementSignGate(props: {
           vr.data.agreement_id === agreementId &&
           vr.data.locked_version_id
         ) {
-          setBadMessage(null);
-          setLockedVersionId(vr.data.locked_version_id);
           const fromTok = (vr.data.recipient_party_id || "").trim();
           const fromUrl = (participantPartyId || "").trim();
-          setResolvedPartyId(fromTok || fromUrl || undefined);
-          stripRecipientAccessTokenQueryFromLocation();
+          if (fromUrl && fromTok && fromUrl !== fromTok) {
+            setRetryable(false);
+            setBadMessage("This link is invalid or expired. Request a new link from the sender.");
+            setPhase("bad");
+            return;
+          }
+          setRetryable(false);
+          setBadMessage(null);
+          setLockedVersionId(vr.data.locked_version_id);
+          setResolvedPartyId(fromTok || undefined);
+          setResolvedSignerRoleId(String(vr.data.signer_role_id || "").trim());
+          saveRecipientMagicLinkSession({
+            agreementId,
+            token: effectiveToken,
+            recipientPartyId: fromTok || undefined,
+            recipientLinkRole: "signer",
+          });
+          setValidatedAccessToken(effectiveToken);
+          if (urlTok) {
+            stripRecipientAccessTokenQueryFromLocation();
+          }
           setPhase("ready");
         } else {
-          setBadMessage(vr.ok ? null : vr.message);
+          setRetryable(!vr.ok && isRecipientAccessRetryableCode(vr.code));
+          setBadMessage(
+            vr.ok
+              ? "This link is invalid or expired. Request a new link from the sender."
+              : vr.message,
+          );
           setPhase("bad");
         }
         return;
       }
       if (policy?.recipient_link_token_required) {
         if (!cancel) {
-          setBadMessage(
-            "This link is invalid or expired. Request a new link from the sender."
-          );
+          setRetryable(false);
+          setBadMessage("This link is invalid or expired. Request a new link from the sender.");
           setPhase("bad");
         }
         return;
       }
       if (!legacyVersionId) {
         if (!cancel) {
-          setBadMessage(
-            "This link is invalid or expired. Request a new link from the sender."
-          );
+          setRetryable(false);
+          setBadMessage("This link is invalid or expired. Request a new link from the sender.");
           setPhase("bad");
         }
         return;
       }
+      setRetryable(false);
       setBadMessage(null);
       setLockedVersionId(legacyVersionId);
       setResolvedPartyId((participantPartyId || "").trim() || undefined);
+      setValidatedAccessToken("");
       if (!cancel) setPhase("ready");
     })();
     return () => {
       cancel = true;
     };
-  }, [agreementId, token, legacyVersionId, participantPartyId]);
+  }, [agreementId, token, legacyVersionId, participantPartyId, retryNonce]);
 
   if (phase === "loading") {
-    return <p className="px-4 py-8 text-center text-sm text-slate-400">Validating link…</p>;
+    return <RecipientLinkGateNotice phase="loading" />;
   }
   if (phase === "bad") {
     return (
-      <p className="px-4 py-8 text-center text-sm text-rose-300">
-        {badMessage?.trim() ||
-          "This link is invalid or expired. Request a new link from the sender."}
-      </p>
+      <RecipientLinkGateNotice
+        phase="bad"
+        detail={badMessage}
+        retryable={retryable}
+        onRetry={() => {
+          setPhase("loading");
+          setRetryNonce((n) => n + 1);
+        }}
+      />
     );
   }
-  const accessGate = token ? { lockedVersionId } : undefined;
+  const accessGate = validatedAccessToken || token ? { lockedVersionId } : undefined;
   return (
     <AgreementRecipientReview
       agreementId={agreementId}
-      entry={{ kind: "sign", lockedVersionId, accessGate }}
+      entry={{
+        kind: "sign",
+        lockedVersionId,
+        accessGate,
+        ...(resolvedSignerRoleId ? { signerRoleId: resolvedSignerRoleId } : {}),
+      }}
       recipientLinkRole="signer"
-      participantPartyId={resolvedPartyId || participantPartyId || ""}
-      recipientAccessToken={(token || "").trim()}
+      participantPartyId={resolvedPartyId || ""}
+      recipientAccessToken={validatedAccessToken || (token || "").trim()}
       onClose={onClose}
     />
   );
 }
 
-/** Legacy `/app/esign/new` → unified Quick flow (compatibility). */
+/** Legacy `/app/esign` and `/app/esign/new` → Quick PDF intake (compatibility only). */
 function RedirectEsignNewToQuick({ search }: { search: string }) {
   const { navigate } = useLaunchNav();
   useEffect(() => {
-    const raw = search?.startsWith("?") ? search.slice(1) : search || "";
-    const sp = new URLSearchParams(raw);
-    if (!sp.get("start")) sp.set("start", "pdf");
-    const qs = sp.toString();
-    navigate(qs ? `/app/quick?${qs}` : "/app/quick?start=pdf");
+    const dest = canonicalizeEsignNewAliasPath("/app/esign/new", search) || "/app/quick?start=pdf";
+    navigate(dest);
   }, [navigate, search]);
   return (
     <div className="px-4 py-16 text-center text-sm text-slate-400" role="status">
@@ -255,6 +298,8 @@ function AgreementReviewGate(props: {
   const [inviterName, setInviterName] = useState<string | undefined>(undefined);
   const [badMessage, setBadMessage] = useState<string | null>(null);
   const [validatedAccessToken, setValidatedAccessToken] = useState("");
+  const [retryable, setRetryable] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     let cancel = false;
@@ -278,6 +323,7 @@ function AgreementReviewGate(props: {
         const vr = await validateRecipientAccessToken(effectiveToken, agreementId);
         if (cancel) return;
         if (vr.ok && vr.data.mode === "review" && vr.data.agreement_id === agreementId) {
+          setRetryable(false);
           setBadMessage(null);
           const lv = (vr.data.locked_version_id || "").trim();
           setGateVid(lv || undefined);
@@ -319,7 +365,8 @@ function AgreementReviewGate(props: {
           });
           setPhase("ready");
         } else {
-          setBadMessage(vr.ok ? null : vr.message);
+          setRetryable(!vr.ok && isRecipientAccessRetryableCode(vr.code));
+          setBadMessage(vr.ok ? "This link is invalid or expired. Request a new link from the sender." : vr.message);
           setPhase("bad");
         }
         return;
@@ -331,6 +378,7 @@ function AgreementReviewGate(props: {
       setValidatedAccessToken("");
       if (policy?.recipient_link_token_required) {
         if (!cancel) {
+          setRetryable(false);
           setBadMessage(
             "This link is invalid or expired. Request a new link from the sender."
           );
@@ -349,17 +397,22 @@ function AgreementReviewGate(props: {
     return () => {
       cancel = true;
     };
-  }, [agreementId, token]);
+  }, [agreementId, token, retryNonce]);
 
   if (phase === "loading") {
-    return <p className="px-4 py-8 text-center text-sm text-slate-400">Validating link…</p>;
+    return <RecipientLinkGateNotice phase="loading" />;
   }
   if (phase === "bad") {
     return (
-      <p className="px-4 py-8 text-center text-sm text-rose-300">
-        {badMessage?.trim() ||
-          "This link is invalid or expired. Request a new link from the sender."}
-      </p>
+      <RecipientLinkGateNotice
+        phase="bad"
+        detail={badMessage}
+        retryable={retryable}
+        onRetry={() => {
+          setPhase("loading");
+          setRetryNonce((n) => n + 1);
+        }}
+      />
     );
   }
   const entry =
@@ -396,6 +449,7 @@ function AgreementReviewGate(props: {
 function AppEsignDocumentShell(props: { seed: string; search: string; pathname: string }) {
   const { seed, search, pathname } = props;
   const [vs01Step, setVs01Step] = useState(0);
+  const esignMode = resolveEsignDocumentMode(search);
   const bridge =
     typeof window !== "undefined"
       ? readDurableAgreementVs01Bridge(seed) ?? readAgreementVs01BridgeSession()
@@ -409,6 +463,7 @@ function AppEsignDocumentShell(props: { seed: string; search: string; pathname: 
       : "default";
 
   useEffect(() => {
+    if (esignMode !== "owner_bridge") return;
     const b =
       typeof window !== "undefined"
         ? readDurableAgreementVs01Bridge(seed) ?? readAgreementVs01BridgeSession()
@@ -427,7 +482,16 @@ function AppEsignDocumentShell(props: { seed: string; search: string; pathname: 
       reviewerApprovedCleanHandoff: Boolean(b?.reviewerApprovedCleanHandoff),
       vs01Step,
     });
-  }, [seed, search, vs01Step]);
+  }, [seed, search, vs01Step, esignMode]);
+
+  if (esignMode !== "owner_bridge") {
+    return (
+      <div className="mx-auto w-full min-w-0 max-w-lg px-4 py-16 text-center" data-testid="esign-unavailable">
+        <h1 className="text-xl font-semibold text-stone-900">Unavailable</h1>
+        <p className="mt-2 text-sm text-stone-600">{ESIGN_UNAVAILABLE_MESSAGE}</p>
+      </div>
+    );
+  }
 
   return (
     <AppShell
@@ -462,7 +526,7 @@ export function ClawProductApp() {
       ? parseClawPublicFeedPath(pathname)
       : false;
 
-  const appMatch = matchAppPath(pathname);
+  const appMatch = matchAppRoute(pathname, search)?.section ?? null;
   const pathNorm = (pathname.replace(/\/$/, "") || "/").split("?")[0];
   const affiliateLanding = parseAffiliateLandingPath(pathNorm);
   const lawdogReferralSlug = parseLawdogReferralPath(pathNorm);
@@ -779,6 +843,16 @@ export function ClawProductApp() {
 
   if (pathNorm === "/") {
     return <LaunchHomePage />;
+  }
+
+  if (pathNorm === "/app" || pathNorm.startsWith("/app/")) {
+    return (
+      <AppShell title="Page not found" subtitle="This LawDog page does not exist or is no longer available.">
+        <button type="button" className="vs01-btn vs01-btn--secondary" onClick={() => navigate("/app")}>
+          Back to dashboard
+        </button>
+      </AppShell>
+    );
   }
 
   return <LaunchHomePage />;

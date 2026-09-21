@@ -160,6 +160,27 @@ describe("draftRecipientReviewSignals", () => {
       expect(agg.finalizeForSigningEnabled).toBe(false);
       expect(agg.aggregateStatus).toBe("changes_pending");
     });
+
+    it("two-party owner minted link does not block after the reviewer approves", () => {
+      const d = makeDraft({
+        parties: [
+          { id: "orion", name: "Orion Harbor LLC", role: "owner", email: "avery@orionharbor.test" },
+          { id: "northwind", name: "Northwind Retail Inc", role: "reviewer", email: "casey@northwind.test" },
+        ],
+        audit_log: [
+          {
+            event_type: "participant_approved",
+            at: BASE_TS,
+            value: { participant_id: "northwind" },
+          },
+        ],
+      });
+      const agg = computeReviewApprovalStatus(d, { mintedReviewerLinkCount: 2 });
+      expect(agg.requiredReviewerCount).toBe(1);
+      expect(agg.approvedReviewerCount).toBe(1);
+      expect(agg.allReviewersApproved).toBe(true);
+      expect(agg.finalizeForSigningEnabled).toBe(true);
+    });
   });
 
   describe("canFinalizeReviewForSigning", () => {

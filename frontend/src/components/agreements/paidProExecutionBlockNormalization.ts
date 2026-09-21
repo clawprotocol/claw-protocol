@@ -37,6 +37,11 @@ import {
   multiPartyExecutionBlockHeading,
   tripartiteRoleLabelForPartyIndex,
 } from "./labeledPartyBlockParse";
+import {
+  corpusDeclaresConsultantClientOpening,
+  restoreDeclaredConsultantClientPaper,
+  shouldPreserveApprovedAddedPartyExecutionTail,
+} from "./paidProDeclaredConsultantClientPaper";
 
 export {
   isRecitalFragmentExecutionPartyLine,
@@ -196,16 +201,56 @@ export function stripPreWitnessExecutionPollutionFromPrefix(prefix: string): {
 }
 
 function executionBlockHeadingFromRoleLabel(roleLabel: string, index: number, intakeText?: string | null): string {
-  if (intakeText) {
-    return multiPartyExecutionBlockHeading(index, intakeText);
-  }
   const r = roleLabel.replace(/\s+/g, " ").trim().toLowerCase();
+  if (r === "consultant") return "CONSULTANT";
   if (r === "client") return "CLIENT";
   if (r.includes("service") && r.includes("provider")) return "SERVICE PROVIDER";
   if (r.includes("analytics") && r.includes("provider")) return "ANALYTICS PROVIDER";
+  if (intakeText) {
+    return multiPartyExecutionBlockHeading(index, intakeText);
+  }
   if (index === 0) return "CLIENT";
   if (index === 1) return "SERVICE PROVIDER";
   return `PARTY ${index + 1}`;
+}
+
+function overlayDeclaredCorpusRolesOntoManifest(
+  roles: ManifestExecutionRole[],
+  corpus: string,
+): ManifestExecutionRole[] {
+  const declared = resolvePaidProPartyRolesFromAcceptedCorpus(corpus);
+  if (!declared.some((row) => row.roleLabel === "Consultant")) return roles;
+  return roles.map((role) => {
+    const hit = declared.find((row) => partyLegalNamesMatch(row.legalName, role.legalName));
+    return hit ? { ...role, role: hit.role, roleLabel: hit.roleLabel } : role;
+  });
+}
+
+function existingConsultantClientTailMatchesDeclared(text: string): boolean {
+  if (!corpusDeclaresConsultantClientOpening(text)) return false;
+  const declared = resolvePaidProPartyRolesFromAcceptedCorpus(text).filter(
+    (row) => row.roleLabel === "Consultant" || row.roleLabel === "Client",
+  );
+  if (declared.length < 2) return false;
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+  if (witnessIdx < 0) return false;
+  const tail = text.slice(witnessIdx);
+  return declared.every((row) => {
+    const role = row.roleLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const sameLine = tail.split("\n").some((line) => {
+      const match = line.match(new RegExp(`^\\s*${role}\\s*:\\s*(.+)$`, "i"));
+      return Boolean(match && partyLegalNamesMatch(match[1], row.legalName));
+    });
+    if (sameLine) return true;
+    const headingIdx = tail.search(new RegExp(`^\\s*${role}\\s*:\\s*$`, "im"));
+    if (headingIdx < 0) return false;
+    const entity = tail
+      .slice(headingIdx)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)[1];
+    return Boolean(entity && !/^By:/i.test(entity) && partyLegalNamesMatch(entity, row.legalName));
+  });
 }
 
 type ManifestExecutionRole = {
@@ -582,7 +627,33 @@ export function enforcePaidProSingleExecutionBlock(
     manifestLegalNames.length >= 2
       ? manifestRolesFromLegalNames(manifestLegalNames, opts?.intakeText ?? null)
       : null;
-  const roles = manifestRoles ?? sanitizeRoleAssignments(text);
+  const roles = overlayDeclaredCorpusRolesOntoManifest(
+    manifestRoles ?? sanitizeRoleAssignments(text),
+    text,
+  );
+  if (corpusDeclaresConsultantClientOpening(text)) {
+    const restored = restoreDeclaredConsultantClientPaper(text, text);
+    if (restored !== text) {
+      text = restored;
+      repairs.push("execution_block:restore_consultant_client");
+    }
+  }
+  if (
+    shouldPreserveApprovedAddedPartyExecutionTail(text, manifestLegalNames) ||
+    (existingConsultantClientTailMatchesDeclared(text) && manifestLegalNames.length <= 2)
+  ) {
+    text = stripRecitalFragmentExecutionLinesFromTail(text, repairs);
+    const truncated = truncatePostCanonicalExecutionPollution(text, {
+      expectedPartyCount: manifestLegalNames.length >= 2 ? manifestLegalNames.length : 2,
+    });
+    if (truncated.text !== text) {
+      repairs.push(...truncated.repairs);
+      text = truncated.text;
+    }
+    logExecutionBlockLocation(text, "enforcePaidProSingleExecutionBlock:preserved");
+    logExecutionBlockCount(text, "enforcePaidProSingleExecutionBlock:preserved");
+    return { text, repairs: [...new Set(repairs)] };
+  }
   const client = roles.find((r) => r.role === "client");
   const provider = roles.find((r) => r.role === "service_provider");
   const quadLabeled = Boolean(opts?.intakeText && isQuadripartiteLabeledPartiesIntake(opts.intakeText));
@@ -618,7 +689,7 @@ export function enforcePaidProSingleExecutionBlock(
     manifestRoles && manifestLegalNames.length >= 2
       ? buildManifestExecutionIdentities(
           manifestLegalNames,
-          manifestRoles,
+          roles,
           opts?.intakeText ?? null,
           useEntityHeadings,
         )

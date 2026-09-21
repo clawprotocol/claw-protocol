@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { JourneyActionBanner } from "./JourneyActionBanner";
+import { JourneyActionBanner, RecipientLinkGateNotice } from "./JourneyActionBanner";
 import {
   CUSTOMER_JOURNEY_STATE,
   resolveCustomerJourneyState,
@@ -58,6 +58,14 @@ describe("JourneyActionBanner rendered states", () => {
     expect(screen.getByTestId("journey-action-banner").getAttribute("data-journey-action-kind")).toBe("failed");
   });
 
+  it("private link gate uses the same banner and never shows a raw token code", () => {
+    const { rerender } = render(<RecipientLinkGateNotice phase="loading" />);
+    expect(screen.getByText("Validating link")).toBeTruthy();
+    rerender(<RecipientLinkGateNotice phase="bad" detail="token_expired" />);
+    expect(screen.getByText(/invalid or expired/i)).toBeTruthy();
+    expect(screen.queryByText("token_expired")).toBeNull();
+  });
+
   it("keeps consequential success feedback available across route transitions until dismissed", () => {
     clearJourneyActionFlash();
     const feedback = feedbackSucceeded(
@@ -88,6 +96,30 @@ describe("customer journey in-flight states", () => {
     fullyExecuted: false,
     actionNeedsAttention: false,
   };
+
+  it("existing review links stay share-when-ready unless remint reports already ready", () => {
+    expect(
+      resolveCustomerJourneyState({
+        ...base,
+        draftCreated: true,
+        partiesComplete: true,
+        reviewRecipientsComplete: true,
+        deliveryTrack: "review",
+        linksCreated: true,
+      }),
+    ).toBe(CUSTOMER_JOURNEY_STATE.linksCreatedShareWhenReady);
+    expect(
+      resolveCustomerJourneyState({
+        ...base,
+        draftCreated: true,
+        partiesComplete: true,
+        reviewRecipientsComplete: true,
+        deliveryTrack: "review",
+        linksCreated: true,
+        reviewLinksAlreadyReady: true,
+      }),
+    ).toBe(CUSTOMER_JOURNEY_STATE.reviewLinksAlreadyReady);
+  });
 
   it("creating agreement and creating links are distinct from ready states", () => {
     expect(resolveCustomerJourneyState({ ...base, creatingAgreement: true })).toBe(

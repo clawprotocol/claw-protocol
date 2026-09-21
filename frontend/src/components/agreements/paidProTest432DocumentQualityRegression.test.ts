@@ -317,6 +317,17 @@ describe("TEST432 document quality — heading integrity", () => {
     expect(out).toMatch(/\n12\.2 Notices/);
   });
 
+  it("does not treat a ZIP+period as a numbered section before If-to notices", () => {
+    const notices = [
+      "9. NOTICES. Formal notices must be delivered to each party's distinct notice address.",
+      "Sponsor address: 3 Ironclad Way, Austin, TX 78701.",
+      "If to Ironclad Systems Group LLC: ethan.cole@ironcladsg.com.",
+    ].join(" ");
+    const out = repairGluedSectionHeadingsInText(notices);
+    expect(out).toContain("3 Ironclad Way, Austin, TX 78701");
+    expect(out).not.toMatch(/\n78701\.\s+If to/);
+  });
+
   it("merges orphan multi-line heading fragments", () => {
     const split = [
       "Lead",

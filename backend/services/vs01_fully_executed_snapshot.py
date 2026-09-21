@@ -229,13 +229,19 @@ def _count_signed_witness_blocks_at(
             continue
         trimmed = line.strip()
         party_index = party_index_at_witness_line(lines, i, patch_start, role_entity_names)
-        entry = party_by_signed.setdefault(party_index, {"by": False, "date": False})
+        if party_index < 0:
+            continue
+        entry = party_by_signed.setdefault(
+            party_index, {"by": False, "date": False, "has_date_line": False}
+        )
         if re.match(r"^by\s*:", trimmed, re.I) and not _witness_by_line_is_blank(trimmed):
             entry["by"] = True
-        if re.match(r"^date\s*:", trimmed, re.I) and not _witness_date_line_is_blank(trimmed):
-            entry["date"] = True
+        if re.match(r"^date\s*:", trimmed, re.I):
+            entry["has_date_line"] = True
+            if not _witness_date_line_is_blank(trimmed):
+                entry["date"] = True
     blocks = list(party_by_signed.values())
-    signed = sum(1 for b in blocks if b["by"] and b["date"])
+    signed = sum(1 for b in blocks if b["by"] and (b["date"] or not b["has_date_line"]))
     return signed, len(blocks)
 
 
@@ -262,11 +268,14 @@ def parse_signature_completed_events(audit: Any) -> List[Dict[str, str]]:
         if not isinstance(val, dict):
             continue
         rid = str(val.get("signer_role_id") or "").strip()
-        if not rid:
+        pid = str(val.get("participant_id") or "").strip()
+        if not rid and not pid:
             continue
         out.append(
             {
                 "signer_role_id": rid,
+                "participant_id": pid,
+                "typed_name": str(val.get("typed_name") or "").strip(),
                 "signed_date_iso": str(val.get("signed_date_iso") or "").strip(),
                 "signed_date_display": str(val.get("signed_date_display") or "").strip(),
                 "display_name": str(val.get("participant_display_name") or "").strip(),
@@ -412,24 +421,39 @@ def reconstruct_corpus_from_audit_and_portable(draft: Dict[str, Any]) -> Optiona
     roles = portable.get("roles") if isinstance(portable.get("roles"), list) else []
     role_entity_names = extract_role_entity_names_from_portable(portable)
     for event in events:
-        rid = event["signer_role_id"]
+        rid = event.get("signer_role_id") or ""
+        pid = event.get("participant_id") or ""
         role = next(
             (r for r in roles if isinstance(r, dict) and str(r.get("roleId") or "").strip() == rid),
             None,
         )
+        if role is None and pid:
+            role = next(
+                (
+                    r
+                    for r in roles
+                    if isinstance(r, dict) and str(r.get("partyId") or r.get("vs01CounterpartyId") or "").strip() == pid
+                ),
+                None,
+            )
+            if isinstance(role, dict):
+                rid = str(role.get("roleId") or "").strip()
         party_index = int(role.get("partyIndex") or 0) if isinstance(role, dict) else 0
         signer_email = ""
         role_signer_name = ""
         if isinstance(role, dict):
             signer_email = str(role.get("signerEmail") or role.get("reviewEmail") or "").strip()
             role_signer_name = str(role.get("signerName") or "").strip()
-        sig = signature_text_for_signer_role(
-            fields,
-            rid,
-            party_index=party_index,
-            signer_email=signer_email or None,
-            audit_display_name=event.get("display_name"),
-            role_signer_name=role_signer_name or None,
+        sig = (
+            str(event.get("typed_name") or "").strip()
+            or signature_text_for_signer_role(
+                fields,
+                rid,
+                party_index=party_index,
+                signer_email=signer_email or None,
+                audit_display_name=event.get("display_name"),
+                role_signer_name=role_signer_name or None,
+            )
         )
         if sig:
             corpus, _ = stamp_witness_block_party_signature(
@@ -522,6 +546,19 @@ def ensure_fully_executed_snapshot_on_draft(
     agreement_id: str = "",
 ) -> EnsureFullyExecutedSnapshotResult:
     aid = (agreement_id or str(draft.get("id") or "")).strip()
+    audit = draft.get("audit_log") or []
+    if fully_executed_snapshot_ready(draft) and not all_signers_signed_from_audit(draft, audit):
+        _log.warning(
+            "[vs01-final-signed-snapshot] agreement_id=%s source=existing_before_all_signers — dropping",
+            aid,
+        )
+        draft = {
+            **draft,
+            "vs01_signing_packet_v1": {
+                **(draft.get("vs01_signing_packet_v1") or {}),
+                "fully_executed_snapshot": None,
+            },
+        }
     if fully_executed_snapshot_ready(draft):
         existing = read_fully_executed_snapshot_from_draft(draft)
         corpus = str((existing or {}).get("corpus_plain") or "")
@@ -551,6 +588,12 @@ def ensure_fully_executed_snapshot_on_draft(
     portable = stored.get("portable") if isinstance(stored.get("portable"), dict) else {}
 
     snap = extract_fully_executed_snapshot_from_portable(portable) if portable else None
+    if snap and not all_signers_signed_from_audit(draft, draft.get("audit_log") or []):
+        _log.warning(
+            "[vs01-final-signed-snapshot] agreement_id=%s source=portable_snapshot_before_all_signers — ignoring",
+            aid,
+        )
+        snap = None
     if snap:
         snap_corpus = str(snap.get("corpus_plain") or "")
         snap_violations = completed_execution_by_name_violations(snap_corpus)

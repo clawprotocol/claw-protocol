@@ -1,6 +1,10 @@
 import { postSigningLinksSent } from "../agreement/agreementWorkspaceApi";
 import { readAcceptedReviewSnapshotRef } from "../agreement/canonicalReviewSnapshotApi";
-import { readFrozenSigningAuthoritySnapshot, loadFrozenSigningAuthority } from "../components/agreements/frozenSigningAuthoritySnapshot";
+import {
+  loadFrozenSigningAuthority,
+  readFrozenSigningAuthoritySnapshot,
+  readFrozenSigningAuthoritySnapshotForAgreement,
+} from "../components/agreements/frozenSigningAuthoritySnapshot";
 import {
   fetchRecipientAccessPolicy,
   mintRecipientAccessTokenResult,
@@ -77,11 +81,23 @@ export function buildSigningInviteTargetsFromHandoff(
   return targets;
 }
 
-function appendSignTokenToSigningUrl(url: string, token: string): string {
+function isAbsoluteHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url.trim());
+}
+
+/** Append/replace `t=` on a signing URL. Absolute inputs keep their origin; relative inputs stay relative. */
+export function appendSignTokenToSigningUrl(url: string, token: string): string {
   const tok = token.trim();
   if (!tok) return url;
+  const raw = url.trim();
+  if (!raw) return url;
   try {
-    const u = new URL(url, "https://lawdog.local");
+    if (isAbsoluteHttpUrl(raw)) {
+      const u = new URL(raw);
+      u.searchParams.set("t", tok);
+      return `${u.origin}${u.pathname}${u.search}${u.hash}`;
+    }
+    const u = new URL(raw, "https://lawdog.local");
     u.searchParams.set("t", tok);
     return `${u.pathname}${u.search}${u.hash}`;
   } catch {
@@ -243,7 +259,9 @@ export async function dispatchSigningInvitesFromHandoff(
   }
 
   try {
-    const frozenLocal = readFrozenSigningAuthoritySnapshot();
+    const frozenLocal =
+      readFrozenSigningAuthoritySnapshotForAgreement(handoff.agreementId) ||
+      readFrozenSigningAuthoritySnapshot();
     const frozen =
       frozenLocal ??
       (await loadFrozenSigningAuthority({

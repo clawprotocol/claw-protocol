@@ -8,6 +8,7 @@ import AgreementBuilderIntake, {
 } from "../../components/agreements/AgreementBuilderIntake";
 import {
   clearCreateReviewAgreementResumeId,
+  parseCreateAgreementIdFromSearch,
   readCreateReviewAgreementResumeId,
   writeCreateReviewAgreementResumeId,
 } from "../../components/agreements/agreementIntakeStorage";
@@ -105,7 +106,8 @@ import {
 import { peekReviewFirstHandoffSource } from "./reviewFirstSendSurface";
 import { logReviewFirstLegacySendBlocked } from "../../components/agreements/guidedDealCompletion/guidedFinalReviewToSigning";
 import { shouldSuppressReviewPipelineTelemetry } from "../../vs01/vs01SignatureDashboardFlow";
-import { getOrgId, bootstrapWorkspaceOrg } from "../orgContext";
+import { getOrgId, bootstrapWorkspaceOrg, subscribeToOrgContextChanges } from "../orgContext";
+import { shouldRedirectCreateForStaleOrg } from "./acceptedCreateResumeWorkspace";
 import { ensureAffiliateAttributionForOrg } from "../affiliate/affiliateAttributionContext";
 import { fetchWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import {
@@ -132,7 +134,15 @@ export function SimpleCreatePage() {
   const showFirstHints = useFirstSessionHint("create");
   const firstSessionLive = useMemo(() => isFirstLawdogSession(), []);
   const [workspaceOrgId, setWorkspaceOrgId] = useState(() => getOrgId());
+  const [workspaceBindTerminal, setWorkspaceBindTerminal] = useState<string | null>(null);
   const hasColdReferralInSearch = Boolean(referralCodeFromCreateSearch(search));
+
+  useEffect(() => {
+    setWorkspaceOrgId(getOrgId());
+    return subscribeToOrgContextChanges((orgId) => {
+      setWorkspaceOrgId(orgId);
+    });
+  }, []);
 
   // Cold GTM referral links must not run entitlement probes (mock-auth 401).
   // Capture ?ref= then send signed-out visitors to sign-in with return destination.
@@ -185,6 +195,7 @@ export function SimpleCreatePage() {
     if (!isReallyAuthenticated || !authUser) return;
     if (isUserWorkspaceOrgId(getOrgId())) {
       setWorkspaceOrgId(getOrgId());
+      setWorkspaceBindTerminal(null);
       return;
     }
     let cancelled = false;
@@ -198,25 +209,41 @@ export function SimpleCreatePage() {
       .then((bind) => {
         if (cancelled) return;
         setWorkspaceOrgId(bind.org_id || getOrgId());
+        setWorkspaceBindTerminal(null);
       })
-      .catch(() => {
-        if (!cancelled) setWorkspaceOrgId(getOrgId());
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setWorkspaceOrgId(getOrgId());
+        setWorkspaceBindTerminal(
+          error instanceof Error ? error.message : "Could not bind workspace.",
+        );
       });
     return () => {
       cancelled = true;
     };
   }, [isReallyAuthenticated, authUser, authSession?.access_token]);
 
-  // If bind cannot settle, leave create rather than probing anon-* forever.
+  // Fresh create may leave if bind cannot settle. Accepted resume stays on this URL.
   useEffect(() => {
     if (probeReadiness.ready || probeReadiness.reason !== "awaiting_user_org") return;
+    const resumeId = parseCreateAgreementIdFromSearch(
+      typeof window !== "undefined" ? window.location.search : search,
+    );
+    if (
+      !shouldRedirectCreateForStaleOrg({
+        urlAgreementId: resumeId,
+        probeReason: probeReadiness.reason,
+      })
+    ) {
+      return;
+    }
     const timer = window.setTimeout(() => {
       if (!isUserWorkspaceOrgId(getOrgId())) {
         navigate("/app");
       }
     }, 8000);
     return () => window.clearTimeout(timer);
-  }, [probeReadiness, navigate]);
+  }, [probeReadiness, navigate, search]);
   const [starterSeed, setStarterSeed] = useState<string | undefined>(undefined);
   const [otherWaysOpen, setOtherWaysOpen] = useState(false);
   const [heroHandoff] = useState(() => readHeroIntakeHandoffForCreate());
@@ -238,6 +265,13 @@ export function SimpleCreatePage() {
     );
     if (fromSearch) return fromSearch;
     return "";
+  });
+  const [resumeAgreementIdFromQuery] = useState(() => {
+    const id = parseCreateAgreementIdFromSearch(
+      typeof window !== "undefined" ? window.location.search : search,
+    );
+    if (id) writeCreateReviewAgreementResumeId(id);
+    return id;
   });
   const openSignerSetupOnResume = Boolean(resumeSignerSetupAgreementId);
 
@@ -289,7 +323,7 @@ export function SimpleCreatePage() {
         heroPrefillText: heroHandoff?.text,
         usingTemplate,
         persistedIntakeWillApply,
-        resumeNotice: null,
+        resumeNotice: resumeAgreementIdFromQuery || readCreateReviewAgreementResumeId(),
       }),
     [
       quickSendTypedArrival,
@@ -297,6 +331,7 @@ export function SimpleCreatePage() {
       heroHandoff?.text,
       usingTemplate,
       persistedIntakeWillApply,
+      resumeAgreementIdFromQuery,
     ],
   );
 
@@ -317,7 +352,7 @@ export function SimpleCreatePage() {
         }),
         entitlement: resolveEntitlementStateFromTier(access.tier),
         isStarterAnonymousSession: hasCurrentSessionFreeStarterIntent(),
-        isResumingOwnedAgreement: Boolean(readCreateReviewAgreementResumeId()),
+        isResumingOwnedAgreement: Boolean(readCreateReviewAgreementResumeId() || resumeAgreementIdFromQuery),
         hasCheckoutPendingMarker: Boolean(readCreateComplexityResume()?.awaitingProCheckout),
         workspaceProEntitledProbe: workspaceProEntitled,
         commercialEntitlement: commercialEntitlement
@@ -337,9 +372,16 @@ export function SimpleCreatePage() {
           : null,
         hasPaidDemoPremiumSession: paidDemoPremiumSession,
       }),
-    [access.tier, createAuthAuthenticated, workspaceProEntitled, commercialEntitlement, paidDemoPremiumSession],
+    [
+      access.tier,
+      createAuthAuthenticated,
+      workspaceProEntitled,
+      commercialEntitlement,
+      paidDemoPremiumSession,
+      resumeAgreementIdFromQuery,
+    ],
   );
-  const isResumingOwnedAgreement = Boolean(readCreateReviewAgreementResumeId());
+  const isResumingOwnedAgreement = Boolean(readCreateReviewAgreementResumeId() || resumeAgreementIdFromQuery);
   const hasCheckoutPendingMarker = Boolean(readCreateComplexityResume()?.awaitingProCheckout);
   const editorGatedUntilEntitlement = shouldGateCreateEditorUntilEntitlementReady({
     isAuthenticated: createAuthAuthenticated,
@@ -603,6 +645,7 @@ export function SimpleCreatePage() {
   const simplifyFirstSession = firstSessionLive;
 
   const [paidProReviewReadyShell, setPaidProReviewReadyShell] = useState(false);
+  const [paidProReviewContentReadyShell, setPaidProReviewContentReadyShell] = useState(false);
   const [freeStarterReviewShellActive, setFreeStarterReviewShellActive] = useState(false);
   const [shellLifecycleStage, setShellLifecycleStage] = useState<
     import("../../agreement/agreementLifecycleRail").AgreementLifecycleStageId
@@ -616,11 +659,13 @@ export function SimpleCreatePage() {
   const onSimpleCreateShellChrome = useCallback(
     (state: {
       paidProReviewReady: boolean;
+      paidProReviewContentReady?: boolean;
       freeStarterReviewShellActive: boolean;
       lifecycleStage: import("../../agreement/agreementLifecycleRail").AgreementLifecycleStageId;
       dashboardSignerSetupResumeActive?: boolean;
     }) => {
       setPaidProReviewReadyShell(state.paidProReviewReady);
+      setPaidProReviewContentReadyShell(Boolean(state.paidProReviewContentReady));
       setFreeStarterReviewShellActive(state.freeStarterReviewShellActive);
       setShellLifecycleStage(state.lifecycleStage);
       setDashboardSignerSetupResumeShell(Boolean(state.dashboardSignerSetupResumeActive));
@@ -641,9 +686,10 @@ export function SimpleCreatePage() {
       ? undefined
       : lifecycleStepForStage("draft");
   const shellProgressLabels = AGREEMENT_LIFECYCLE_PROGRESS_LABELS;
+  const paidProCompletedReviewShell = paidProReviewReadyShell && paidProReviewContentReadyShell;
   const shellTitle = dashboardSignerSetupResumeShell
     ? SIMPLE_CREATE_SIGNER_SETUP_RESUME_TITLE
-    : paidProReviewReadyShell
+    : paidProCompletedReviewShell
       ? SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE
       : quickSendTypedArrival
         ? "Shape your draft"
@@ -652,7 +698,7 @@ export function SimpleCreatePage() {
           : "Describe your deal";
   const shellSubtitle = dashboardSignerSetupResumeShell
     ? SIMPLE_CREATE_SIGNER_SETUP_RESUME_SUBTITLE
-    : paidProReviewReadyShell
+    : paidProCompletedReviewShell
       ? SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE
       : quickSendTypedArrival
         ? "We turned your input into a structured draft for the same send/sign/proof workflow."
@@ -682,6 +728,23 @@ export function SimpleCreatePage() {
   }
 
   if (awaitingAuthWorkspace) {
+    const resumeAgreementId = parseCreateAgreementIdFromSearch(
+      typeof window !== "undefined" ? window.location.search : search,
+    );
+    if (workspaceBindTerminal && resumeAgreementId) {
+      return (
+        <SimpleFlowShell
+          title="Could not open this agreement"
+          subtitle="Your signed-in workspace could not be restored for this agreement."
+          logoHomeHref="/app"
+          hideAffiliateNav
+        >
+          <p className="text-sm text-slate-400" data-testid="create-auth-workspace-bind-failed">
+            {workspaceBindTerminal}
+          </p>
+        </SimpleFlowShell>
+      );
+    }
     // Already-signed-in create/resume must not flash OAuth "Finishing sign-in".
     // When signer-setup resume is armed, keep that chrome so the settle does not
     // look like a create-prompt hop before the agreement preview mounts.

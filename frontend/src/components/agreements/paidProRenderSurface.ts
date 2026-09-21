@@ -17,6 +17,7 @@ import {
   shouldBlockLivePreviewAsPaidProAuthority,
 } from "./premiumGenerationApiAvailability";
 import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
+import { normalizePaidProCandidateCompareLen } from "./paidProFirstReviewAuthoritySelection";
 
 export const PAID_PRO_UNAVAILABLE_RETRY_HEADLINE =
   "We couldn't finish the Pro rewrite. Your starter draft is safe.";
@@ -218,8 +219,8 @@ export function resolvePaidProReviewRenderSurface(args: {
   logPaidProStarterCloneBlocked({
     reason: resolution.reason,
     attemptedSource: source,
-    attemptedLen: picked.length,
-    freeBaselineLen: freeBaseline.length,
+    attemptedLen: normalizePaidProCandidateCompareLen(picked),
+    freeBaselineLen: normalizePaidProCandidateCompareLen(freeBaseline),
     hashMatchesFree: picked && freeBaseline ? corpusMatchesFreeBasicDraft(picked, freeBaseline) : false,
     pipelineSource: args.pipelineSource ?? null,
     failedCandidates: resolution.failedCandidates,
@@ -230,6 +231,6 @@ export function resolvePaidProReviewRenderSurface(args: {
     reason: resolution.reason,
     starterBaselinePlain: freeBaseline,
     attemptedSource: source,
-    attemptedLen: picked.length,
+    attemptedLen: normalizePaidProCandidateCompareLen(picked),
   };
 }

@@ -65,6 +65,39 @@ def _draft_dict_fully_executed(draft_body: Dict[str, Any]) -> bool:
     return False
 
 
+def _signer_completed_for_replay(draft_body: Dict[str, Any], party_id: str) -> bool:
+    """Exact completion replay is allowed only after this participant already completed."""
+    pid = (party_id or "").strip()
+    if not pid:
+        return False
+    from backend.services.vs01_signer_completion import signature_completed_participant_ids
+
+    if pid in signature_completed_participant_ids(draft_body.get("audit_log")):
+        return True
+    aid = str(draft_body.get("id") or "").strip()
+    if not aid:
+        return False
+    from backend.services.vs01_completion_ledger import has_participant_completion
+
+    return has_participant_completion(aid, pid)
+
+
+def _completed_invitation_recovery(draft_body: Dict[str, Any], party_id: str, jti: str) -> bool:
+    """Completed-status recovery for the invitation that actually completed — not a replaced JTI."""
+    if not _signer_completed_for_replay(draft_body, party_id):
+        return False
+    aid = str(draft_body.get("id") or "").strip()
+    if not aid:
+        return True
+    from backend.services.vs01_completion_ledger import completing_invite_jti
+
+    stored = completing_invite_jti(aid, party_id)
+    token_jti = (jti or "").strip()
+    if stored and token_jti and stored != token_jti:
+        return False
+    return True
+
+
 def _recipient_party_id_on_draft(draft: Dict[str, Any], party_id: str) -> bool:
     pid = (party_id or "").strip()
     if not pid:
@@ -125,6 +158,7 @@ def validate_recipient_access_token_for_agreement(
     secret_raw: str,
     consume_single_use: bool,
     log_validation: bool,
+    allow_completed_signer_replay: bool = False,
 ) -> Dict[str, Any]:
     """
     Verify recipient/signer token for an agreement. Optionally consume single-use JTI (validate endpoint).
@@ -178,8 +212,13 @@ def validate_recipient_access_token_for_agreement(
     except Exception:
         raise HTTPException(status_code=404, detail="agreement_not_found") from None
 
+    party_id = str(payload.get("pid") or "").strip()
+    inviter = str(payload.get("inv") or "").strip()
+    replay_ok = allow_completed_signer_replay and _signer_completed_for_replay(draft_body, party_id)
+    recovery_ok = _completed_invitation_recovery(draft_body, party_id, jti)
+
     if mode == "sign":
-        if _draft_dict_fully_executed(draft_body):
+        if _draft_dict_fully_executed(draft_body) and not replay_ok and not recovery_ok:
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -201,8 +240,6 @@ def validate_recipient_access_token_for_agreement(
         if tok_v and lock_v and tok_v != lock_v:
             raise _rfail("review_link_stale")
 
-    party_id = str(payload.get("pid") or "").strip()
-    inviter = str(payload.get("inv") or "").strip()
     if party_id:
         if not _recipient_party_id_on_draft(draft_body, party_id):
             raise _rfail("recipient_not_assigned")
@@ -215,7 +252,7 @@ def validate_recipient_access_token_for_agreement(
         commercial = _commercial_mode_enforced()
         if jti_invite_access_denied(
             draft_body, jti, phase, party_id, commercial=commercial
-        ):
+        ) and not replay_ok and not recovery_ok:
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -238,6 +275,8 @@ def validate_recipient_access_token_for_agreement(
         "role": payload.get("r"),
         "recipient_party_id": party_id or None,
         "inviter_display_name": inviter or None,
+        "signer_already_completed": bool(recovery_ok or replay_ok),
+        "completion_status": "completed" if (recovery_ok or replay_ok) else None,
     }
 
 
@@ -247,6 +286,7 @@ def assert_agreement_recipient_write_allowed(
     *,
     allowed_modes: tuple[str, ...],
     bind_participant_id: Optional[str] = None,
+    allow_completed_signer_replay: bool = False,
 ) -> None:
     """
     Require a valid recipient access token for mutating recipient flows.
@@ -294,6 +334,7 @@ def assert_agreement_recipient_write_allowed(
         secret_raw=secret_raw,
         consume_single_use=False,
         log_validation=False,
+        allow_completed_signer_replay=allow_completed_signer_replay,
     )
     mode = str(out.get("mode") or "")
     if mode not in allowed_modes:
@@ -308,26 +349,38 @@ def assert_agreement_recipient_write_allowed(
     if bind_participant_id is not None:
         tok_pid = str(out.get("recipient_party_id") or "").strip()
         body_pid = (bind_participant_id or "").strip()
-        if tok_pid:
-            if not body_pid:
-                raise HTTPException(
-                    status_code=403,
-                    detail={
-                        "code": "recipient_party_id_required",
-                        "message": RECIPIENT_LINK_INVALID_OR_EXPIRED,
-                    },
-                )
-            if tok_pid != body_pid:
-                raise HTTPException(
-                    status_code=403,
-                    detail={
-                        "code": "recipient_party_token_mismatch",
-                        "message": RECIPIENT_LINK_INVALID_OR_EXPIRED,
-                    },
-                )
+        if not tok_pid:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "unbound_recipient_token",
+                    "message": RECIPIENT_LINK_INVALID_OR_EXPIRED,
+                },
+            )
+        if not body_pid:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "recipient_party_id_required",
+                    "message": RECIPIENT_LINK_INVALID_OR_EXPIRED,
+                },
+            )
+        if tok_pid != body_pid:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "recipient_party_token_mismatch",
+                    "message": RECIPIENT_LINK_INVALID_OR_EXPIRED,
+                },
+            )
 
 
-def assert_agreement_full_draft_read_allowed(request: Request, agreement_id: str) -> None:
+def assert_agreement_full_draft_read_allowed(
+    request: Request,
+    agreement_id: str,
+    *,
+    allow_completed_signer_replay: bool = False,
+) -> None:
     """
     Require recipient token or owner principal before returning a full draft / render.
 
@@ -357,6 +410,7 @@ def assert_agreement_full_draft_read_allowed(request: Request, agreement_id: str
             secret_raw=secret_raw,
             consume_single_use=False,
             log_validation=False,
+            allow_completed_signer_replay=allow_completed_signer_replay,
         )
         return
 

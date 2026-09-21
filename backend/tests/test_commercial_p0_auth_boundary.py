@@ -35,6 +35,11 @@ from backend.services.recipient_delivery_registry import (
     record_invite_sent,
     supersede_active_invite,
 )
+from backend.services.vs01_completion_evidence import (
+    CONSENT_ACTION,
+    CONSENT_INTENT_STATEMENT,
+    CONSENT_INTENT_VERSION,
+)
 
 
 _SECRET = "unit-test-commercial-p0-signing-secret"
@@ -119,6 +124,23 @@ def _seed_signing_draft(aid: str) -> None:
             },
         }
     )
+
+
+def _recipient_complete_json() -> dict:
+    return {
+        "signer_role_id": "role_cp",
+        "participant_id": "p2",
+        "document_id": "doc_vs01",
+        "assigned_fields": [
+            {"field_id": "cp_sig", "field_type": "signature", "value": "CP Signer"},
+        ],
+        "consent": {
+            "accepted": True,
+            "intent_version": CONSENT_INTENT_VERSION,
+            "intent_statement": CONSENT_INTENT_STATEMENT,
+            "action": CONSENT_ACTION,
+        },
+    }
 
 
 def test_workspace_index_rejects_anonymous_and_forged_org(client: TestClient, monkeypatch):
@@ -341,7 +363,7 @@ def test_genesis_affiliate_and_customer_denied_admin_mutations(client: TestClien
 
 
 def test_replayed_signing_token_fails_after_recipient_complete(client: TestClient):
-    """After successful recipient complete, the same JTI must be superseded (replay fail-closed)."""
+    """After successful recipient complete, exact replay is idempotent and does not add another event."""
     from backend.services.agreement_signing_lock_store import write_signing_lock
     from unittest.mock import patch
 
@@ -369,17 +391,25 @@ def test_replayed_signing_token_fails_after_recipient_complete(client: TestClien
         first = client.post(
             f"/api/agreements/{aid}/vs01-signer-complete",
             headers={"X-Claw-Recipient-Access-Token": token},
-            json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
+            json=_recipient_complete_json(),
         )
     assert first.status_code == 200, first.text
 
     replay = client.post(
         f"/api/agreements/{aid}/vs01-signer-complete",
         headers={"X-Claw-Recipient-Access-Token": token},
-        json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
+        json=_recipient_complete_json(),
     )
-    assert replay.status_code == 403
-    assert replay.json()["detail"]["code"] == "invite_superseded"
+    assert replay.status_code == 200, replay.text
+    assert replay.json().get("already_signed") is True
+    draft_after = load_draft(aid)
+    events = [
+        e
+        for e in (draft_after.get("audit_log") or [])
+        if e.get("event_type") == "signature_completed"
+        and (e.get("value") or {}).get("participant_id") == "p2"
+    ]
+    assert len(events) == 1
 
 
 def test_sign_vs_signing_revoke_normalization_invalidates_live_token(client: TestClient):

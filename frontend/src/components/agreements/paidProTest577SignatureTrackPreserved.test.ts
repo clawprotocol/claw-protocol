@@ -125,7 +125,7 @@ describe("TEST577 AgreementBuilderIntake wiring", () => {
       intake.indexOf("const effectivePremiumSendMode = useMemo") + 800,
     );
     expect(memo).toContain("paidProReviewDefaultsToReviewTrack({");
-    expect(memo).toContain("signaturePrepIntentLatched: paidProSignaturePrepIntentLatched,");
+    expect(memo).toContain("paidProSignaturePrepIntentLatched || finalReviewSendIntentRef.current === \"signature\"");
   });
 
   it("the delivery track resolver is fed the latch", () => {
@@ -150,9 +150,8 @@ describe("TEST577 AgreementBuilderIntake wiring", () => {
     expect(handler).toContain("setPaidProSignaturePrepIntentLatched(false);");
   });
 
-  it("tears down the latch when the paid Pro source of truth is gone", () => {
-    expect(intake).toContain(
-      "if (paidProSignaturePrepIntentLatched && !hasPaidProSourceOfTruth()) {",
-    );
+  it("does not tear down the latch during signer confirmation or a latched signature intent", () => {
+    expect(intake).toContain('if (finalReviewSendIntentRef.current === "signature" || paidProInlineSignerSetupLatched)');
+    expect(intake).toContain("if (!hasPaidProSourceOfTruth())");
   });
 });

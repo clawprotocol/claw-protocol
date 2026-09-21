@@ -7,6 +7,7 @@ import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenera
 import type { AuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
+import { isAgreementSectionHeadingPartyName } from "./paidProPartyNamePreserve";
 import { partyIdFromStableKey } from "./canonicalPartyIdentityModel";
 import { readStarterToPaidPartyHandoff } from "./starterToPaidPartyHandoff";
 import {
@@ -99,8 +100,10 @@ export type FrozenSigningAuthorityValidationError =
   | "stale_packet_revision";
 
 const STORAGE_KEY_PREFIX = "claw_frozen_signing_authority_v1:";
+const AGREEMENT_STORAGE_KEY_PREFIX = "claw_frozen_signing_authority_agreement_v1:";
 
 let inMemorySnapshotBySession = new Map<string, FrozenSigningAuthoritySnapshotV1>();
+let inMemorySnapshotByAgreement = new Map<string, FrozenSigningAuthoritySnapshotV1>();
 
 function storageKey(agreementSessionId: string): string {
   return `${STORAGE_KEY_PREFIX}${agreementSessionId.trim()}`;
@@ -112,24 +115,47 @@ function executionTailHash(corpus: string): string {
   return hashPaidProCorpus(tail.trim());
 }
 
+const GENERATED_PARTY_ID_RE = /^party_\d+$/i;
+const GENERATED_HASH_PARTY_ID_RE = /^party_[0-9a-f]+:[0-9a-f]+$/i;
+
+function isGeneratedFrozenPartyId(id: string | null | undefined): boolean {
+  const value = String(id || "").trim();
+  return !value || GENERATED_PARTY_ID_RE.test(value) || GENERATED_HASH_PARTY_ID_RE.test(value);
+}
+
 function resolveAgreementPartyIdForManifestIndex(args: {
   index: number;
   legalName: string;
   handoffPartyIds: readonly string[];
   snapshotPartyIds: readonly string[];
+  draftPartyIdsByName?: ReadonlyMap<string, string>;
 }): string {
+  const draftByName = args.draftPartyIdsByName;
+  if (draftByName) {
+    for (const [name, id] of draftByName) {
+      if (partyLegalNamesMatch(name, args.legalName) && !isGeneratedFrozenPartyId(id)) {
+        return id;
+      }
+    }
+  }
   const fromSnapshot = args.snapshotPartyIds[args.index]?.trim();
-  if (fromSnapshot) return fromSnapshot;
+  if (fromSnapshot && !isGeneratedFrozenPartyId(fromSnapshot)) return fromSnapshot;
   const handoff = readStarterToPaidPartyHandoff();
   if (handoff) {
-    const byOrder = handoff.parties.find((p) => p.canonicalOrder === args.index);
-    if (byOrder?.agreementPartyId) return byOrder.agreementPartyId;
     const byName = handoff.parties.find((p) =>
       partyLegalNamesMatch(p.legalEntityName, args.legalName),
     );
-    if (byName?.agreementPartyId) return byName.agreementPartyId;
+    if (byName?.agreementPartyId && !isGeneratedFrozenPartyId(byName.agreementPartyId)) {
+      return byName.agreementPartyId;
+    }
+    const byOrder = handoff.parties.find((p) => p.canonicalOrder === args.index);
+    if (byOrder?.agreementPartyId && !isGeneratedFrozenPartyId(byOrder.agreementPartyId)) {
+      return byOrder.agreementPartyId;
+    }
   }
-  if (args.handoffPartyIds[args.index]?.trim()) return args.handoffPartyIds[args.index].trim();
+  const handoffAtIndex = args.handoffPartyIds[args.index]?.trim();
+  if (handoffAtIndex && !isGeneratedFrozenPartyId(handoffAtIndex)) return handoffAtIndex;
+  if (fromSnapshot) return fromSnapshot;
   return partyIdFromStableKey(args.legalName, args.index);
 }
 
@@ -233,6 +259,12 @@ export function extractRequiredSigningActions(
   return actions;
 }
 
+export type FrozenDraftPartyIdHint = {
+  id?: string | null;
+  name?: string | null;
+  role?: string | null;
+};
+
 export type BuildFrozenSigningAuthoritySnapshotArgs = {
   agreementId: string;
   authoritativeSnapshot: AuthoritativeSigningSnapshot;
@@ -240,6 +272,8 @@ export type BuildFrozenSigningAuthoritySnapshotArgs = {
   requiresInitialsByPartyId?: ReadonlyMap<string, boolean>;
   /** Review-only emails not tied to a signing party. */
   reviewerEmails?: readonly { email: string; agreementPartyId?: string }[];
+  /** Durable workspace party ids keyed by legal name — never synthetic party_* hashes. */
+  draftParties?: readonly FrozenDraftPartyIdHint[] | null;
 };
 
 export function buildFrozenSigningAuthoritySnapshotV1(
@@ -251,24 +285,42 @@ export function buildFrozenSigningAuthoritySnapshotV1(
   const snapshotPartyIds = meta.partyIds ?? [];
   const handoff = readStarterToPaidPartyHandoff(args.intakeText ?? undefined);
   const handoffPartyIds = handoff?.parties.map((p) => p.agreementPartyId) ?? [];
+  const draftPartyIdsByName = new Map<string, string>();
+  const draftPartyRoleByName = new Map<string, string>();
+  for (const party of args.draftParties ?? []) {
+    const name = String(party.name ?? "").trim();
+    const id = String(party.id ?? "").trim();
+    const role = String(party.role ?? "").trim();
+    if (name.length < 2) continue;
+    if (id && !isGeneratedFrozenPartyId(id)) draftPartyIdsByName.set(name, id);
+    if (role && !/^party$/i.test(role)) draftPartyRoleByName.set(name, role);
+  }
   const executionRecords = readSignerExecutionAuthority(args.intakeText)?.records ?? [];
 
   const parties: FrozenSigningAuthorityPartyV1[] = manifest.parties
-    .filter((p) => String(p.partyName ?? "").trim().length >= 2)
+    .filter((p) => {
+      const legalEntityName = String(p.partyName ?? "").trim();
+      return legalEntityName.length >= 2 && !isAgreementSectionHeadingPartyName(legalEntityName);
+    })
     .map((p) => {
       const legalEntityName = String(p.partyName ?? "").trim();
       const handoffParty =
         handoff?.parties.find((hp) => hp.canonicalOrder === p.index) ??
         handoff?.parties.find((hp) => partyLegalNamesMatch(hp.legalEntityName, legalEntityName));
+      const draftRole =
+        draftPartyRoleByName.get(legalEntityName) ||
+        [...draftPartyRoleByName.entries()].find(([name]) => partyLegalNamesMatch(name, legalEntityName))?.[1] ||
+        "";
       return {
         agreementPartyId: resolveAgreementPartyIdForManifestIndex({
           index: p.index,
           legalName: legalEntityName,
           handoffPartyIds,
           snapshotPartyIds,
+          draftPartyIdsByName,
         }),
         legalEntityName,
-        agreementRole: handoffParty?.agreementRole ?? (p.roleLabel?.trim() || undefined),
+        agreementRole: draftRole || p.roleLabel?.trim() || handoffParty?.agreementRole,
         canonicalOrder: p.index,
       };
     });
@@ -393,9 +445,14 @@ export function buildFrozenSigningAuthoritySnapshotV1(
 
 function persistSnapshot(snapshot: FrozenSigningAuthoritySnapshotV1): void {
   inMemorySnapshotBySession.set(snapshot.agreementSessionId, snapshot);
+  const agreementId = snapshot.agreementId.trim();
+  if (agreementId) inMemorySnapshotByAgreement.set(agreementId, snapshot);
   if (typeof sessionStorage === "undefined") return;
   try {
     sessionStorage.setItem(storageKey(snapshot.agreementSessionId), JSON.stringify(snapshot));
+    if (agreementId) {
+      sessionStorage.setItem(`${AGREEMENT_STORAGE_KEY_PREFIX}${agreementId}`, JSON.stringify(snapshot));
+    }
   } catch {
     /* ignore */
   }
@@ -461,7 +518,9 @@ export async function loadFrozenSigningAuthority(
     return backend;
   }
 
-  const local = readFrozenSigningAuthoritySnapshot();
+  const local =
+    readFrozenSigningAuthoritySnapshotForAgreement(agreementId) ||
+    readFrozenSigningAuthoritySnapshot();
   if (local && local.agreementId === agreementId) {
     const validation = validateFrozenSigningAuthoritySnapshot(local, args.expectedCorpusHash, {
       expectedAgreementId: agreementId,
@@ -473,6 +532,29 @@ export async function loadFrozenSigningAuthority(
   }
 
   return null;
+}
+
+export function readFrozenSigningAuthoritySnapshotForAgreement(
+  agreementId?: string | null,
+): FrozenSigningAuthoritySnapshotV1 | null {
+  const id = String(agreementId || "").trim();
+  if (!id) return null;
+  const mem = inMemorySnapshotByAgreement.get(id);
+  if (mem && mem.agreementId === id) return mem;
+  if (typeof sessionStorage === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(`${AGREEMENT_STORAGE_KEY_PREFIX}${id}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as FrozenSigningAuthoritySnapshotV1;
+    if (parsed?.version !== 1 || parsed.agreementId !== id) return null;
+    inMemorySnapshotByAgreement.set(id, parsed);
+    if (parsed.agreementSessionId) {
+      inMemorySnapshotBySession.set(parsed.agreementSessionId, parsed);
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 export function readFrozenSigningAuthoritySnapshot(
@@ -488,6 +570,7 @@ export function readFrozenSigningAuthoritySnapshot(
     const parsed = JSON.parse(raw) as FrozenSigningAuthoritySnapshotV1;
     if (parsed?.version !== 1 || parsed.agreementSessionId !== sessionId) return null;
     inMemorySnapshotBySession.set(sessionId, parsed);
+    if (parsed.agreementId) inMemorySnapshotByAgreement.set(parsed.agreementId, parsed);
     return parsed;
   } catch {
     return null;
@@ -500,10 +583,15 @@ export function hasFrozenSigningAuthoritySnapshot(): boolean {
 
 export function clearFrozenSigningAuthoritySnapshotForSession(agreementSessionId?: string): void {
   const sessionId = (agreementSessionId ?? getOrInitSessionAgreementGenerationId()).trim();
+  const existing = inMemorySnapshotBySession.get(sessionId);
   inMemorySnapshotBySession.delete(sessionId);
+  if (existing?.agreementId) inMemorySnapshotByAgreement.delete(existing.agreementId);
   if (typeof sessionStorage === "undefined") return;
   try {
     sessionStorage.removeItem(storageKey(sessionId));
+    if (existing?.agreementId) {
+      sessionStorage.removeItem(`${AGREEMENT_STORAGE_KEY_PREFIX}${existing.agreementId}`);
+    }
   } catch {
     /* ignore */
   }
@@ -511,12 +599,13 @@ export function clearFrozenSigningAuthoritySnapshotForSession(agreementSessionId
 
 export function clearFrozenSigningAuthoritySnapshotForTests(): void {
   inMemorySnapshotBySession = new Map();
+  inMemorySnapshotByAgreement = new Map();
   if (typeof sessionStorage === "undefined") return;
   try {
     const keys: string[] = [];
     for (let i = 0; i < sessionStorage.length; i += 1) {
       const k = sessionStorage.key(i);
-      if (k?.startsWith(STORAGE_KEY_PREFIX)) keys.push(k);
+      if (k?.startsWith(STORAGE_KEY_PREFIX) || k?.startsWith(AGREEMENT_STORAGE_KEY_PREFIX)) keys.push(k);
     }
     for (const k of keys) sessionStorage.removeItem(k);
   } catch {

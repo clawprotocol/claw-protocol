@@ -1,3 +1,4 @@
+import { requiredSignerPartiesFromDraft } from "../launch/simpleProduct/acceptedSigningCompletionAuthority";
 import type { AgreementDraft } from "./agreementTypes";
 
 /** Statuses we can represent from current agreement workspace data (no per-signer analytics yet). */
@@ -13,6 +14,13 @@ export type PendingSignerRow = {
 
 function partyIsSigner(role: string): boolean {
   return (role || "").trim().toLowerCase() === "signer";
+}
+
+function requiredSignerParties(draft: AgreementDraft | null): NonNullable<AgreementDraft["parties"]> {
+  if (!draft) return [];
+  const persisted = requiredSignerPartiesFromDraft(draft.parties || []);
+  if (persisted.length > 0) return persisted;
+  return (draft.parties || []).filter((p) => partyIsSigner(p.role));
 }
 
 export function signatureCompletedParticipantIds(draft: AgreementDraft | null): Set<string> {
@@ -37,7 +45,7 @@ export function hasLegacySignatureWithoutParticipant(draft: AgreementDraft | nul
 
 export function isAllSignersCompletedFromAudit(draft: AgreementDraft | null): boolean {
   if (!draft) return false;
-  const signers = (draft.parties || []).filter((p) => partyIsSigner(p.role));
+  const signers = requiredSignerParties(draft);
   if (!signers.length) return false;
   const done = signatureCompletedParticipantIds(draft);
   const ids = signers.map((p) => (p.id || "").trim());
@@ -82,15 +90,15 @@ function signatureCompletedDetailForParticipant(
 
 export function isParticipantSignatureComplete(draft: AgreementDraft | null, participantId: string): boolean {
   const pid = (participantId || "").trim();
-  if (pid) return signatureCompletedParticipantIds(draft).has(pid);
-  return hasLegacySignatureWithoutParticipant(draft);
+  if (!pid) return false;
+  return signatureCompletedParticipantIds(draft).has(pid);
 }
 
 export function pendingSignatureCount(args: {
   draft: AgreementDraft;
   agreementFullySigned: boolean;
 }): { pending: number; total: number } {
-  const signerParties = (args.draft.parties || []).filter((p) => partyIsSigner(p.role));
+  const signerParties = requiredSignerParties(args.draft);
   const total = signerParties.length;
   if (total === 0) return { pending: 0, total: 0 };
   if (args.agreementFullySigned) return { pending: 0, total };
@@ -116,8 +124,7 @@ export function buildPendingSignerRows(args: {
   linkReady: boolean;
   agreementFullySigned: boolean;
 }): { rows: PendingSignerRow[]; completedCount: number; total: number; summary: string } {
-  const parties = args.draft.parties || [];
-  const signerParties = parties.filter((p) => partyIsSigner(p.role));
+  const signerParties = requiredSignerParties(args.draft);
   const total = signerParties.length;
   const agreementFullySigned = args.agreementFullySigned;
   const linkReady = args.linkReady;

@@ -80,20 +80,17 @@ export function resolveVs01RecipientIdentityFromAuthority(args: {
   const tokenPid = (args.tokenPartyId ?? "").trim();
 
   if (!portable || portable.roles.length < 2) {
-    if (urlRoleId && urlCp) {
-      return {
-        lockedSignerRoleId: urlRoleId,
-        lockedCounterpartyId: urlCp,
-        recipientName: args.urlRecipientName.trim() || "Recipient",
-        recipientEmail: args.urlRecipientEmail.trim(),
-        partyIndex: args.urlRecipientIndex ?? 0,
-        source: "url_bootstrap",
-      };
-    }
     return mismatch(
       "missing_packet_roles",
       "This signing link could not be verified. Ask the sender for a new link.",
       { hasPortable: Boolean(portable), roleCount: portable?.roles.length ?? 0 },
+    );
+  }
+  if (!tokenPid) {
+    return mismatch(
+      "recipient_token_required",
+      "This signing link could not be verified. Open the link from your email or ask the sender to resend.",
+      { hasUrlRole: Boolean(urlRoleId), hasUrlCp: Boolean(urlCp) },
     );
   }
 

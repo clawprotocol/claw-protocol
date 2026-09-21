@@ -14,6 +14,8 @@ import { resolvePaidProPostFinalizeReviewPlain } from "../../components/agreemen
 import { readConsumedPaidProSignerMetadataAuthority } from "../../components/agreements/paidProSignerMetadataAuthority";
 import { getPaidProDocumentForSurface, hashPaidProCorpus } from "../../components/agreements/paidProSourceOfTruth";
 import { applyPaidProUserVisibleDisplayPrep } from "../../components/agreements/paidProDisplayPlainAuthority";
+import { restoreDeclaredConsultantClientPaper } from "../../components/agreements/paidProDeclaredConsultantClientPaper";
+import { selectVerifiedPaidReviewPaper } from "../../components/agreements/paidProVerifiedReviewPaper";
 import { isAuthoritativePremiumPipelineRenderSource } from "../../components/agreements/premiumRenderSourceResolver";
 import { peekReviewFirstPinnedCorpus } from "./reviewFirstSendSurface";
 import {
@@ -40,6 +42,7 @@ export type ReviewFirstDisplayCorpusSource =
   | "document_text"
   | "rendered_document_text"
   | "authoritative_agreement_document"
+  | "verified_server_canonical_review_snapshot"
   | "none";
 
 export type ReviewFirstDisplayCorpus = {
@@ -127,7 +130,10 @@ function finalizeReviewFirstCorpusText(
     hydrated = repairExecutionBlockEntityHeadingLines(hydrated, parties).text.trim();
   }
 
-  return applyReviewTrackDisplayFormatting(hydrated);
+  return restoreDeclaredConsultantClientPaper(
+    applyReviewTrackDisplayFormatting(hydrated),
+    body,
+  );
 }
 
 function wrapReviewFirstCorpus(
@@ -180,6 +186,19 @@ export function resolveReviewFirstDisplayCorpus(
         text: acceptedCorpus.text,
         source: acceptedCorpus.source,
         hash: acceptedCorpus.hash,
+      },
+      draft,
+      surface,
+    );
+  }
+
+  const verifiedPaper = selectVerifiedPaidReviewPaper({ agreementId });
+  if (verifiedPaper) {
+    return commitReviewFirstCorpus(
+      {
+        text: verifiedPaper.plain,
+        source: "verified_server_canonical_review_snapshot",
+        hash: verifiedPaper.corpusSha256,
       },
       draft,
       surface,

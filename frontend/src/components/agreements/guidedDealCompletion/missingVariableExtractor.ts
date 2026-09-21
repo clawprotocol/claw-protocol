@@ -86,6 +86,8 @@ const MATERIAL_TO_SEVERITY: Record<MaterialSeverity, DealVariableSeverity> = {
 
 const ID_TO_CATEGORY: Record<string, DealVariableCategory> = {
   payment_timing: "payment_timing",
+  payment_due: "payment_timing",
+  invoice_cadence: "payment_timing",
   payment_structure: "compensation",
   support_obligations: "support",
   scope_change_approval: "general",

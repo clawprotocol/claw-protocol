@@ -16,6 +16,16 @@ const DOC = "doc_test361";
 const OWNER_ROLE = "vs01r:ag_test361:i0:owner";
 const CP_ROLE = "vs01r:ag_test361:i1:cp";
 
+function confirmedCompletion(role = OWNER_ROLE, participantId = "owner") {
+  return {
+    status: "completed",
+    agreement_id: AG,
+    document_id: DOC,
+    signer_role_id: role,
+    participant_id: participantId,
+  };
+}
+
 function witnessCorpus(): string {
   return (
     `${"Paid Pro services agreement corpus. ".repeat(90)}\n\n` +
@@ -130,6 +140,7 @@ describe("recordVs01SignerCompletion (Test361)", () => {
         ok: true,
         fully_executed: false,
         completion_emails_sent: false,
+        completion: confirmedCompletion(),
       };
     });
     const statusStore = await import("./vs01SigningPacketStatusStore");
@@ -157,7 +168,7 @@ describe("recordVs01SignerCompletion (Test361)", () => {
     vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockImplementation(async () => {
       calls += 1;
       await new Promise((r) => setTimeout(r, 20));
-      return { ok: true, fully_executed: false };
+      return { ok: true, fully_executed: false, completion: confirmedCompletion() };
     });
     const [a, b] = await Promise.all([
       recordVs01SignerCompletion({
@@ -191,6 +202,7 @@ describe("recordVs01SignerCompletion (Test361)", () => {
       ok: true,
       fully_executed: true,
       completion_emails_sent: true,
+      completion: confirmedCompletion(CP_ROLE, "cp1"),
     });
 
     const result = await recordVs01SignerCompletion({
@@ -205,6 +217,46 @@ describe("recordVs01SignerCompletion (Test361)", () => {
     expect(result.fullySigned).toBe(true);
     expect(result.completionEmailsSent).toBe(true);
     expect(readSigningPacketStatus(AG)?.fullySigned).toBe(true);
+  });
+
+  it("does not write local signed state when the server rejects completion", async () => {
+    vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockResolvedValue({
+      ok: false,
+      error: "invalid_token",
+      errorCode: "invalid_token",
+      status: 403,
+      retryable: false,
+    });
+
+    const result = await recordVs01SignerCompletion({
+      agreementId: AG,
+      documentId: DOC,
+      signerRoleId: OWNER_ROLE,
+      partyIndex: 0,
+      participantId: "owner",
+    });
+
+    expect(result.serverSynced).toBe(false);
+    expect(readSigningPacketStatus(AG)?.bySignerKey[OWNER_ROLE]).not.toBe("signed");
+  });
+
+  it("does not write local signed state when HTTP 200 lacks matching confirmation", async () => {
+    vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockResolvedValue({
+      ok: true,
+      fully_executed: true,
+    });
+
+    const result = await recordVs01SignerCompletion({
+      agreementId: AG,
+      documentId: DOC,
+      signerRoleId: OWNER_ROLE,
+      partyIndex: 0,
+      participantId: "owner",
+    });
+
+    expect(result.serverSynced).toBe(false);
+    expect(result.errorCode).toBe("completion_confirmation_mismatch");
+    expect(readSigningPacketStatus(AG)?.bySignerKey[OWNER_ROLE]).not.toBe("signed");
   });
 
   it("skips server sync for local_ag bridge agreements", async () => {
@@ -223,11 +275,39 @@ describe("recordVs01SignerCompletion (Test361)", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it("does not attach fullyExecutedSnapshot on the completion POST before the server finalizes", async () => {
+    writeSigningPacketStatus({
+      agreementId: AG,
+      updatedAt: new Date().toISOString(),
+      bySignerKey: { [OWNER_ROLE]: "signed", [CP_ROLE]: "waiting" },
+      fullySigned: false,
+    });
+    let posted: Record<string, unknown> | undefined;
+    vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockImplementation(async (_aid, body) => {
+      posted = body as Record<string, unknown>;
+      return { ok: true, fully_executed: false, completion_emails_sent: false, completion: confirmedCompletion(CP_ROLE, "cp1") };
+    });
+
+    await recordVs01SignerCompletion({
+      agreementId: AG,
+      documentId: DOC,
+      signerRoleId: CP_ROLE,
+      partyIndex: 1,
+      participantId: "cp1",
+      signingDateIso: "2026-08-25",
+    });
+
+    const portable = posted?.portable_packet as { fullyExecutedSnapshot?: unknown } | undefined;
+    expect(portable?.fullyExecutedSnapshot).toBeUndefined();
+    expect(loadVs01CanonicalPacketPortable(DOC)?.fullyExecutedSnapshot).toBeUndefined();
+  });
+
   it("persists signer signature and date into portable corpus on finish", async () => {
     vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockResolvedValue({
       ok: true,
       fully_executed: false,
       completion_emails_sent: false,
+      completion: confirmedCompletion(),
     });
 
     await recordVs01SignerCompletion({

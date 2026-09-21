@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
 import {
   buildCanonicalPaidProServicesOpeningRecital,
@@ -63,6 +63,13 @@ function draftParties(): ParsedDraftShape {
 }
 
 describe("paidProOpeningRecitalGuard", () => {
+  beforeEach(() => {
+    clearPaidProSourceOfTruth();
+  });
+  afterEach(() => {
+    clearPaidProSourceOfTruth();
+  });
+
   it("detects naked party-name header before Section 1", () => {
     const records = resolveCanonicalPartyIdentitiesFromIntake(INTAKE, [BLUE, IRON]);
     expect(records.length).toBeGreaterThanOrEqual(2);
@@ -75,7 +82,8 @@ describe("paidProOpeningRecitalGuard", () => {
     expect(repairs.length).toBeGreaterThan(0);
     expect(text.trim()).not.toMatch(new RegExp(`^${BLUE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\n`));
     expect(text).toContain(PAID_PRO_SERVICES_TITLE);
-    expect(text).toMatch(/entered\s+into\s+as\s+of/i);
+    expect(text).toMatch(/entered\s+into\s+by\s+and\s+between/i);
+    expect(text).not.toMatch(/as of the Effective Date/i);
     expect(text).toContain(`${BLUE} ("Client")`);
     expect(text).toMatch(/Iron Vale Systems Inc\.?\s*\(\s*["']Service Provider["']\s*\)/);
     const sec1 = text.search(/^\s*1\.\s+/m);
@@ -100,7 +108,8 @@ describe("paidProOpeningRecitalGuard", () => {
       source: "server_full_draft",
     });
     const sotPlain = getPaidProSourceOfTruthText();
-    expect(sotPlain).toMatch(/entered\s+into\s+as\s+of/i);
+    expect(sotPlain).toMatch(/entered\s+into\s+by\s+and\s+between/i);
+    expect(sotPlain).not.toMatch(/as of the Effective Date/i);
     expect(sotPlain).toContain(`${BLUE} ("Client")`);
 
     const review = resolvePaidProReviewRenderPlain({ draft, intakeText: INTAKE });
@@ -111,7 +120,8 @@ describe("paidProOpeningRecitalGuard", () => {
       const surface = label === "review" ? review : label === "copy" ? copy : display;
       const head = surface.slice(0, 1_500);
       expect(head.startsWith(PAID_PRO_SERVICES_TITLE), label).toBe(true);
-      expect(head).toMatch(/entered\s+into\s+as\s+of/i);
+      expect(head).toMatch(/entered\s+into\s+by\s+and\s+between/i);
+      expect(head).not.toMatch(/as of the Effective Date/i);
       expect(surface).toContain(`${BLUE} ("Client")`);
       expect(surface).toMatch(/Iron Vale Systems Inc\.?\s*\(\s*["']Service Provider["']\s*\)/);
       const sec1 = surface.search(/^\s*1\.\s+/m);
@@ -133,6 +143,201 @@ describe("paidProOpeningRecitalGuard", () => {
     expect(block).toContain(PAID_PRO_SERVICES_TITLE);
     expect(block).toContain('this "Agreement")');
     expect(block).toContain("collectively as the \"Parties.\"");
+    expect(block).toMatch(/entered into by and between/i);
+    expect(block).not.toMatch(/as of the Effective Date/i);
+  });
+
+  it("safe display does not invert Harbor Consultant / Ironvale Client", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc.";
+    const corpus = [
+      "CONSULTING SERVICES AGREEMENT",
+      "",
+      `This Consulting Services Agreement (the "Agreement") is entered into as of October 1, 2026 by and between ${harbor} ("Consultant") and ${ironvale} ("Client").`,
+      "",
+      "1. PARTIES AND ROLES",
+      "Consultant shall perform AI workflow implementation. Client shall pay $48,000.",
+      "2. TERM",
+      "The initial term is twelve months beginning October 1, 2026.",
+    ].join("\n");
+    const draft = {
+      title: "Consulting Services Agreement",
+      parties: [
+        { name: harbor, role: "Consultant" },
+        { name: ironvale, role: "Client" },
+      ],
+    } as ParsedDraftShape;
+    const intake =
+      "Draft a consulting services agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client).";
+    const safe = applyAcceptedProCorpusSafeDisplay(padBody(corpus), { draft, intakeText: intake });
+    expect(safe.text).toContain(`${harbor} ("Consultant")`);
+    expect(safe.text).toMatch(/Ironvale Manufacturing Inc\.?\s*\(\s*"Client"\s*\)/);
+    expect(safe.text).not.toContain(`${harbor} ("Client")`);
+    expect(safe.text).not.toMatch(/Ironvale Manufacturing Inc\.?\s*\(\s*"Service Provider"\s*\)/);
+  });
+
+  it("does not invent an undefined Effective Date when only a term start is supplied", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc.";
+    const corpus = [
+      "CONSULTING SERVICES AGREEMENT",
+      "",
+      `This Consulting Services Agreement (the "Agreement") is entered into by and between ${harbor} ("Consultant") and ${ironvale} ("Client").`,
+      "",
+      "1. PARTIES AND ROLES",
+      "Consultant shall perform AI workflow implementation.",
+      "4. TERM AND DURATION",
+      "The initial term is twelve months beginning October 1, 2026.",
+    ].join("\n");
+    const records = [
+      {
+        fullLegalName: harbor,
+        roleLabel: "Consultant",
+        displayAlias: "Harbor Peak",
+        signerName: "Maya Chen",
+        signerTitle: "Principal",
+      },
+      {
+        fullLegalName: ironvale,
+        roleLabel: "Client",
+        displayAlias: "Ironvale",
+        signerName: "Jordan Hale",
+        signerTitle: "Operations Lead",
+      },
+    ];
+    expect(isPaidProOpeningStructurallyValid(padBody(corpus), records)).toBe(true);
+    const ensured = ensurePaidProServicesAgreementOpening(padBody(corpus), records);
+    expect(ensured.text).toMatch(/entered into by and between/i);
+    expect(ensured.text).not.toMatch(/as of the Effective Date/i);
+    expect(ensured.text).toMatch(/beginning October 1, 2026/);
+  });
+
+  it("does not invent an undefined Effective Date when index-default roles would fail structural checks", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc.";
+    const corpus = [
+      "CONSULTING SERVICES AGREEMENT",
+      "",
+      `This Consulting Services Agreement (the "Agreement") is entered into by and between ${harbor} ("Consultant") and ${ironvale} ("Client").`,
+      "",
+      "1. PARTIES AND ROLES",
+      "Consultant shall perform AI workflow implementation.",
+      "4. TERM AND DURATION",
+      "The initial term is twelve months beginning October 1, 2026.",
+    ].join("\n");
+    const indexDefault = [
+      { fullLegalName: harbor, roleLabel: "Client", displayAlias: harbor, signerName: null, signerTitle: null },
+      { fullLegalName: ironvale, roleLabel: "Service Provider", displayAlias: ironvale, signerName: null, signerTitle: null },
+    ];
+    const repaired = repairPaidProServicesAgreementOpening(padBody(corpus), indexDefault);
+    expect(repaired.text).toMatch(/entered into by and between/i);
+    expect(repaired.text).not.toMatch(/as of the Effective Date/i);
+    expect(repaired.text).toMatch(/beginning October 1, 2026/);
+    const ensured = ensurePaidProServicesAgreementOpening(padBody(corpus), indexDefault);
+    expect(ensured.text).not.toMatch(/as of the Effective Date/i);
+  });
+
+  it("keeps a labeled Effective Date and does not invent one from the Harbor stub recital", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc.";
+    const records = [
+      { fullLegalName: harbor, roleLabel: "Consultant", displayAlias: harbor, signerName: null, signerTitle: null },
+      { fullLegalName: ironvale, roleLabel: "Client", displayAlias: ironvale, signerName: null, signerTitle: null },
+    ];
+    const stub = [
+      "CONSULTING SERVICES AGREEMENT",
+      `This Consulting Services Agreement (the "Agreement") is entered into by and between ${harbor} ("Consultant") and ${ironvale} ("Client").`,
+      "1. PARTIES AND ROLES. Consultant is an independent professional services firm.",
+      "4. TERM AND DURATION. The initial term is twelve months beginning October 1, 2026.",
+    ].join("\n");
+    const unlabeled = ensurePaidProServicesAgreementOpening(padBody(stub), records);
+    expect(unlabeled.text).toMatch(/entered into by and between/i);
+    expect(unlabeled.text).not.toMatch(/as of the Effective Date/i);
+    const labeled = [
+      "CONSULTING SERVICES AGREEMENT",
+      `This Consulting Services Agreement (the "Agreement") is entered into as of October 1, 2026 (the "Effective Date") by and between ${harbor} ("Consultant") and ${ironvale} ("Client").`,
+      "1. PARTIES AND ROLES. Consultant is an independent professional services firm.",
+      "4. TERM AND DURATION. The initial term is twelve months beginning October 1, 2026.",
+    ].join("\n");
+    const kept = repairPaidProServicesAgreementOpening(padBody(labeled), records);
+    expect(kept.text).toMatch(/October 1, 2026 \(the "Effective Date"\)/);
+    expect(kept.text).not.toMatch(/as of the Effective Date by and between/i);
+  });
+
+  it("does not invert Harbor Consultant / Ironvale Client before acceptance", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc.";
+    const records = [
+      {
+        fullLegalName: harbor,
+        roleLabel: "Consultant",
+        displayAlias: "Harbor Peak",
+        signerName: "Maya Chen",
+        signerTitle: "Principal",
+      },
+      {
+        fullLegalName: ironvale,
+        roleLabel: "Client",
+        displayAlias: "Ironvale",
+        signerName: "Jordan Hale",
+        signerTitle: "Operations Lead",
+      },
+    ];
+    const corpus = [
+      "CONSULTING SERVICES AGREEMENT",
+      "",
+      `This Consulting Services Agreement (the "Agreement") is entered into as of October 1, 2026 by and between ${harbor} ("Consultant") and ${ironvale} ("Client").`,
+      "",
+      "1. PARTIES AND ROLES",
+      "Consultant is an independent professional services firm.",
+    ].join("\n");
+    expect(detectPaidProMalformedServicesOpening(corpus, records)).toBe(false);
+    const ensured = ensurePaidProServicesAgreementOpening(corpus, records);
+    expect(ensured.text).toContain(`${harbor} ("Consultant")`);
+    expect(ensured.text).toContain(`${ironvale} ("Client")`);
+    expect(ensured.text).not.toContain(`${harbor} ("Client")`);
+    expect(ensured.text).not.toContain(`${ironvale} ("Service Provider")`);
+  });
+
+  it("does not rewrite Harbor Consultant / Ironvale Client when slots are empty or index-default Client/SP", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc.";
+    const corpus = [
+      "CONSULTING SERVICES AGREEMENT",
+      "",
+      `This Consulting Services Agreement (the "Agreement") is entered into as of October 1, 2026 by and between ${harbor} ("Consultant") and ${ironvale} ("Client").`,
+      "",
+      "1. PARTIES AND ROLES",
+      "Consultant shall perform AI workflow implementation. Client shall pay $48,000.",
+    ].join("\n");
+    const emptyRoles = [
+      { fullLegalName: harbor, roleLabel: "", displayAlias: harbor, signerName: null, signerTitle: null },
+      { fullLegalName: ironvale, roleLabel: "", displayAlias: ironvale, signerName: null, signerTitle: null },
+    ];
+    const indexDefault = [
+      { fullLegalName: harbor, roleLabel: "Client", displayAlias: harbor, signerName: null, signerTitle: null },
+      { fullLegalName: ironvale, roleLabel: "Service Provider", displayAlias: ironvale, signerName: null, signerTitle: null },
+    ];
+    for (const records of [emptyRoles, indexDefault]) {
+      expect(detectPaidProMalformedServicesOpening(corpus, records)).toBe(false);
+      expect(isPaidProOpeningStructurallyValid(corpus, records)).toBe(true);
+      const repaired = repairPaidProServicesAgreementOpening(corpus, records);
+      expect(repaired.text).toContain(`${harbor} ("Consultant")`);
+      expect(repaired.text).toContain(`${ironvale} ("Client")`);
+      expect(repaired.text).not.toContain(`${harbor} ("Client")`);
+      expect(repaired.text).not.toContain(`${ironvale} ("Service Provider")`);
+    }
+    const draft = {
+      title: "Consulting Services Agreement",
+      parties: [
+        { name: harbor, role: "" },
+        { name: ironvale, role: "" },
+      ],
+    } as ParsedDraftShape;
+    const safe = applyAcceptedProCorpusSafeDisplay(padBody(corpus), { draft });
+    expect(safe.text).toContain(`${harbor} ("Consultant")`);
+    expect(safe.text).not.toContain(`${harbor} ("CLIENT")`);
+    expect(safe.text).not.toContain(`${harbor} ("Client")`);
   });
 
   it("ensurePaidProServicesAgreementOpening is idempotent on valid corpus", () => {

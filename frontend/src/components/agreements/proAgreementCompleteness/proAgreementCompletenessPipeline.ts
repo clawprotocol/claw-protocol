@@ -51,9 +51,13 @@ export function applyProAgreementCompletenessPipeline(
 
   const materialMissingItems = buildMaterialMissingItems({
     intakeRaw: ctx.intakeRaw,
+    userGapAnswers: ctx.userGapAnswers,
     body: working,
     structuralIssues: issues,
     serverMissing: ctx.serverMissingMaterial,
+    parsedParties: ctx.parsedParties,
+    additionalTerms: ctx.additionalTerms,
+    unresolvedSubjects: ctx.unresolvedSubjects,
   });
 
   const structuralOk =

@@ -3,12 +3,9 @@
  */
 import React from "react";
 import { useAuth } from "./AuthProvider";
-import {
-  isAuthenticatedDashboardSurface,
-  isPublicTokenAgreementSurface,
-  resolveCurrentUser,
-} from "../account/currentUser";
+import { resolveCurrentUser } from "../account/currentUser";
 import { useLaunchNav } from "../launch/LaunchNavContext";
+import { matchAppRoute, routeRequiresAuthenticatedSession } from "../launch/routes";
 import {
   buildSignInContinuationPath,
   CHECKOUT_SIGN_IN_BODY,
@@ -16,10 +13,7 @@ import {
   CHECKOUT_SIGN_IN_HEADING,
   isSecureCheckoutPath,
 } from "./safeRedirectResolver";
-import {
-  consumeHomeAnonymousCreateAuthority,
-  isHomeAnonymousStarterAuthorityActive,
-} from "../launch/homeAnonymousCreateOrigin";
+import { isHomeAnonymousStarterAuthorityActive } from "../launch/homeAnonymousCreateOrigin";
 import {
   hasDemoSessionUser,
   isGuestCheckoutAuthorityActiveForPath,
@@ -30,19 +24,16 @@ export function RequireAuthenticatedDashboard({
 }: {
   children: React.ReactNode;
 }): React.ReactElement {
-  const { enabled, loading, user } = useAuth();
+  const { enabled, loading, user, session } = useAuth();
   const { pathname, search, navigate } = useLaunchNav();
   const path = (pathname || "").replace(/\/$/, "") || "/";
   const checkoutContinuation = isSecureCheckoutPath(path);
+  const route = matchAppRoute(path, search);
 
-  if (isPublicTokenAgreementSurface(path)) {
-    return <>{children}</>;
-  }
-  if (!isAuthenticatedDashboardSurface(path)) {
+  if (!route || !routeRequiresAuthenticatedSession(route.access)) {
     return <>{children}</>;
   }
   if (path === "/app/create" && isHomeAnonymousStarterAuthorityActive()) {
-    consumeHomeAnonymousCreateAuthority();
     return <>{children}</>;
   }
 
@@ -63,7 +54,23 @@ export function RequireAuthenticatedDashboard({
     supabaseEmail: user?.email ?? null,
     supabaseDisplayName:
       (user?.user_metadata as { full_name?: string } | undefined)?.full_name ?? null,
+    lifecycle: loading && !user
+      ? { status: "loading" }
+      : user?.id && session?.access_token
+        ? {
+            status: "authenticated",
+            accessToken: session.access_token,
+            userId: user.id,
+            email: user.email ?? null,
+          }
+        : { status: "signed_out" },
   });
+
+  // Only a validated session / e2e seed counts — never org headers alone.
+  // Known identity must win over the loading splash so reload cannot blank a ready review.
+  if (current.isAuthenticated) {
+    return <>{children}</>;
+  }
 
   if (loading && enabled) {
     return (
@@ -71,11 +78,6 @@ export function RequireAuthenticatedDashboard({
         Checking your session…
       </div>
     );
-  }
-
-  // Only a validated session / e2e seed counts — never org headers alone.
-  if (current.isAuthenticated) {
-    return <>{children}</>;
   }
 
   return (

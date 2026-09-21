@@ -30,6 +30,7 @@ import {
   resolvePaidProReviewState,
   type PaidProReviewState,
 } from "./paidProReviewStateMachine";
+import { selectVerifiedPaidReviewPaper } from "./paidProVerifiedReviewPaper";
 
 export const PAID_PRO_REVIEW_RECOVERING_TITLE = "Review your agreement draft";
 export const PAID_PRO_REVIEW_RECOVERING_SUBTITLE =
@@ -53,6 +54,7 @@ export type PaidProReviewAuthorityInput = ResolveAuthoritativeCreateFlowReviewSh
   premiumPostCheckoutPhase?: string | null;
   suppressProcessingModal?: boolean;
   authoritativePremiumUiCommitted?: boolean;
+  agreementId?: string | null;
 };
 
 export type PaidProValidatedCorpus = {
@@ -62,10 +64,17 @@ export type PaidProValidatedCorpus = {
 };
 
 /** The only gate for whether a paid Pro corpus may drive review render / title / CTA. */
-export function resolveValidatedPaidProReviewCorpus(): PaidProValidatedCorpus {
+export function resolveValidatedPaidProReviewCorpus(args?: {
+  agreementId?: string | null;
+}): PaidProValidatedCorpus {
+  const agreementId = String(args?.agreementId || "").trim() || null;
+  const verified = selectVerifiedPaidReviewPaper({ agreementId });
   if (hasPaidProSourceOfTruth()) {
     const sot = getPaidProSourceOfTruthText().trim();
     if (sot.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      if (agreementId && verified && verified.plain.length >= PAID_PRO_AUTHORITY_MIN_LEN && verified.plain !== sot) {
+        return { plain: verified.plain, source: verified.source, len: verified.plain.length };
+      }
       return { plain: sot, source: "paid_pro_source_of_truth", len: sot.length };
     }
   }
@@ -83,6 +92,9 @@ export function resolveValidatedPaidProReviewCorpus(): PaidProValidatedCorpus {
     })
   ) {
     return { plain: latchedBody, source: "latched_accepted", len: latchedBody.length };
+  }
+  if (verified && verified.plain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return { plain: verified.plain, source: verified.source, len: verified.plain.length };
   }
   return { plain: "", source: null, len: 0 };
 }
@@ -110,7 +122,9 @@ export function resolvePaidProReviewAuthority(
   const shellKind = resolveAuthoritativeCreateFlowReviewShell(input);
   if (shellKind !== "paid_pro") return null;
 
-  const validatedCorpus = resolveValidatedPaidProReviewCorpus();
+  const validatedCorpus = resolveValidatedPaidProReviewCorpus({
+    agreementId: input.agreementId,
+  });
   const hasValidatedCorpus =
     validatedCorpus.len >= PAID_PRO_AUTHORITY_MIN_LEN ||
     Boolean(input.authoritativePremiumUiCommitted);

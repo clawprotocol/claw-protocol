@@ -18,6 +18,9 @@ import {
 import { PaidProReviewNextStepCallout } from "./PaidProReviewNextStepCallout";
 import { PaidProReviewStatusPanel } from "./PaidProReviewStatusPanel";
 import { PaidProSignerSavedConfirmationBanner } from "./PaidProSignerSavedConfirmationBanner";
+import { PaymentClarificationAdvisory } from "./PaymentClarificationAdvisory";
+import { PaidDraftContentAdvisory } from "./PaidDraftContentAdvisory";
+import { getPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import {
   PAID_PRO_FINAL_VERSION_HEADLINE,
   resolvePaidProFinalVersionCopy,
@@ -136,6 +139,11 @@ export type SimpleProFinalReviewScreenProps = {
   visibleProPaperTrace?: VisibleProPaperDiagnosticsTrace;
   selectedTrack?: string | null;
   signaturePreparationRequested?: boolean;
+  agreementId?: string | null;
+  intakeText?: string | null;
+  parsedParties?: readonly { name: string; role: string; email?: string; signerName?: string }[] | null;
+  additionalTerms?: string | null;
+  unresolvedSubjects?: readonly { name: string; source: "customer_mentioned" | "extraction_only"; email?: string; roleHint?: string }[] | null;
 };
 
 export function SimpleProFinalReviewScreen({
@@ -203,6 +211,11 @@ export function SimpleProFinalReviewScreen({
   visibleProPaperTrace,
   selectedTrack = null,
   signaturePreparationRequested = false,
+  agreementId = null,
+  intakeText = null,
+  parsedParties = null,
+  additionalTerms = null,
+  unresolvedSubjects = null,
 }: SimpleProFinalReviewScreenProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const reviewFirstErrorRef = useRef<HTMLDivElement>(null);
@@ -765,6 +778,21 @@ export function SimpleProFinalReviewScreen({
 
       {documentFirst ? (
         <>
+          <PaymentClarificationAdvisory
+            agreementId={agreementId}
+            revisionId={getPaidProSourceOfTruth()?.hash}
+            intakeText={intakeText}
+            body={canonicalPlainForRender || paidReviewPlain}
+          />
+          <PaidDraftContentAdvisory
+            agreementId={agreementId}
+            revisionId={getPaidProSourceOfTruth()?.hash}
+            intakeText={intakeText}
+            body={canonicalPlainForRender || paidReviewPlain}
+            parsedParties={parsedParties}
+            additionalTerms={additionalTerms}
+            unresolvedSubjects={unresolvedSubjects}
+          />
           {documentBlock}
           {postDocumentGuidance}
           {!suppressPostDocumentScrollSpacer && stickyBottomScrollInsetPx > 0 ? (
@@ -774,6 +802,21 @@ export function SimpleProFinalReviewScreen({
       ) : (
         <>
           {postDocumentGuidance}
+          <PaymentClarificationAdvisory
+            agreementId={agreementId}
+            revisionId={getPaidProSourceOfTruth()?.hash}
+            intakeText={intakeText}
+            body={canonicalPlainForRender || paidReviewPlain}
+          />
+          <PaidDraftContentAdvisory
+            agreementId={agreementId}
+            revisionId={getPaidProSourceOfTruth()?.hash}
+            intakeText={intakeText}
+            body={canonicalPlainForRender || paidReviewPlain}
+            parsedParties={parsedParties}
+            additionalTerms={additionalTerms}
+            unresolvedSubjects={unresolvedSubjects}
+          />
           {documentBlock}
           {!suppressPostDocumentScrollSpacer && stickyBottomScrollInsetPx > 0 ? (
             <PaidProReviewStickyScrollSpacer heightPx={stickyBottomScrollInsetPx} />

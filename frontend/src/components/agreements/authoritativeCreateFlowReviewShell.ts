@@ -35,6 +35,7 @@ import { hasPaidDashboardCreateContextActive, isAppCreatePath, shouldFailClosedB
 import { isHomeAnonymousStarterAuthorityActive } from "../../launch/homeAnonymousCreateOrigin";
 import { mustBlockPaidEntitlementForLegacyFallbackOrg } from "../../launch/fallbackOrgPaidEntitlementGuard";
 import { computeDashboardPaidCreateReviewShellReady, isDashboardPaidCreateRouteActive } from "./dashboardPaidCreateRoute";
+import { selectVerifiedPaidReviewPaper } from "./paidProVerifiedReviewPaper";
 
 export type AuthoritativeCreateFlowReviewShell = "paid_pro" | "free_starter";
 
@@ -118,15 +119,15 @@ export function resolveAuthoritativeCreateFlowReviewShell(
   }
   if (input.premiumCheckoutCompleted) return "paid_pro";
 
-  // local-org / empty bootstrap: never select paid_pro from path/dashboard inference alone.
-  // Explicit workspace Pro entitlement, checkout completion, and accepted corpora still win.
+  // local-org / empty bootstrap: never select paid_pro from path/dashboard inference
+  // or stale React workspaceProEntitled alone (Case F). Explicit in-memory billing
+  // resolution, checkout completion, and accepted corpora still win.
   if (mustBlockPaidEntitlementForLegacyFallbackOrg()) {
-    // local-org / empty bootstrap: never trust workspaceProEntitled alone (Case F).
-    // Accepted corpora, session Pro markers, and checkout completion still win.
     if (hasPaidProSourceOfTruth()) return "paid_pro";
     if (input.paidProAuthoritative) return "paid_pro";
     if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) return "paid_pro";
     if (hasCurrentSessionProEntitlement()) return "paid_pro";
+    if (resolveCreateFlowWorkspaceProEntitled()) return "paid_pro";
     if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_pro";
     if (hasPaidCreateFlowPipelineAcceptance()) return "paid_pro";
     if (readDisplayReviewSnapshotAuthority()?.snapshotId) return "paid_pro";
@@ -140,7 +141,7 @@ export function resolveAuthoritativeCreateFlowReviewShell(
   if (hasPaidProSourceOfTruth()) return "paid_pro";
   if (input.paidProAuthoritative) return "paid_pro";
   if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) return "paid_pro";
-  if (input.workspaceProEntitled || resolveCreateFlowWorkspaceProEntitled()) return "paid_pro";
+  if (resolveCreateFlowWorkspaceProEntitled()) return "paid_pro";
   if (resolveProvisionalWorkspaceProEntitledForCreate()) return "paid_pro";
   if (input.tier && tierAllowsAdvancedFullDraftReveal(input.tier)) return "paid_pro";
   if (hasCurrentSessionProEntitlement()) return "paid_pro";
@@ -191,6 +192,7 @@ export function resolveCreateFlowReviewShellTransitionReason(
       return "premium_persisted_or_send_unlocked";
     }
     if (hasCurrentSessionProEntitlement()) return "session_pro_entitlement";
+    if (resolveCreateFlowWorkspaceProEntitled()) return "workspace_pro_entitled";
     if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_create_flow_freeze_latch";
     if (hasPaidCreateFlowPipelineAcceptance()) return "pipeline_acceptance";
     const snap = readPremiumCompletionSnapshot();
@@ -206,7 +208,7 @@ export function resolveCreateFlowReviewShellTransitionReason(
   if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) {
     return "premium_persisted_or_send_unlocked";
   }
-  if (input.workspaceProEntitled || resolveCreateFlowWorkspaceProEntitled()) return "workspace_pro_entitled";
+  if (resolveCreateFlowWorkspaceProEntitled()) return "workspace_pro_entitled";
   if (resolveProvisionalWorkspaceProEntitledForCreate()) return "provisional_workspace_pro_entitled";
   if (input.tier && tierAllowsAdvancedFullDraftReveal(input.tier)) return "tier_advanced_full_draft";
   if (hasCurrentSessionProEntitlement()) return "session_pro_entitlement";
@@ -374,7 +376,9 @@ export function computeCreateFlowPaidProReviewContentReady(
   if (hasPaidProSourceOfTruth()) {
     if (getPaidProSourceOfTruthText().trim().length >= PAID_PRO_AUTHORITY_MIN_LEN) return true;
   }
-  return readAcceptedPipelineReviewCorpusPlain().length >= PAID_PRO_AUTHORITY_MIN_LEN;
+  if (readAcceptedPipelineReviewCorpusPlain().length >= PAID_PRO_AUTHORITY_MIN_LEN) return true;
+  const verified = selectVerifiedPaidReviewPaper();
+  return Boolean(verified && verified.plain.length >= PAID_PRO_AUTHORITY_MIN_LEN);
 }
 
 /** Review plain text for paid create-flow shell when SoT is not yet frozen. */
@@ -462,10 +466,17 @@ export function resolveCanonicalPaidCreateFlowReviewCorpusLen(args: {
   premiumPostCheckoutPhase?: string | null;
   pipelineWinningBody?: string | null;
   hydratedPremiumBody?: string | null;
+  agreementId?: string | null;
+  verifiedReviewPaper?: string | null;
 }): number {
   if (hasPaidProSourceOfTruth()) {
-    return getPaidProSourceOfTruthText().trim().length;
+    const sotLen = getPaidProSourceOfTruthText().trim().length;
+    if (sotLen >= PAID_PRO_AUTHORITY_MIN_LEN) return sotLen;
   }
+  const verifiedPaper = String(
+    args.verifiedReviewPaper || selectVerifiedPaidReviewPaper({ agreementId: args.agreementId })?.plain || "",
+  ).trim();
+  if (verifiedPaper.length >= PAID_PRO_AUTHORITY_MIN_LEN) return verifiedPaper.length;
   const createFlowPlain = resolveCreateFlowAuthoritativeReviewPlain({
     agreementDocumentText: args.agreementDocumentText,
     draft: args.draft ?? null,
@@ -507,6 +518,8 @@ export function isCanonicalPaidCreateFlowFirstReviewActive(input: {
   premiumPostCheckoutPhase?: string | null;
   pipelineWinningBody?: string | null;
   hydratedPremiumBody?: string | null;
+  agreementId?: string | null;
+  verifiedReviewPaper?: string | null;
 }): boolean {
   const corpusLen = resolveCanonicalPaidCreateFlowReviewCorpusLen({
     draft: input.draft ?? null,
@@ -517,6 +530,8 @@ export function isCanonicalPaidCreateFlowFirstReviewActive(input: {
     premiumPostCheckoutPhase: input.premiumPostCheckoutPhase,
     pipelineWinningBody: input.pipelineWinningBody,
     hydratedPremiumBody: input.hydratedPremiumBody,
+    agreementId: input.agreementId,
+    verifiedReviewPaper: input.verifiedReviewPaper,
   });
   if (corpusLen < PAID_PRO_AUTHORITY_MIN_LEN) return false;
 

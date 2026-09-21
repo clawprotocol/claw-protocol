@@ -5,7 +5,11 @@
 
 import type { CanonicalPartyIdentityRecord } from "./canonicalPartyIdentityResolver";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
-import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import {
+  isAuthoritativeLegalEntityName,
+  isOccupationalOrJobTitlePartyName,
+  isPartyMetadataRoleLabel,
+} from "./paidProPartyNamePreserve";
 
 const OPENING_ROLE_SCAN_MAX = 12_000;
 const WITNESS_RE = /\bIN WITNESS WHEREOF\b/i;
@@ -39,9 +43,68 @@ function openingSliceBounds(text: string): { start: number; end: number } {
 
 function entityRoleParentheticalRe(legalName: string): RegExp {
   return new RegExp(
-    `(${escapeRe(legalName)})\\s*\\(\\s*(["'“”\u2018\u2019\u201C\u201D]?)([^)"'“”\u2018\u2019\u201C\u201D]+)\\2\\s*\\)`,
+    `(${escapeRe(legalName)})\\s*\\(\\s*["'“”‘’]?([^)"'“”‘’]+)["'“”‘’]?\\s*\\)`,
     "gi",
   );
+}
+
+/** Confirmed `Entity ("Role")` parenthetical from the current paper, if present. */
+export function declaredRoleParentheticalForEntity(text: string, legalName: string): string | null {
+  const name = String(legalName || "").replace(/\s+/g, " ").trim();
+  if (!name || name.length < 3) return null;
+  const re = entityRoleParentheticalRe(name);
+  const match = re.exec(String(text || ""));
+  const found = String(match?.[2] || "").replace(/\s+/g, " ").trim();
+  if (!found || found.length < 2 || found.length > 64) return null;
+  if (/^party\s+\d+$/i.test(found)) return null;
+  if (name.toLowerCase() === found.toLowerCase() || name.toLowerCase().startsWith(found.toLowerCase())) {
+    return null;
+  }
+  return found;
+}
+
+function isIndexDefaultClientOrProvider(role: string): boolean {
+  return /^client$/i.test(role) || /^(?:service\s+provider|provider)$/i.test(role);
+}
+
+/** Index-default Client/SP manifests must not overwrite a declared Consultant/Client opening. */
+function preserveDeclaredConsultantClientBinding(slice: string, foundRole: string, canonicalRoleLabel: string): boolean {
+  if (!isIndexDefaultClientOrProvider(canonicalRoleLabel)) return false;
+  if (!/\(\s*["'“”‘’]?Consultant["'“”‘’]?\s*\)/i.test(slice)) return false;
+  return /^(?:consultant|client)$/i.test(foundRole);
+}
+
+function isSlotTemplateRole(role: string): boolean {
+  return /^party\s+\d+$/i.test(role);
+}
+
+/** Manifest/contact label that must not replace a contractual parenthetical already on paper. */
+export function roleLabelIsNonContractualIdentity(roleLabel: string, legalName: string): boolean {
+  const role = String(roleLabel || "").replace(/\s+/g, " ").trim();
+  const name = String(legalName || "").replace(/\s+/g, " ").trim();
+  if (!role) return true;
+  if (isSlotTemplateRole(role)) return true;
+  if (isPartyMetadataRoleLabel(role)) return true;
+  if (isOccupationalOrJobTitlePartyName(role)) return true;
+  const roleKey = role.replace(/[.,]+$/g, "").toLowerCase();
+  const nameKey = name.replace(/[.,]+$/g, "").toLowerCase();
+  if (roleKey === nameKey) return true;
+  if (nameKey.startsWith(`${roleKey} `)) return true;
+  if (isAuthoritativeLegalEntityName(role) && roleKey.length >= 8) return true;
+  return false;
+}
+
+/** Prefer `Entity ("Role")` already on the paper when the slot label is identity/contact metadata. */
+export function overlayDeclaredOpeningRoleParentheticals<T extends { fullLegalName: string; roleLabel: string }>(
+  records: readonly T[],
+  corpus: string,
+): T[] {
+  return records.map((rec) => {
+    const declared = declaredRoleParentheticalForEntity(corpus, rec.fullLegalName);
+    if (!declared) return rec;
+    if (!roleLabelIsNonContractualIdentity(rec.roleLabel, rec.fullLegalName)) return rec;
+    return { ...rec, roleLabel: declared };
+  });
 }
 
 function repairEntityRoleParentheticalsInSlice(
@@ -51,16 +114,32 @@ function repairEntityRoleParentheticalsInSlice(
 ): { slice: string; repairs: string[] } {
   const repairs: string[] = [];
   const re = entityRoleParentheticalRe(legalName);
-  const next = slice.replace(re, (full, namePart, quote, foundRole) => {
+  const next = slice.replace(re, (full, namePart, foundRole) => {
     const found = String(foundRole || "").trim();
     if (!found || openingRoleLabelsMatch(canonicalRoleLabel, found)) {
       return full;
     }
-    const q = quote || '"';
+    if (preserveDeclaredConsultantClientBinding(slice, found, canonicalRoleLabel)) {
+      return full;
+    }
+    const foundLooksLikeNameShort =
+      legalName.toLowerCase().startsWith(found.toLowerCase()) ||
+      legalName.toLowerCase().includes(` ${found.toLowerCase()}`);
+    if (roleLabelIsNonContractualIdentity(canonicalRoleLabel, legalName) && !foundLooksLikeNameShort) {
+      return full;
+    }
+    if (
+      isSlotTemplateRole(canonicalRoleLabel) &&
+      found.length >= 2 &&
+      !isSlotTemplateRole(found) &&
+      !foundLooksLikeNameShort
+    ) {
+      return full;
+    }
     repairs.push(
       `opening_role_label:${normRole(found)}->${canonicalRoleLabel.replace(/\s+/g, "_")}`,
     );
-    return `${namePart} (${q}${canonicalRoleLabel}${q})`;
+    return `${namePart} ("${canonicalRoleLabel}")`;
   });
   return { slice: next, repairs };
 }
@@ -113,7 +192,7 @@ export function detectOpeningRecitalCrossMappedLegalNameAliases(
     const re = entityRoleParentheticalRe(trimmed);
     let m: RegExpExecArray | null;
     while ((m = re.exec(slice)) !== null) {
-      const alias = (m[3] || "").trim();
+      const alias = (m[2] || "").trim();
       if (!alias || !isAuthoritativeLegalEntityName(alias)) continue;
       const matchesSelf = partyLegalNamesMatch(trimmed, alias);
       const matchesOther = partyNames.some(
@@ -141,8 +220,9 @@ export function detectOpeningRecitalRoleLabelInversion(
     const re = entityRoleParentheticalRe(legal);
     let m: RegExpExecArray | null;
     while ((m = re.exec(slice)) !== null) {
-      const found = (m[3] || "").trim();
+      const found = (m[2] || "").trim();
       if (found && !openingRoleLabelsMatch(role, found)) {
+        if (preserveDeclaredConsultantClientBinding(slice, found, role)) continue;
         return true;
       }
     }

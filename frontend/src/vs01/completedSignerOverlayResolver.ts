@@ -49,6 +49,13 @@ export function resolvePartyIndexForSignerRole(
   return role.partyIndex;
 }
 
+function isPartyLegalEntityIdentity(value: string, partyLegalName?: string | null): boolean {
+  const v = (value ?? "").trim();
+  const entity = (partyLegalName ?? "").trim();
+  if (!v || !entity) return false;
+  return v.toLowerCase() === entity.toLowerCase();
+}
+
 export function resolveCompletedSignerByText(args: {
   agreementId: string;
   source: string;
@@ -57,18 +64,20 @@ export function resolveCompletedSignerByText(args: {
   signerEmail?: string | null;
   roleSignerName?: string | null;
   auditDisplayName?: string | null;
+  partyLegalName?: string | null;
   fields: readonly Vs01RecipientPlacedField[];
 }): CompletedSignerOverlayResolution {
   const rid = args.signerRoleId.trim();
   const partyIndex = args.partyIndex;
   const targetEmail = normalizeEmail(args.signerEmail);
+  const partyLegalName = args.partyLegalName ?? "";
 
   const assignedField = args.fields.find(
     (f) => isSignatureOverlayField(f) && (f.assignedSignerRoleId ?? "").trim() === rid,
   );
   const assignedValue =
     typeof assignedField?.value === "string" ? assignedField.value.trim() : "";
-  if (assignedValue) {
+  if (assignedValue && !isPartyLegalEntityIdentity(assignedValue, partyLegalName)) {
     return {
       byText: assignedValue,
       fallbackUsed: "assigned_signer_role_id_field",
@@ -87,7 +96,7 @@ export function resolveCompletedSignerByText(args: {
     });
     const partyEmailValue =
       typeof partyEmailField?.value === "string" ? partyEmailField.value.trim() : "";
-    if (partyEmailValue) {
+    if (partyEmailValue && !isPartyLegalEntityIdentity(partyEmailValue, partyLegalName)) {
       return {
         byText: partyEmailValue,
         fallbackUsed: "party_index_and_email_field",
@@ -98,7 +107,7 @@ export function resolveCompletedSignerByText(args: {
   }
 
   const auditName = (args.auditDisplayName ?? "").trim();
-  if (auditName) {
+  if (auditName && !isPartyLegalEntityIdentity(auditName, partyLegalName)) {
     return {
       byText: auditName,
       fallbackUsed: "audit_display_name",
@@ -108,7 +117,7 @@ export function resolveCompletedSignerByText(args: {
   }
 
   const roleName = (args.roleSignerName ?? "").trim();
-  if (roleName) {
+  if (roleName && !isPartyLegalEntityIdentity(roleName, partyLegalName)) {
     return {
       byText: roleName,
       fallbackUsed: "role_signer_name",
@@ -175,6 +184,7 @@ export function resolveCompletedSignerByFromEvent(args: {
     signerEmail,
     roleSignerName: role?.signerName,
     auditDisplayName: args.event.displayName,
+    partyLegalName: partyName,
     fields: args.portable.fields,
   });
   logCompletedSignerOverlaySource({

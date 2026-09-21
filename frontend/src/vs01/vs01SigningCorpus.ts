@@ -41,7 +41,12 @@ import {
 import { readCanonicalAgreementCorpusForSurface } from "../components/agreements/canonicalAgreementSnapshot";
 import { getAuthoritativeSigningSnapshot } from "../components/agreements/authoritativeSigningSnapshot";
 import { isPaidProSigningReadyHydratedCorpus } from "../components/agreements/paidProPostFinalizeReviewSurface";
-import { getPaidProDocumentForSurface } from "../components/agreements/paidProSourceOfTruth";
+import {
+  getPaidProDocumentForSurface,
+  getPaidProSourceOfTruthText,
+  hasPaidProSourceOfTruth,
+} from "../components/agreements/paidProSourceOfTruth";
+import { preserveFrozenOperativeClause } from "../components/agreements/paidProSoTSignerExecutionOverlay";
 import { requireAuthoritativeCorpusForSurface } from "../components/agreements/authoritativeAgreementDocument";
 import { logLawdogOutputPathMap } from "../components/agreements/lawdogOutputPathMap";
 import { PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN } from "../components/agreements/paidProPaidSessionLanding";
@@ -491,9 +496,24 @@ function buildDeferredVs01Resolution(args: {
   };
 }
 
+function bindIncomingCorpusToFrozenClause(candidate: string | null | undefined): string {
+  const text = (candidate || "").trim();
+  if (!hasPaidProSourceOfTruth()) return text;
+  const sot = getPaidProSourceOfTruthText().trim();
+  if (!sot) return text;
+  if (!text) return sot;
+  return preserveFrozenOperativeClause(sot, text);
+}
+
 export function resolveFinalVs01CorpusOrBlock(
   args: ResolveFinalVs01CorpusOrBlockArgs,
 ): FinalVs01CorpusResolution {
+  args = {
+    ...args,
+    agreementCorpusText: bindIncomingCorpusToFrozenClause(args.agreementCorpusText),
+    acceptedAuthoritativePlain: bindIncomingCorpusToFrozenClause(args.acceptedAuthoritativePlain),
+    finalizedSigningPlain: bindIncomingCorpusToFrozenClause(args.finalizedSigningPlain),
+  };
   const guidedPro = args.guidedPro !== false;
   const premiumInProgress = Boolean(args.premiumInProgress);
   const premiumComplete = Boolean(args.premiumComplete);
@@ -584,7 +604,7 @@ export function resolveFinalVs01CorpusOrBlock(
     // Fall through to the full resolver for short/free-hash blocks, witness rebuild,
     // paidPro SoT preference, and missing-execution diagnostics.
   }
-  const snapshotCorpus = signingSnapshot?.corpus?.trim() ?? "";
+  const snapshotCorpus = bindIncomingCorpusToFrozenClause(signingSnapshot?.corpus);
   if (guidedPro && snapshotCorpus.length >= VS01_SIGNING_CORPUS_MIN_LEN) {
     const hash = fingerprintAgreementBody(snapshotCorpus);
     const witnessRequirement = resolveVs01WitnessRequirement({

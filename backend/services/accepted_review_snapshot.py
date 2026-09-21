@@ -28,6 +28,7 @@ SNAPSHOT_SCHEMA_VERSION = "claw.canonical_review_snapshot/v1"
 REGISTRY_SCHEMA_VERSION = "claw.canonical_review_snapshots/v1"
 AUTHORITY_MODE_ACCEPTED_SNAPSHOT = "accepted_review_snapshot"
 AUTHORITY_MODE_LEGACY_PACKET = "legacy_packet_pre_snapshot"
+AUTHORITY_MODE_UPLOADED_FINAL_PDF = "uploaded_final_pdf"
 
 STATUS_PENDING = "pending"
 STATUS_ACCEPTED = "accepted"
@@ -145,9 +146,14 @@ def classify_authority_mode(draft: Any) -> str:
     """
     Return authority mode for commercial operations.
 
-    - ``accepted_review_snapshot``: trusted commercial path
+    - ``uploaded_final_pdf``: uploaded final PDF (never drafted corpus)
+    - ``accepted_review_snapshot``: trusted commercial drafted-paper path
     - ``legacy_packet_pre_snapshot``: pre-existing sealed packet without accepted snapshot
     """
+    from backend.services.quick_pdf_envelope import is_uploaded_final_pdf_authority
+
+    if is_uploaded_final_pdf_authority(draft):
+        return AUTHORITY_MODE_UPLOADED_FINAL_PDF
     accepted = get_accepted_snapshot_record(draft)
     if accepted:
         return AUTHORITY_MODE_ACCEPTED_SNAPSHOT
@@ -253,8 +259,13 @@ def allows_first_ceremony_packet_without_accepted_snapshot(
 def requires_accepted_snapshot_for_continuation(draft: Any) -> bool:
     """
     Post-cutover commercial: always require accepted snapshot for reissue/signer-complete.
+    Uploaded final PDFs use their own authority and must not invent a drafted snapshot.
     Pure pre-cutover sealed packets may continue until deliberate re-attestation.
     """
+    from backend.services.quick_pdf_envelope import is_uploaded_final_pdf_authority
+
+    if is_uploaded_final_pdf_authority(draft):
+        return False
     return not is_pure_legacy_pre_cutover(draft)
 
 
@@ -277,6 +288,7 @@ def create_pending_snapshot(
     registry: Optional[Dict[str, Any]] = None,
     expected_registry_version: Optional[int] = None,
     draft_for_immutability: Any = None,
+    customer_confirmed_answers: Optional[str] = None,
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """
     Persist an immutable pending snapshot.
@@ -355,6 +367,7 @@ def create_pending_snapshot(
         "acceptedAt": None,
         "acceptedByPrincipal": None,
         "acceptedBySession": None,
+        "customerConfirmedAnswers": _clean(customer_confirmed_answers) or None,
     }
     snaps[snap_id] = snap
     reg["schema"] = REGISTRY_SCHEMA_VERSION
@@ -576,6 +589,231 @@ def reattest_legacy_sealed_corpus(
     )
 
 
+def latest_pending_snapshot_record(draft: Any) -> Optional[Dict[str, Any]]:
+    reg = get_registry(draft)
+    snaps = reg.get("snapshots") if isinstance(reg.get("snapshots"), dict) else {}
+    pending = [
+        s
+        for s in snaps.values()
+        if isinstance(s, dict) and _clean(s.get("status")) == STATUS_PENDING
+    ]
+    pending.sort(key=lambda s: str(s.get("createdAt") or ""), reverse=True)
+    return pending[0] if pending else None
+
+
+def review_snapshot_authority_required(draft: Any) -> bool:
+    """True once an agreement has entered snapshot authority. Not a missing-revision bypass."""
+    from backend.services.quick_pdf_envelope import is_uploaded_final_pdf_authority
+
+    if is_uploaded_final_pdf_authority(draft):
+        return False
+    if is_pure_legacy_pre_cutover(draft):
+        return False
+    if get_accepted_snapshot_record(draft):
+        return True
+    reg = get_registry(draft)
+    if bool(reg.get("commercialSnapshotAuthorityRequired")):
+        return True
+    snaps = reg.get("snapshots")
+    return bool(isinstance(snaps, dict) and snaps)
+
+
+def resolve_owner_authorized_review_revision(
+    draft: Any,
+    agreement_id: str,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Return (public revision, error). Error is set when snapshot authority is required but unusable."""
+    aid = _clean(agreement_id)
+    required = review_snapshot_authority_required(draft)
+    if not aid:
+        return None, "review_revision_required" if required else None
+    snap = get_accepted_snapshot_record(draft) or latest_pending_snapshot_record(draft)
+    if not isinstance(snap, dict):
+        return None, "review_revision_required" if required else None
+    snap_aid = _clean(snap.get("agreementId"))
+    if snap_aid and snap_aid != aid:
+        return None, "snapshot_agreement_mismatch"
+    ok, err = verify_snapshot_integrity(snap)
+    if not ok:
+        return None, err or "review_revision_invalid"
+    sid = _clean(snap.get("snapshotId"))
+    digest = _clean(snap.get("corpusSha256")).lower()
+    try:
+        length = int(snap.get("corpusLength") or 0)
+    except (TypeError, ValueError):
+        length = 0
+    if not sid or len(digest) != 64 or length < 1:
+        return None, "review_revision_invalid"
+    return {
+        "snapshot_id": sid,
+        "agreement_id": aid,
+        "corpus_sha256": digest,
+        "corpus_length": length,
+        "status": _clean(snap.get("status")),
+    }, None
+
+
+def current_review_revision_public(draft: Any, agreement_id: str) -> Optional[Dict[str, Any]]:
+    """Owner-authorized review revision: accepted snapshot, else latest pending. Digests only."""
+    rev, err = resolve_owner_authorized_review_revision(draft, agreement_id)
+    return rev if not err else None
+
+
+def lock_authority_from_snapshot_record(snap: Any) -> Optional[Dict[str, Any]]:
+    """Ids/digests to persist on the signing lock. Never a live-draft rewrite."""
+    if not isinstance(snap, dict):
+        return None
+    ok, _err = verify_snapshot_integrity(snap)
+    if not ok:
+        return None
+    sid = _clean(snap.get("snapshotId"))
+    digest = _clean(snap.get("corpusSha256")).lower()
+    try:
+        length = int(snap.get("corpusLength") or 0)
+    except (TypeError, ValueError):
+        length = 0
+    if not sid or len(digest) != 64 or length < 1:
+        return None
+    return {
+        "accepted_snapshot_id": sid,
+        "accepted_snapshot_digest": digest,
+        "accepted_snapshot_length": length,
+        "accepted_snapshot_status": _clean(snap.get("status")),
+    }
+
+
+def lock_authority_from_accepted_snapshot(draft: Any) -> Optional[Dict[str, Any]]:
+    """Modern lock authority is the accepted snapshot only. Pending is not enough."""
+    return lock_authority_from_snapshot_record(get_accepted_snapshot_record(draft))
+
+
+def lock_authority_from_draft(draft: Any) -> Optional[Dict[str, Any]]:
+    """Ids/digests to persist on the signing lock. Never a live-draft rewrite."""
+    snap = get_accepted_snapshot_record(draft) or latest_pending_snapshot_record(draft)
+    return lock_authority_from_snapshot_record(snap)
+
+
+def recipient_review_revision_with_corpus(
+    draft: Any,
+    agreement_id: str,
+    locked_version_id: str = "",
+) -> Optional[Dict[str, Any]]:
+    """Authorized recipient revision plus the lock-bound corpus the signer must read."""
+    rev, err = resolve_owner_authorized_review_revision(draft, agreement_id)
+    if err or not rev:
+        return None
+    snap = get_accepted_snapshot_record(draft) or latest_pending_snapshot_record(draft)
+    corpus = ""
+    if isinstance(snap, dict) and isinstance(snap.get("corpusPlain"), str):
+        corpus = snap.get("corpusPlain") or ""
+    out = dict(rev)
+    lv = _clean(locked_version_id)
+    if lv:
+        out["locked_version_id"] = lv
+    if corpus.strip():
+        out["corpus_plain"] = corpus
+    return out
+
+
+def assert_signing_lock_bound_to_snapshot(
+    lock: Any,
+    snapshot_id: Optional[str],
+    body_digest: Optional[str],
+) -> Tuple[bool, Optional[str]]:
+    """Fail closed when lock, snapshot id, or rendered-body digest disagree."""
+    if not isinstance(lock, dict):
+        return False, "signing_lock_missing"
+    sid = _clean(lock.get("accepted_snapshot_id"))
+    digest = _clean(lock.get("accepted_snapshot_digest")).lower()
+    if not sid or len(digest) != 64:
+        return False, "lock_snapshot_binding_missing"
+    want_id = _clean(snapshot_id)
+    want_digest = _clean(body_digest).lower()
+    if not want_id or want_id != sid:
+        return False, "lock_snapshot_id_mismatch"
+    if not want_digest or want_digest != digest:
+        return False, "lock_snapshot_digest_mismatch"
+    return True, None
+
+
+def _draft_agreement_id(draft: Any) -> str:
+    if isinstance(draft, dict):
+        return _clean(draft.get("id") or draft.get("agreement_id"))
+    return _clean(getattr(draft, "id", None) or getattr(draft, "agreement_id", None))
+
+
+def assert_production_signing_lock_authority(
+    draft: Any,
+    agreement_id: str,
+    lock: Any,
+) -> Tuple[bool, Optional[str], str]:
+    """
+    Production lock/mint/complete gate.
+
+    Uses server-authoritative classification. Pure pre-cutover sealed packets may
+    continue without a snapshot bind. Malformed modern records are never treated
+    as legacy. A valid snapshot for another agreement is never authority here.
+    """
+    aid = _clean(agreement_id)
+    mode = classify_authority_mode(draft)
+    from backend.services.quick_pdf_envelope import is_uploaded_final_pdf_authority
+
+    if not aid:
+        return False, "agreement_id_required", mode
+    draft_id = _draft_agreement_id(draft)
+    if draft_id and draft_id != aid:
+        return False, "snapshot_agreement_mismatch", mode
+    if isinstance(lock, dict):
+        lock_aid = _clean(lock.get("agreement_id"))
+        if lock_aid and lock_aid != aid:
+            return False, "snapshot_agreement_mismatch", mode
+    if is_uploaded_final_pdf_authority(draft):
+        return True, None, AUTHORITY_MODE_UPLOADED_FINAL_PDF
+    if is_pure_legacy_pre_cutover(draft):
+        return True, None, AUTHORITY_MODE_LEGACY_PACKET
+    accepted = get_accepted_snapshot_record(draft)
+    if not isinstance(accepted, dict):
+        return False, "accepted_review_snapshot_required", mode
+    snap_aid = _clean(accepted.get("agreementId") or accepted.get("agreement_id"))
+    if not snap_aid or snap_aid != aid:
+        return False, "snapshot_agreement_mismatch", mode
+    ok, err = verify_snapshot_integrity(accepted)
+    if not ok:
+        return False, err or "accepted_snapshot_invalid", mode
+    bind = lock_authority_from_snapshot_record(accepted)
+    if not bind:
+        return False, "accepted_snapshot_invalid", mode
+    bound_ok, bound_err = assert_signing_lock_bound_to_snapshot(
+        lock,
+        bind["accepted_snapshot_id"],
+        bind["accepted_snapshot_digest"],
+    )
+    if not bound_ok:
+        return False, bound_err or "lock_snapshot_binding_missing", mode
+    return True, None, mode
+
+
+def assert_review_revision_binding(
+    draft: Any,
+    agreement_id: str,
+    snapshot_id: Optional[str],
+    expected_digest: Optional[str],
+) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+    """Approve/propose must target the owner-authorized revision when snapshot authority applies."""
+    rev, resolve_err = resolve_owner_authorized_review_revision(draft, agreement_id)
+    if resolve_err:
+        return False, resolve_err, None
+    if not rev:
+        return True, None, None
+    sid = _clean(snapshot_id)
+    digest = _clean(expected_digest).lower()
+    if not sid or not digest:
+        return False, "review_revision_required", rev
+    if sid != rev["snapshot_id"] or digest != rev["corpus_sha256"]:
+        return False, "stale_review_revision", rev
+    return True, None, rev
+
+
 def public_accepted_snapshot_fragment(snap: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Non-secret public-verify fragment — digests/ids only, never corpus/MAC."""
     if not isinstance(snap, dict):
@@ -612,6 +850,14 @@ def bind_portable_to_accepted_snapshot(
     aid = _clean(agreement_id)
     if not isinstance(portable, dict):
         return False, "portable_required", None, None
+
+    from backend.services.quick_pdf_envelope import (
+        bind_uploaded_final_pdf_portable,
+        is_uploaded_final_pdf_authority,
+    )
+
+    if is_uploaded_final_pdf_authority(draft):
+        return bind_uploaded_final_pdf_portable(agreement_id=aid, draft=draft, portable=portable)
 
     accepted = get_accepted_snapshot_record(draft)
     mode = classify_authority_mode(draft)

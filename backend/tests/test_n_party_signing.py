@@ -127,3 +127,168 @@ def test_two_party_backward_compat_unchanged() -> None:
         },
     }
     assert resolve_required_signer_count(draft) == 2
+
+
+def _reviewer_stamped_parties(*names: str) -> list[dict]:
+    rows = []
+    for i, name in enumerate(names):
+        rows.append(
+            {
+                "id": f"p{i + 1}",
+                "name": name,
+                "role": "owner" if i == 0 else "reviewer",
+            }
+        )
+    return rows
+
+
+def test_two_party_owner_plus_reviewer_without_packet_counts_two() -> None:
+    draft = {
+        "parties": _reviewer_stamped_parties("Harbor Peak Analytics LLC", "Ironvale Manufacturing Inc."),
+    }
+    assert party_requires_signature(draft["parties"][1]) is True
+    assert resolve_required_signer_count(draft) == 2
+
+
+def test_three_party_reviewer_stamped_without_packet_counts_three() -> None:
+    draft = {
+        "parties": _reviewer_stamped_parties(
+            "Stonebridge Wellness LLC",
+            "NovaPath Learning Inc.",
+            "ClearSpring Distribution LLC",
+        ),
+    }
+    assert resolve_required_signer_count(draft) == 3
+
+
+def test_four_party_reviewer_stamped_without_packet_counts_four() -> None:
+    draft = {
+        "parties": _reviewer_stamped_parties(
+            "Lumen Bioinformatics Inc.",
+            "Thalassa Data Systems LLC",
+            "Coastal Meridian Analytics LLC",
+            "Vanguard Regulatory Sciences Ltd.",
+        ),
+    }
+    assert resolve_required_signer_count(draft) == 4
+    assert all(party_requires_signature(p) for p in draft["parties"])
+
+
+def test_consultant_client_advisor_without_packet_are_required_signers() -> None:
+    draft = {
+        "parties": [
+            {"id": "p1", "name": "Harbor Peak Analytics LLC", "role": "Consultant"},
+            {"id": "p2", "name": "Ironvale Manufacturing Inc.", "role": "Client"},
+            {"id": "p3", "name": "Alex Rivera", "role": "Advisor"},
+        ],
+    }
+    assert resolve_required_signer_count(draft) == 3
+    assert all(party_requires_signature(p) for p in draft["parties"])
+    one = [
+        {
+            "event_type": "signature_completed",
+            "value": {"participant_id": "p1", "typed_name": "Pat Harbor"},
+        }
+    ]
+    two = one + [
+        {
+            "event_type": "signature_completed",
+            "value": {"participant_id": "p2", "typed_name": "Sam Ironvale"},
+        }
+    ]
+    three = two + [
+        {
+            "event_type": "signature_completed",
+            "value": {"participant_id": "p3", "typed_name": "Alex Rivera"},
+        }
+    ]
+    assert all_signers_signed_from_audit(draft, one) is False
+    assert all_signers_signed_from_audit(draft, two) is False
+    assert all_signers_signed_from_audit(draft, three) is True
+
+
+def test_ceremony_gate_counts_audit_event_models_plus_latest_dict() -> None:
+    from backend.routers.agreements_v2_api import (
+        AgreementDraft,
+        AgreementParty,
+        AuditEvent,
+        _all_signers_signed_from_audit,
+    )
+
+    draft = AgreementDraft(
+        id="ag_legal_roles",
+        created_at="2026-09-15T00:00:00Z",
+        updated_at="2026-09-15T00:00:00Z",
+        title="Consulting Agreement",
+        jurisdiction="DE",
+        parties=[
+            AgreementParty(id="p1", name="Harbor Peak Analytics LLC", role="Consultant"),
+            AgreementParty(id="p2", name="Ironvale Manufacturing Inc.", role="Client"),
+            AgreementParty(id="p3", name="Alex Rivera", role="Advisor"),
+        ],
+        audit_log=[
+            AuditEvent(
+                event_type="signature_completed",
+                at="2026-09-15T00:01:00Z",
+                value={"participant_id": "p1", "typed_name": "Pat Harbor"},
+            ),
+            AuditEvent(
+                event_type="signature_completed",
+                at="2026-09-15T00:02:00Z",
+                value={"participant_id": "p2", "typed_name": "Sam Ironvale"},
+            ),
+        ],
+    )
+    mixed = list(draft.audit_log) + [
+        {
+            "event_type": "signature_completed",
+            "at": "2026-09-15T00:03:00Z",
+            "value": {"participant_id": "p3", "typed_name": "Alex Rivera"},
+        }
+    ]
+    assert _all_signers_signed_from_audit(draft, list(draft.audit_log)) is False
+    assert _all_signers_signed_from_audit(draft, mixed) is True
+
+
+def test_explicit_requires_signature_false_excludes_reviewer_only_extra() -> None:
+    draft = {
+        "parties": [
+            {"id": "p1", "name": "Alpha LLC", "role": "owner"},
+            {"id": "p2", "name": "Beta Inc", "role": "reviewer"},
+            {
+                "id": "p-notice",
+                "name": "Notice Desk LLC",
+                "role": "reviewer",
+                "requires_signature": False,
+            },
+        ],
+    }
+    assert party_requires_signature(draft["parties"][2]) is False
+    assert resolve_required_signer_count(draft) == 2
+
+
+def test_incomplete_four_party_signatures_are_not_complete() -> None:
+    draft = {
+        "parties": _reviewer_stamped_parties(
+            "Lumen Bioinformatics Inc.",
+            "Thalassa Data Systems LLC",
+            "Coastal Meridian Analytics LLC",
+            "Vanguard Regulatory Sciences Ltd.",
+        ),
+    }
+    three = [
+        build_signature_completed_event(
+            signer_role_id=f"role_{i}",
+            participant_id=f"p{i}",
+            display_name=f"Signer {i}",
+            document_id="doc1",
+            signed_at="2026-06-07T00:00:00Z",
+            signed_date_iso="2026-06-07",
+            signed_date_display="June 7, 2026",
+            locked_version_id=None,
+            agreement_version_hash=None,
+        )
+        for i in range(1, 4)
+    ]
+    assert resolve_required_signer_count(draft) == 4
+    assert all_signers_signed_from_audit(draft, three) is False

@@ -11,6 +11,7 @@
  */
 
 import { apiUrl } from "../lib/clawApi";
+import { getOrgId } from "../launch/orgContext";
 import { sha256Hex } from "../utils/agreements/hash";
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
 
@@ -25,6 +26,7 @@ export type CanonicalReviewSnapshot = {
   accepted_at?: string | null;
   schema_version?: string | null;
   status: string;
+  customer_confirmed_answers?: string | null;
 };
 
 export type PersistCanonicalReviewSnapshotResult =
@@ -54,6 +56,7 @@ export type StoredAcceptedReviewSnapshotRef = {
   snapshotId: string;
   corpusSha256: string;
   corpusLength: number;
+  orgId?: string;
 };
 
 export type StoredDisplayReviewSnapshotAuthority = {
@@ -62,15 +65,66 @@ export type StoredDisplayReviewSnapshotAuthority = {
   corpusSha256: string;
   corpusLength: number;
   status: string;
+  orgId?: string;
 };
 
 export type StoredVerifiedDisplayReviewCorpus = StoredDisplayReviewSnapshotAuthority & {
   corpusPlain: string;
 };
 
+function stampOrgId(explicit?: string | null): string {
+  return (explicit || "").trim() || getOrgId().trim();
+}
+
+function storedOrgMatches(storedOrg: string | null | undefined, expectedOrg?: string | null): boolean {
+  const stored = (storedOrg || "").trim();
+  if (!stored) return true;
+  const expected = (expectedOrg || getOrgId()).trim();
+  return !expected || stored === expected;
+}
+
+/**
+ * Accept production `{ snapshot: {...} }` and a flat snapshot body (snapshot_id at root).
+ * Envelope shape must not drop an otherwise valid persist/GET authority.
+ */
+export function coerceCanonicalReviewSnapshot(payload: unknown): CanonicalReviewSnapshot | null {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload as Record<string, unknown>;
+  const nested =
+    root.snapshot && typeof root.snapshot === "object"
+      ? (root.snapshot as Record<string, unknown>)
+      : null;
+  const src =
+    nested && String(nested.snapshot_id || "").trim()
+      ? nested
+      : String(root.snapshot_id || "").trim()
+        ? root
+        : null;
+  if (!src) return null;
+  const snapshot_id = String(src.snapshot_id || "").trim();
+  if (!snapshot_id) return null;
+  const confirmed = String(src.customer_confirmed_answers ?? "").trim();
+  return {
+    snapshot_id,
+    agreement_id: String(src.agreement_id || "").trim(),
+    corpus_plain: String(src.corpus_plain ?? ""),
+    corpus_sha256: String(src.corpus_sha256 || "").trim().toLowerCase(),
+    corpus_length: Number(src.corpus_length || 0),
+    generation_session_id: (src.generation_session_id as string | null | undefined) ?? null,
+    created_at: (src.created_at as string | null | undefined) ?? null,
+    accepted_at: (src.accepted_at as string | null | undefined) ?? null,
+    schema_version: (src.schema_version as string | null | undefined) ?? null,
+    status: String(src.status || root.status || "pending"),
+    customer_confirmed_answers: confirmed || null,
+  };
+}
+
 export function storeAcceptedReviewSnapshotRef(ref: StoredAcceptedReviewSnapshotRef): void {
   try {
-    sessionStorage.setItem(ACCEPTED_SESSION_KEY, JSON.stringify(ref));
+    sessionStorage.setItem(
+      ACCEPTED_SESSION_KEY,
+      JSON.stringify({ ...ref, orgId: stampOrgId(ref.orgId) }),
+    );
   } catch {
     /* ignore */
   }
@@ -85,6 +139,7 @@ export function readAcceptedReviewSnapshotRef(
     const parsed = JSON.parse(raw) as StoredAcceptedReviewSnapshotRef;
     if (!parsed?.snapshotId || !parsed?.corpusSha256) return null;
     if (agreementId && parsed.agreementId && parsed.agreementId !== agreementId.trim()) return null;
+    if (!storedOrgMatches(parsed.orgId)) return null;
     return parsed;
   } catch {
     return null;
@@ -103,7 +158,10 @@ export function storeDisplayReviewSnapshotAuthority(
   ref: StoredDisplayReviewSnapshotAuthority,
 ): void {
   try {
-    sessionStorage.setItem(DISPLAY_SESSION_KEY, JSON.stringify(ref));
+    sessionStorage.setItem(
+      DISPLAY_SESSION_KEY,
+      JSON.stringify({ ...ref, orgId: stampOrgId(ref.orgId) }),
+    );
   } catch {
     /* ignore */
   }
@@ -118,6 +176,7 @@ export function readDisplayReviewSnapshotAuthority(
     const parsed = JSON.parse(raw) as StoredDisplayReviewSnapshotAuthority;
     if (!parsed?.snapshotId || !parsed?.corpusSha256) return null;
     if (agreementId && parsed.agreementId && parsed.agreementId !== agreementId.trim()) return null;
+    if (!storedOrgMatches(parsed.orgId)) return null;
     return parsed;
   } catch {
     return null;
@@ -150,12 +209,14 @@ export function storeVerifiedCommercialDisplayCorpus(
   ) {
     return;
   }
+  const orgId = stampOrgId(ref.orgId);
   storeDisplayReviewSnapshotAuthority({
     agreementId: ref.agreementId.trim(),
     snapshotId: ref.snapshotId.trim(),
     corpusSha256: ref.corpusSha256.toLowerCase(),
     corpusLength: Number(ref.corpusLength),
     status: ref.status,
+    orgId,
   });
   try {
     sessionStorage.setItem(
@@ -166,6 +227,7 @@ export function storeVerifiedCommercialDisplayCorpus(
         corpusSha256: ref.corpusSha256.toLowerCase(),
         corpusLength: Number(ref.corpusLength),
         status: ref.status,
+        orgId,
         corpusPlain: corpus,
       } satisfies StoredVerifiedDisplayReviewCorpus),
     );
@@ -190,6 +252,9 @@ export function readVerifiedCommercialDisplayCorpus(
     const corpus = (parsed?.corpusPlain || "").trim();
     if (!corpus || !parsed?.snapshotId) return null;
     if (agreementId && parsed.agreementId && parsed.agreementId !== agreementId.trim()) {
+      return null;
+    }
+    if (!storedOrgMatches(parsed.orgId) || !storedOrgMatches(display.orgId)) {
       return null;
     }
     if (
@@ -271,6 +336,7 @@ export async function persistCanonicalReviewSnapshot(args: {
   generationSessionId?: string | null;
   createdBySession?: string | null;
   expectedRegistryVersion?: number | null;
+  customerConfirmedAnswers?: string | null;
 }): Promise<PersistCanonicalReviewSnapshotResult> {
   const id = args.agreementId.trim();
   const corpus = (args.corpusPlain || "").trim();
@@ -289,18 +355,21 @@ export async function persistCanonicalReviewSnapshot(args: {
           args.expectedRegistryVersion === undefined || args.expectedRegistryVersion === null
             ? null
             : args.expectedRegistryVersion,
+        customer_confirmed_answers: (args.customerConfirmedAnswers || "").trim() || null,
       }),
     });
     if (!res.ok) {
       const j = (await res.json().catch(() => ({}))) as { detail?: { code?: string } | string };
       return { ok: false, code: _errorCodeFromResponse(j, res.status) };
     }
-    const j = (await res.json()) as {
-      snapshot?: CanonicalReviewSnapshot;
-      registry_version?: number | null;
-    };
-    if (!j.snapshot?.snapshot_id) return { ok: false, code: "snapshot_missing" };
-    return { ok: true, snapshot: j.snapshot, registryVersion: j.registry_version ?? null };
+    const j = await res.json();
+    const snapshot = coerceCanonicalReviewSnapshot(j);
+    if (!snapshot?.snapshot_id) return { ok: false, code: "snapshot_missing" };
+    const registryVersion =
+      j && typeof j === "object" && "registry_version" in j
+        ? ((j as { registry_version?: number | null }).registry_version ?? null)
+        : null;
+    return { ok: true, snapshot, registryVersion };
   } catch {
     return { ok: false, code: "network_error" };
   }
@@ -323,17 +392,15 @@ export async function fetchCanonicalReviewSnapshot(args: {
       const j = (await res.json().catch(() => ({}))) as { detail?: { code?: string } | string };
       return { ok: false, code: _errorCodeFromResponse(j, res.status) };
     }
-    const j = (await res.json()) as {
-      status?: string;
-      snapshot?: CanonicalReviewSnapshot;
-      registry_version?: number | null;
-    };
-    if (!j.snapshot?.snapshot_id) return { ok: false, code: "snapshot_missing" };
+    const j = await res.json();
+    const snapshot = coerceCanonicalReviewSnapshot(j);
+    if (!snapshot?.snapshot_id) return { ok: false, code: "snapshot_missing" };
+    const root = j && typeof j === "object" ? (j as { status?: string; registry_version?: number | null }) : {};
     return {
       ok: true,
-      status: j.status || j.snapshot.status || "pending",
-      snapshot: j.snapshot,
-      registryVersion: j.registry_version ?? null,
+      status: root.status || snapshot.status || "pending",
+      snapshot,
+      registryVersion: root.registry_version ?? null,
     };
   } catch {
     return { ok: false, code: "network_error" };
@@ -406,10 +473,41 @@ export async function acceptCanonicalReviewSnapshot(args: {
  * Phase 1 — before review UI: persist pending, then GET authoritative bytes for display.
  * Does NOT accept. Fire-and-forget commercial accept is intentionally unsupported.
  */
+let pendingPrepareHold: Promise<void> | null = null;
+let releasePendingPrepareHold: (() => void) | null = null;
+
+export function holdNextCommercialReviewSnapshotPrepare(): { release: () => void } {
+  releaseCommercialReviewSnapshotPrepareHoldForTests();
+  pendingPrepareHold = new Promise<void>((resolve) => {
+    releasePendingPrepareHold = resolve;
+  });
+  return {
+    release: () => {
+      releasePendingPrepareHold?.();
+      releasePendingPrepareHold = null;
+    },
+  };
+}
+
+export function releaseCommercialReviewSnapshotPrepareHoldForTests(): void {
+  releasePendingPrepareHold?.();
+  releasePendingPrepareHold = null;
+  pendingPrepareHold = null;
+}
+
 export async function prepareCommercialReviewSnapshotAuthority(args: {
   agreementId: string;
   corpusPlain: string;
   generationSessionId?: string | null;
+  requestId?: string | null;
+  userId?: string | null;
+  organizationId?: string | null;
+  revisionId?: string | null;
+  customerConfirmedAnswers?: string | null;
+  /** Customer-approved revision: persist a new pending without rewriting the accepted hash. */
+  allowSupersedingRevision?: boolean;
+  /** Accept the pending just posted even when no accepted record exists yet. */
+  acceptIfNoPriorAccepted?: boolean;
 }): Promise<
   | {
       ok: true;
@@ -424,13 +522,100 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
   const corpus = (args.corpusPlain || "").trim();
   if (!id || corpus.length < 500) return { ok: false, code: "invalid_snapshot_args" };
 
+  const hold = pendingPrepareHold;
+  pendingPrepareHold = null;
+  if (hold) await hold;
+  if (args.requestId) {
+    const { paidProRevisionOperationAllowsPersist } = await import(
+      "../components/agreements/paidProRevisionOperation"
+    );
+    if (
+      !paidProRevisionOperationAllowsPersist({
+        userId: args.userId || "",
+        organizationId: args.organizationId || "",
+        agreementId: id,
+        revisionId: args.revisionId || "",
+        requestId: args.requestId,
+      })
+    ) {
+      return { ok: false, code: "stale_revision_operation" };
+    }
+  }
+
+  const existing = await fetchCanonicalReviewSnapshot({ agreementId: id });
+  if (existing.ok && String(existing.status || existing.snapshot.status).toLowerCase() === "accepted") {
+    const incomingDigest = await sha256CorpusDigest(corpus);
+    const acceptedDigest = String(existing.snapshot.corpus_sha256 || "").trim().toLowerCase();
+    const acceptedPlain = (existing.snapshot.corpus_plain || "").trim();
+    if (incomingDigest !== acceptedDigest || acceptedPlain !== corpus) {
+      if (!args.allowSupersedingRevision) {
+        return { ok: false, code: "accepted_snapshot_immutable" };
+      }
+      // Fall through and persist a new pending. The accepted digest stays historical.
+    } else {
+      const display: StoredDisplayReviewSnapshotAuthority = {
+        agreementId: id,
+        snapshotId: existing.snapshot.snapshot_id,
+        corpusSha256: acceptedDigest,
+        corpusLength: existing.snapshot.corpus_length,
+        status: "accepted",
+      };
+      storeVerifiedCommercialDisplayCorpus({
+        ...display,
+        corpusPlain: acceptedPlain,
+      });
+      storeAcceptedReviewSnapshotRef({
+        agreementId: id,
+        snapshotId: existing.snapshot.snapshot_id,
+        corpusSha256: acceptedDigest,
+        corpusLength: existing.snapshot.corpus_length,
+      });
+      return {
+        ok: true,
+        snapshot: existing.snapshot,
+        status: "accepted",
+        registryVersion: existing.registryVersion ?? null,
+        display,
+      };
+    }
+  }
+
+  const priorAcceptedId =
+    existing.ok && String(existing.status || existing.snapshot.status).toLowerCase() === "accepted"
+      ? String(existing.snapshot.snapshot_id || "").trim()
+      : "";
+
   const persisted = await persistCanonicalReviewSnapshot({
     agreementId: id,
     corpusPlain: corpus,
     generationSessionId: args.generationSessionId,
     createdBySession: args.generationSessionId,
+    customerConfirmedAnswers: args.customerConfirmedAnswers,
   });
   if (!persisted.ok) return { ok: false, code: persisted.code };
+
+  // GET prefers the current accepted record. A customer-approved revision must
+  // accept the pending we just posted so named/payment paper becomes GET
+  // authority. Do not accept an earlier first-draft pending. If a prior
+  // accepted exists, allow_revision supersedes it without rewriting that digest.
+  if (
+    args.allowSupersedingRevision &&
+    persisted.snapshot.snapshot_id &&
+    persisted.snapshot.snapshot_id !== priorAcceptedId &&
+    (priorAcceptedId || args.acceptIfNoPriorAccepted)
+  ) {
+    const accepted = await acceptCanonicalReviewSnapshot({
+      agreementId: id,
+      snapshotId: persisted.snapshot.snapshot_id,
+      expectedDigest: persisted.snapshot.corpus_sha256,
+      expectedAcceptedSnapshotId: priorAcceptedId || undefined,
+      allowRevision: Boolean(priorAcceptedId),
+      displaySnapshotId: persisted.snapshot.snapshot_id,
+      displayDigest: persisted.snapshot.corpus_sha256,
+      displayLength: persisted.snapshot.corpus_length,
+    });
+    if (!accepted.ok) return { ok: false, code: accepted.code };
+  }
 
   // Prefer GET as the sole review hydration authority (not POST response alone).
   const fetched = await fetchCanonicalReviewSnapshot({ agreementId: id });
@@ -463,6 +648,28 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
     corpusLength: snap.corpus_length,
     status: String(fetched.status || snap.status || "pending"),
   };
+  if (args.requestId) {
+    const { paidProRevisionOperationAllowsDisplay } = await import(
+      "../components/agreements/paidProRevisionOperation"
+    );
+    if (
+      !paidProRevisionOperationAllowsDisplay({
+        userId: args.userId || "",
+        organizationId: args.organizationId || "",
+        agreementId: id,
+        revisionId: args.revisionId || "",
+        requestId: args.requestId,
+      })
+    ) {
+      return {
+        ok: true,
+        snapshot: snap,
+        status: display.status,
+        registryVersion: fetched.registryVersion ?? persisted.registryVersion ?? null,
+        display,
+      };
+    }
+  }
   storeVerifiedCommercialDisplayCorpus({
     ...display,
     corpusPlain: getCorpus,
@@ -506,6 +713,10 @@ export async function hydrateCommercialReviewFromServerSnapshot(args: {
   if (!fetched.ok) return { ok: false, code: fetched.code };
   const snap = fetched.snapshot;
   const id = args.agreementId.trim();
+  const returnedId = String(snap.agreement_id || "").trim();
+  if (!id || !returnedId || returnedId !== id) {
+    return { ok: false, code: "agreement_id_mismatch" };
+  }
   const getCorpus = (snap.corpus_plain || "").trim();
   const getDigest = await sha256CorpusDigest(getCorpus);
   if (
@@ -526,6 +737,21 @@ export async function hydrateCommercialReviewFromServerSnapshot(args: {
     ...display,
     corpusPlain: getCorpus,
   });
+  if ((snap.customer_confirmed_answers || "").trim()) {
+    const { restoreConfirmedContentAnswersFromVerifiedSnapshot } = await import(
+      "../components/agreements/paidProConfirmedContentAnswers"
+    );
+    const { resolveCurrentUser } = await import("../account/currentUser");
+    restoreConfirmedContentAnswersFromVerifiedSnapshot({
+      userId: resolveCurrentUser().id,
+      organizationId: getOrgId(),
+      agreementId: id,
+      revisionId: snap.corpus_sha256,
+      answers: snap.customer_confirmed_answers,
+      snapshotId: snap.snapshot_id,
+      digest: snap.corpus_sha256,
+    });
+  }
   const accepted = display.status === "accepted";
   if (accepted) {
     storeAcceptedReviewSnapshotRef({

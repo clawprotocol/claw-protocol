@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react";
 import {
   agreementPublicVerifyPath,
-  fetchPublicAgreementVerify,
+  loadPublicAgreementVerify,
   type PublicVerifyPayload,
 } from "./agreementPublicVerify";
+import {
+  isPublicVerifyFullyAttested,
+  publicCompletedPdfDistributionPermitted,
+  publicVerifyProofBadgeState,
+  publicVerifyStatusLabel,
+} from "./publicVerifyAuthority";
 import {
   evaluatePublicVerifyEnvelopeLinkage,
   VS01_SIGNING_ENVELOPE_SCHEMA_VERSION,
@@ -14,7 +20,7 @@ import {
 } from "./completedSignedAgreementPdfDownload";
 import { CREATOR_DOWNLOAD_PDF_LABEL } from "../launch/creatorDashboardCopy";
 import { ClawTrustFooter } from "../components/claw/ClawTrustFooter";
-import { type ProofBadgeState, ProofBadge } from "../components/claw/ProofBadge";
+import { ProofBadge } from "../components/claw/ProofBadge";
 import { LawdogOnRecordStamp } from "../components/ui/LawdogOnRecordStamp";
 import { PROOF_LADDER_SUBTITLE } from "../components/proof/proofTrustLadder";
 import { CANONICAL_PROOF_SENTENCE } from "../joy/clawJoyCopy";
@@ -24,38 +30,17 @@ type Props = {
   onClose?: () => void;
 };
 
-function statusLabel(status: string | undefined): string {
-  switch ((status || "").trim()) {
-    case "fully_executed":
-      return "Fully executed";
-    case "partially_signed":
-      return "Partially signed";
-    case "locked_for_signing":
-      return "Locked for signing";
-    case "in_negotiation":
-      return "In negotiation";
-    default:
-      return status || "—";
-  }
-}
-
 function formatTs(iso: string | undefined): string {
   if (!iso) return "—";
   const t = new Date(iso).getTime();
   return Number.isNaN(t) ? iso : new Date(t).toLocaleString();
 }
 
-function proofStateFromPayload(data: PublicVerifyPayload): ProofBadgeState {
-  if (String(data.record_status || "").trim().toLowerCase() === "pending") return "pending";
-  if (data.signature_status?.fully_executed) return "verified";
-  const s = String(data.summary?.status || "").trim();
-  if (s === "partially_signed" || s === "locked_for_signing") return "pending";
-  return "draft";
-}
-
 export function AgreementPublicVerify({ agreementId, onClose }: Props) {
   const [data, setData] = useState<PublicVerifyPayload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [retryable, setRetryable] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [envelopeLinkOk, setEnvelopeLinkOk] = useState<boolean | null>(null);
@@ -63,12 +48,24 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
 
   useEffect(() => {
     let cancel = false;
+    setData(null);
+    setRetryable(false);
+    setPdfError(null);
+    setEnvelopeLinkOk(null);
+    setEnvelopeLinkReason(null);
+    setLoading(true);
     void (async () => {
-      setLoading(true);
-      const p = await fetchPublicAgreementVerify(agreementId);
+      const result = await loadPublicAgreementVerify(agreementId);
       if (cancel) return;
-      setData(p);
-      const raw = p?.verification?.envelope_provenance;
+      if (!result.ok) {
+        setData(null);
+        setRetryable(result.retryable);
+        setLoading(false);
+        return;
+      }
+      setRetryable(false);
+      setData(result.data);
+      const raw = result.data.verification?.envelope_provenance;
       if (raw?.acceptedSoTDigest && raw?.packetDigest) {
         const provenance = {
           acceptedSoTDigest: String(raw.acceptedSoTDigest),
@@ -89,37 +86,53 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
           setEnvelopeLinkOk(link.ok);
           setEnvelopeLinkReason(link.reason);
         }
-      } else if (!cancel) {
-        setEnvelopeLinkOk(null);
-        setEnvelopeLinkReason(null);
       }
       if (!cancel) setLoading(false);
     })();
     return () => {
       cancel = true;
     };
-  }, [agreementId]);
+  }, [agreementId, retryNonce]);
 
+  const canonicalPath = agreementPublicVerifyPath(agreementId);
   const verifyUrl =
-    typeof window !== "undefined" ? `${window.location.origin}${agreementPublicVerifyPath(agreementId)}` : "";
+    typeof window !== "undefined" ? `${window.location.origin}${canonicalPath}` : canonicalPath;
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-16 text-center text-sm text-slate-400">Loading verification…</div>
+      <div
+        className="mx-auto max-w-3xl px-4 py-16 text-center text-sm text-slate-400"
+        data-testid="public-verify-loading"
+      >
+        Loading verification…
+      </div>
+    );
+  }
+
+  if (retryable) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-4 px-4 py-12" data-testid="public-verify-retry">
+        <p className="text-sm text-slate-300">We couldn&apos;t load verification. Try again.</p>
+        <button
+          type="button"
+          className="rounded-lg bg-sky-600 px-4 py-2 text-xs font-semibold text-white hover:bg-sky-500"
+          data-testid="public-verify-load-retry"
+          onClick={() => {
+            setRetryable(false);
+            setData(null);
+            setRetryNonce((n) => n + 1);
+          }}
+        >
+          Try again
+        </button>
+      </div>
     );
   }
 
   if (!data) {
     return (
-      <div className="mx-auto max-w-3xl space-y-4 px-4 py-12">
-        <p className="text-sm text-rose-300">
-          We couldn&apos;t load public verification for this link. The ID may be wrong, the agreement may not exist yet,
-          or public verification may be off for this workspace.
-        </p>
-        <p className="text-xs leading-relaxed text-slate-500">
-          If you contact support, include this agreement ID:{" "}
-          <span className="font-mono text-slate-400 break-all">{agreementId}</span>
-        </p>
+      <div className="mx-auto max-w-3xl space-y-4 px-4 py-12" data-testid="public-verify-unavailable">
+        <p className="text-sm text-slate-300">Verification is unavailable for this link.</p>
         {onClose ? (
           <button
             type="button"
@@ -135,55 +148,75 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
 
   const vfy = data.verification;
   const sig = data.signature_status;
-  const proofState = proofStateFromPayload(data);
+  const proofState = publicVerifyProofBadgeState(data);
   const recordPending = String(data.record_status || "").trim().toLowerCase() === "pending";
   const versionHistory = data.version_history ?? [];
   const signatureEvents = data.signature_events ?? [];
-  const fullyExecuted = Boolean(sig?.fully_executed);
+  const fullyAttested = isPublicVerifyFullyAttested(data);
+  const allowPublicPdf = publicCompletedPdfDistributionPermitted(data);
+  const statusText = publicVerifyStatusLabel(data);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8 px-4 py-8 sm:px-6 sm:py-10">
+    <div
+      className="mx-auto w-full min-w-0 max-w-3xl space-y-8 overflow-x-clip px-4 py-8 sm:px-6 sm:py-10"
+      data-testid="public-verify-shell"
+    >
       <header className="space-y-2 border-b border-slate-800/90 pb-6">
         <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
           LawDog · Public verification
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          <ProofBadge state={proofState} />
+          <span data-testid="public-verify-badge" data-state={proofState}>
+            <ProofBadge state={proofState} />
+          </span>
           <span className="rounded-md border border-slate-700/80 bg-slate-900/50 px-2 py-0.5 text-[10px] font-medium text-slate-400">
             Public status (LawDog)
           </span>
           <LawdogOnRecordStamp surface="dark" />
         </div>
-        <h1 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
+        <h1 className="text-xl font-semibold tracking-tight text-white sm:text-2xl" data-testid="public-verify-title">
           {(data.summary.title || "").trim() || "Agreement"}
         </h1>
+        {vfy.uploaded_final_pdf || vfy.document_kind === "uploaded_final_pdf" ? (
+          <p className="text-xs leading-relaxed text-slate-400" data-testid="public-verify-uploaded-final-pdf">
+            {vfy.uploaded_final_pdf?.label ||
+              "Uploaded final PDF signed through LawDog — not a LawDog-drafted agreement."}
+          </p>
+        ) : null}
         <p className="text-[11px] leading-snug text-slate-500">{PROOF_LADDER_SUBTITLE}</p>
         {recordPending ? (
-          <p className="rounded-md border border-amber-800/40 bg-amber-950/25 px-3 py-2 text-xs leading-snug text-amber-100/95">
+          <p
+            className="rounded-md border border-amber-800/40 bg-amber-950/25 px-3 py-2 text-xs leading-snug text-amber-100/95"
+            data-testid="public-verify-pending"
+          >
             {vfy.record_note?.trim() ||
-              "Public verification details are still preparing. This page shows agreement metadata only — not full agreement text."}
+              "Public verification is still preparing. This page shows agreement metadata only."}
           </p>
         ) : null}
         <p className="text-sm text-slate-400">
           {data.summary.jurisdiction ? `${data.summary.jurisdiction} · ` : null}
-          <span className="text-slate-300">{statusLabel(data.summary.status)}</span>
+          <span className="text-slate-300" data-testid="public-verify-status">
+            {statusText}
+          </span>
         </p>
         <p className="text-xs leading-relaxed text-slate-500">{CANONICAL_PROOF_SENTENCE}</p>
-        <p className="text-[11px] text-slate-600">
+        <p className="text-[11px] text-slate-600 break-all">
           Agreement ID: <span className="font-mono text-slate-500">{data.agreement_id}</span>
         </p>
         <div className="flex flex-wrap gap-2 pt-2">
           <button
             type="button"
-            className="rounded-lg bg-sky-600 px-4 py-2 text-xs font-semibold text-white hover:bg-sky-500"
+            className="min-h-11 rounded-lg bg-sky-600 px-4 py-2 text-xs font-semibold text-white hover:bg-sky-500"
+            data-testid="public-verify-copy-link"
+            data-canonical-path={canonicalPath}
             onClick={() => void navigator.clipboard.writeText(verifyUrl).catch(() => {})}
           >
             Copy verification link
           </button>
-          {fullyExecuted ? (
+          {allowPublicPdf ? (
             <button
               type="button"
-              className="rounded-lg border border-slate-600 bg-slate-900/60 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-800/80"
+              className="min-h-11 rounded-lg border border-slate-600 bg-slate-900/60 px-4 py-2 text-xs font-semibold text-slate-100 hover:bg-slate-800/80"
               data-testid="public-verify-download-pdf"
               disabled={pdfBusy}
               onClick={() => {
@@ -206,7 +239,7 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
           {onClose ? (
             <button
               type="button"
-              className="rounded-lg border border-slate-600 px-4 py-2 text-xs text-slate-300 hover:bg-slate-900/70"
+              className="min-h-11 rounded-lg border border-slate-600 px-4 py-2 text-xs text-slate-300 hover:bg-slate-900/70"
               onClick={onClose}
             >
               Close
@@ -252,11 +285,14 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
         {data.participants.length === 0 ? (
           <p className="text-xs text-slate-500">No parties listed.</p>
         ) : (
-          <ul className="divide-y divide-slate-800/90 rounded-lg border border-slate-800/90 bg-slate-950/40">
+          <ul
+            className="divide-y divide-slate-800/90 rounded-lg border border-slate-800/90 bg-slate-950/40"
+            data-testid="public-verify-participants"
+          >
             {data.participants.map((p, i) => (
-              <li key={`${p.name}_${i}`} className="flex justify-between gap-4 px-4 py-3 text-sm">
-                <span className="text-slate-100">{p.name?.trim() || "—"}</span>
-                <span className="text-xs text-slate-500">{p.role || "—"}</span>
+              <li key={`${p.name}_${i}`} className="flex justify-between gap-4 px-4 py-3 text-sm min-w-0">
+                <span className="text-slate-100 break-words">{p.name?.trim() || "—"}</span>
+                <span className="text-xs text-slate-500 shrink-0">{p.role || "—"}</span>
               </li>
             ))}
           </ul>
@@ -270,7 +306,7 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
         {versionHistory.length === 0 ? (
           <p className="text-xs text-slate-500">No version rows on record.</p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-2" data-testid="public-verify-versions">
             {versionHistory.map((v) => (
               <li
                 key={`${v.version}_${v.created_at}`}
@@ -280,7 +316,6 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
                   <span className="font-medium text-slate-200">Version {v.version}</span>
                   <span className="text-slate-500">{formatTs(v.created_at)}</span>
                 </div>
-                {v.note ? <p className="mt-1 text-slate-500">{v.note}</p> : null}
                 <p className="mt-2 font-mono text-[10px] text-slate-600 break-all">Hash: {v.version_hash}</p>
               </li>
             ))}
@@ -292,10 +327,13 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
         <h2 id="verify-sig-heading" className="text-sm font-semibold text-slate-200">
           Signature status
         </h2>
-        <div className="rounded-lg border border-slate-800/90 bg-slate-950/40 px-4 py-3 text-xs text-slate-300">
+        <div
+          className="rounded-lg border border-slate-800/90 bg-slate-950/40 px-4 py-3 text-xs text-slate-300"
+          data-testid="public-verify-signature-status"
+        >
           <p>
             <span className="text-slate-500">State: </span>
-            {sig?.fully_executed ? "Fully executed" : "Not fully executed"}
+            {fullyAttested ? "Fully executed" : "Not fully executed"}
           </p>
           <p className="mt-1">
             <span className="text-slate-500">Signatures recorded: </span>
@@ -315,12 +353,12 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
           Verification
         </h2>
         <details className="group rounded-lg border border-violet-900/40 bg-violet-950/20 px-4 py-3">
-          <summary className="cursor-pointer list-none text-sm font-medium text-violet-200 marker:content-none">
+          <summary className="cursor-pointer list-none text-sm font-medium text-violet-200 marker:content-none min-h-11">
             <span className="underline decoration-violet-700 underline-offset-2 group-open:no-underline">
               View proof record details
             </span>
           </summary>
-          <div className="mt-4 space-y-4 border-t border-violet-900/30 pt-4 text-xs">
+          <div className="mt-4 space-y-4 border-t border-violet-900/30 pt-4 text-xs" data-testid="public-verify-proof">
             <div>
               <p className="font-semibold text-slate-400">Agreement hash (public overview)</p>
               {vfy.agreement_hash?.trim() ? (
@@ -365,12 +403,15 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
                   Packet-layer envelope linked to the customer-accepted source of truth. Witness/signature placement is
                   not re-frozen as the agreement body.
                 </p>
-                {envelopeLinkOk === false ? (
+                {envelopeLinkOk === false || vfy.envelope_attestation_valid === false ? (
                   <p className="mt-2 text-[11px] text-rose-300" role="alert">
                     Provenance linkage check failed
-                    {envelopeLinkReason ? `: ${envelopeLinkReason}` : ""}.
+                    {envelopeLinkReason || vfy.envelope_attestation_reason
+                      ? `: ${envelopeLinkReason || vfy.envelope_attestation_reason}`
+                      : ""}
+                    .
                   </p>
-                ) : envelopeLinkOk === true ? (
+                ) : envelopeLinkOk === true && vfy.envelope_attestation_valid === true ? (
                   <p className="mt-2 text-[11px] text-emerald-300/90">Provenance linkage verified.</p>
                 ) : null}
               </div>
@@ -405,32 +446,50 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
               {signatureEvents.length === 0 ? (
                 <p className="mt-1 text-slate-500">None recorded.</p>
               ) : (
-                <ul className="mt-2 space-y-3">
-                  {signatureEvents.map((ev, idx) => (
-                    <li
-                      key={`${ev.event_type}_${ev.at}_${idx}`}
-                      className="rounded border border-slate-800/80 bg-slate-900/50 px-3 py-2"
-                    >
-                      <div className="flex flex-wrap justify-between gap-2">
-                        <span className="font-medium text-slate-200">{ev.event_type.replace(/_/g, " ")}</span>
-                        <span className="text-slate-500">{formatTs(ev.at)}</span>
-                      </div>
-                      {ev.participant_display_name ? (
-                        <p className="mt-1 text-slate-400">Participant: {ev.participant_display_name}</p>
-                      ) : null}
-                      {ev.typed_name ? (
-                        <p className="mt-1 text-slate-500">Typed confirmation: {ev.typed_name}</p>
-                      ) : null}
-                      {ev.agreement_version_hash ? (
-                        <p className="mt-1 break-all font-mono text-[10px] text-slate-500">
-                          Version hash: {ev.agreement_version_hash}
-                        </p>
-                      ) : null}
-                      {ev.locked_version_id ? (
-                        <p className="mt-1 font-mono text-[10px] text-slate-600">Lock: {ev.locked_version_id}</p>
-                      ) : null}
-                    </li>
-                  ))}
+                <ul className="mt-2 space-y-3" data-testid="public-verify-events">
+                  {signatureEvents.map((ev, idx) => {
+                    const participantId = (ev.participant_id || "").trim();
+                    const signerRoleId = (ev.signer_role_id || "").trim();
+                    const hasPersistedIdentity = Boolean(participantId || signerRoleId);
+                    return (
+                      <li
+                        key={`${ev.event_type}_${ev.at}_${idx}`}
+                        className="rounded border border-slate-800/80 bg-slate-900/50 px-3 py-2"
+                      >
+                        <div className="flex flex-wrap justify-between gap-2">
+                          <span className="font-medium text-slate-200">{ev.event_type.replace(/_/g, " ")}</span>
+                          <span className="text-slate-500">{formatTs(ev.at)}</span>
+                        </div>
+                        {hasPersistedIdentity ? (
+                          <>
+                            {participantId ? (
+                              <p className="mt-1 font-mono text-[10px] text-slate-400 break-all">
+                                Participant ID: {participantId}
+                              </p>
+                            ) : null}
+                            {signerRoleId ? (
+                              <p className="mt-1 font-mono text-[10px] text-slate-400 break-all">
+                                Signer role: {signerRoleId}
+                              </p>
+                            ) : null}
+                            {ev.participant_display_name ? (
+                              <p className="mt-1 text-slate-400">Participant: {ev.participant_display_name}</p>
+                            ) : null}
+                          </>
+                        ) : (
+                          <p className="mt-1 text-slate-500">Signature recorded</p>
+                        )}
+                        {ev.agreement_version_hash ? (
+                          <p className="mt-1 break-all font-mono text-[10px] text-slate-500">
+                            Version hash: {ev.agreement_version_hash}
+                          </p>
+                        ) : null}
+                        {ev.locked_version_id ? (
+                          <p className="mt-1 font-mono text-[10px] text-slate-600">Lock: {ev.locked_version_id}</p>
+                        ) : null}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

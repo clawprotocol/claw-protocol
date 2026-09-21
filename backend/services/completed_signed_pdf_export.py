@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 import re
 from typing import Any, Dict, List, Literal, Optional, Tuple
@@ -473,7 +474,35 @@ def _completed_signed_pdf_filename(draft: Any) -> str:
     return f"{slug}-signed.pdf"
 
 
-def build_completed_signed_pdf_bytes(*, agreement_id: str, draft: Any) -> Tuple[bytes, str]:
+def _completed_signed_provenance_footer_html(authority: Optional[Dict[str, str]]) -> str:
+    if not authority:
+        return ""
+    receipt_id = html.escape(str(authority.get("receipt_id") or "").strip())
+    snapshot_id = html.escape(str(authority.get("accepted_snapshot_id") or "").strip())
+    digest = html.escape(str(authority.get("accepted_digest") or "").strip())
+    lock = html.escape(str(authority.get("lock_version_id") or "").strip())
+    packet = html.escape(str(authority.get("packet_document_id") or "").strip())
+    if not (receipt_id and snapshot_id and digest):
+        return ""
+    packet_line = f"<p>Locked packet: {packet}</p>" if packet else ""
+    return (
+        '<footer class="completed-signed-provenance">'
+        "<p>Fully executed.</p>"
+        f"<p>Completion receipt: {receipt_id}</p>"
+        f"<p>Verification snapshot: {snapshot_id}</p>"
+        f"<p>Accepted corpus digest: {digest}</p>"
+        f"<p>Locked version: {lock}</p>"
+        f"{packet_line}"
+        "</footer>"
+    )
+
+
+def build_completed_signed_pdf_bytes(
+    *,
+    agreement_id: str,
+    draft: Any,
+    authority: Optional[Dict[str, str]] = None,
+) -> Tuple[bytes, str]:
     """
     Build canonical completed signed PDF bytes from stored fully_executed_snapshot only.
 
@@ -492,6 +521,7 @@ def build_completed_signed_pdf_bytes(*, agreement_id: str, draft: Any) -> Tuple[
         raise HTTPException(status_code=409, detail="signed_snapshot_unavailable")
 
     html_for_export = completed_signed_corpus_to_export_html(corpus_plain)
+    html_for_export = f"{html_for_export}{_completed_signed_provenance_footer_html(authority)}"
 
     cap = assess_agreement_pdf_story_capability()
     if not cap.get("available"):
@@ -544,10 +574,69 @@ def build_completed_signed_pdf_bytes(*, agreement_id: str, draft: Any) -> Tuple[
     return built.pdf_bytes, _completed_signed_pdf_filename(draft)
 
 
-def build_completed_signed_pdf_response(*, agreement_id: str, draft: Any) -> Response:
-    pdf_bytes, filename = build_completed_signed_pdf_bytes(agreement_id=agreement_id, draft=draft)
+def evaluate_completed_signed_pdf_export(*, args: Dict[str, Any]) -> Optional[str]:
+    """Fail-closed completed-PDF gate. Returns a reason or None when export may proceed."""
+    if args.get("unsigned_historical_paper"):
+        return "historical_unsigned_paper"
+    required = [str(v or "").strip() for v in (args.get("required_participant_ids") or []) if str(v or "").strip()]
+    signed = {str(v or "").strip() for v in (args.get("signed_participant_ids") or []) if str(v or "").strip()}
+    if not required:
+        return "missing_required_signers"
+    if any(pid not in signed for pid in required):
+        return "incomplete_required_signatures"
+    if not args.get("receipt_bound") or not str(args.get("receipt_id") or "").strip():
+        return "unbound_receipt"
+    snapshot_ids = [
+        str(args.get("accepted_snapshot_id") or "").strip(),
+        str(args.get("lock_snapshot_id") or "").strip(),
+        str(args.get("packet_snapshot_id") or "").strip(),
+    ]
+    digests = [
+        str(args.get("accepted_digest") or "").strip().lower(),
+        str(args.get("lock_digest") or "").strip().lower(),
+        str(args.get("packet_digest") or "").strip().lower(),
+    ]
+    present_ids = [v for v in snapshot_ids if v]
+    present_digests = [v for v in digests if v]
+    if len(set(present_ids)) > 1 or len(set(present_digests)) > 1:
+        return "snapshot_digest_mismatch"
+    accepted_digest = str(args.get("accepted_digest") or "").strip().lower()
+    if not str(args.get("accepted_snapshot_id") or "").strip() or len(accepted_digest) != 64:
+        return "snapshot_digest_mismatch"
+    if not str(args.get("lock_version_id") or "").strip():
+        return "snapshot_digest_mismatch"
+    return None
+
+
+def build_completed_signed_pdf_response(
+    *,
+    agreement_id: str,
+    draft: Any,
+    authority: Optional[Dict[str, str]] = None,
+) -> Response:
+    pdf_bytes, filename = build_completed_signed_pdf_bytes(
+        agreement_id=agreement_id,
+        draft=draft,
+        authority=authority,
+    )
+    if not filename.lower().endswith(".pdf") or "/" in filename or "\\" in filename:
+        filename = "agreement-signed.pdf"
+    pdf_sha = hashlib.sha256(pdf_bytes).hexdigest()
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "X-Lawdog-Pdf-Sha256": pdf_sha,
+    }
+    if authority:
+        if authority.get("accepted_snapshot_id"):
+            headers["X-Lawdog-Accepted-Snapshot-Id"] = authority["accepted_snapshot_id"]
+        if authority.get("accepted_digest"):
+            headers["X-Lawdog-Accepted-Snapshot-Digest"] = authority["accepted_digest"]
+        if authority.get("lock_version_id"):
+            headers["X-Lawdog-Locked-Version-Id"] = authority["lock_version_id"]
+        if authority.get("receipt_id"):
+            headers["X-Lawdog-Receipt-Id"] = authority["receipt_id"]
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers=headers,
     )

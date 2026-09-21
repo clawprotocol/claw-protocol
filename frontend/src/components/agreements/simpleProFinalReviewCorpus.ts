@@ -197,10 +197,12 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   if (
     authorityOnly &&
     picked.plain.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
-    pipelineWinning.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN
+    pipelineWinning.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN &&
+    hasPaidProPipelineValidationForCorpus({
+      text: pipelineWinning,
+      source: "server_full_draft",
+    })
   ) {
-    // Explicit pipeline-winning corpus on the create-flow final-review path may be used
-    // before validation markers are latched (TEST500 authority-only recovery).
     picked = { plain: pipelineWinning, source: "picker_authoritative" };
   }
 
@@ -305,6 +307,25 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   }
 
   if (authorityOnly && plainText.length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
+    const unvalidatedPipelineWinning =
+      !args.isFreeStarterReview &&
+      explicitPipelineWinning.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN &&
+      !hasPaidProPipelineValidationForCorpus({
+        text: explicitPipelineWinning,
+        source: "server_full_draft",
+      });
+    if (unvalidatedPipelineWinning) {
+      logFinalReviewAuthoritativeRenderBlocked({ reason: "unvalidated_pipeline_corpus" });
+      return {
+        plainText: "",
+        source: picked.source,
+        authoritativeLen: 0,
+        renderedLen,
+        overriddenPreview: false,
+        appliedAnswerCount: args.appliedAnswerCount ?? 0,
+        corpusBlocked: true,
+      };
+    }
     logFinalReviewAuthoritativeRenderBlocked({ reason: "empty_authoritative_body" });
     return {
       plainText: "",

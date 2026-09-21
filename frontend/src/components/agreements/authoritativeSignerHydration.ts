@@ -51,6 +51,7 @@ import {
   shouldPreserveFrozenCanonicalCorpusOnSignerFinalize,
   shouldUseFrozenServerFullSourceOfTruthMinimalHydration,
 } from "./paidProFrozenServerFullSignerHydration";
+import { resolveImmutableFrozenLegalCorpusOnSignerFinalize } from "./paidProFrozenLegalCorpus";
 import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
 import {
   countBlankSignerMetadataLinesInExecutionBlock,
@@ -175,6 +176,9 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
   signatureRegionOnly?: boolean;
   /** When true, run recital repair before hydration (finalize only — never during signer typing). */
   repairRecital?: boolean;
+  agreementId?: string | null;
+  organizationId?: string | null;
+  expectedFrozenHash?: string | null;
 }): HydratedAuthoritativeSigningCorpusResult {
   let rawCorpus = (args.rawCorpus || "").trim();
   const rawCorpusLenBeforeHydration = rawCorpus.length;
@@ -193,6 +197,28 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       rawCorpus,
       openingRecords.length >= 2 ? openingRecords : undefined,
     ).text;
+  }
+
+  const immutableFrozenLegal = resolveImmutableFrozenLegalCorpusOnSignerFinalize({
+    surface: args.surface,
+    signatureRegionOnly: args.signatureRegionOnly,
+    repairRecital: args.repairRecital,
+    agreementId: args.agreementId,
+    organizationId: args.organizationId,
+    expectedHash: args.expectedFrozenHash,
+  });
+  if (immutableFrozenLegal) {
+    const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties, {
+      intakeText: args.intakeRaw,
+      acceptedCorpus: immutableFrozenLegal,
+    });
+    return {
+      corpus: immutableFrozenLegal,
+      identities,
+      signaturePolishCount: 0,
+      partyNoticeApplied: false,
+      rejected: false,
+    };
   }
 
   if (

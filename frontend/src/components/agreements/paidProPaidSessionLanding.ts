@@ -10,6 +10,7 @@
  */
 
 import { looksLikeEmail } from "./recipientEmailValidation";
+import { canEnablePaidCommercialActions } from "./paidProFirstReviewAuthoritySelection";
 import { meetsPaidSessionFallbackPaintFloor } from "./paidProFirstReviewDisplayAuthority";
 
 /**
@@ -157,15 +158,19 @@ export function resolvePaidSessionTwoSignerNamesEmailsComplete(args: {
 
 /**
  * After pay, a visible deal on the card + N signer names/emails (2–4) is enough
- * to open existing SimpleProFinalReviewScreen. Do not sit on Preparing.
+ * to reopen existing SimpleProFinalReviewScreen. Do not remount Free Starter
+ * questions. Send / sign / freeze still require verified authority.
  */
 export function canOpenPaidSessionFinalReviewAfterSigners(args: {
   paidSessionActive: boolean;
   visibleDealBody: boolean;
   twoSignerNamesAndEmailsComplete: boolean;
+  hasVerifiedPaidReviewAuthority?: boolean;
 }): boolean {
   return Boolean(
-    args.paidSessionActive && args.visibleDealBody && args.twoSignerNamesAndEmailsComplete,
+    args.paidSessionActive &&
+      args.visibleDealBody &&
+      args.twoSignerNamesAndEmailsComplete,
   );
 }
 
@@ -176,8 +181,11 @@ export function canOpenPaidSessionFinalReviewAfterSigners(args: {
 export function shouldSkipPaidSessionReviewHydrateWait(args: {
   paidSessionActive: boolean;
   visibleDealBody: boolean;
+  hasVerifiedPaidReviewAuthority?: boolean;
 }): boolean {
-  return Boolean(args.paidSessionActive && args.visibleDealBody);
+  const verified =
+    args.hasVerifiedPaidReviewAuthority ?? canEnablePaidCommercialActions();
+  return Boolean(verified && args.paidSessionActive && args.visibleDealBody);
 }
 
 /**
@@ -191,8 +199,12 @@ export function shouldShowPaidSessionFinalReviewActions(args: {
   twoSignerNamesAndEmailsComplete: boolean;
   signerMetadataFinalized: boolean;
   signaturePreparationRequested?: boolean;
+  hasVerifiedPaidReviewAuthority?: boolean;
 }): boolean {
+  const verified =
+    args.hasVerifiedPaidReviewAuthority ?? canEnablePaidCommercialActions();
   return (
+    verified &&
     canOpenPaidSessionFinalReviewAfterSigners({
       paidSessionActive: args.paidSessionActive,
       visibleDealBody: args.visibleDealBody,
@@ -210,8 +222,11 @@ export function shouldShowPaidSessionFinalReviewActions(args: {
  */
 export function canStartPaidSessionSignatureTrackFromFinalReview(args: {
   namesAndEmailsComplete: boolean;
+  hasVerifiedPaidReviewAuthority?: boolean;
 }): boolean {
-  return Boolean(args.namesAndEmailsComplete);
+  const verified =
+    args.hasVerifiedPaidReviewAuthority ?? canEnablePaidCommercialActions();
+  return Boolean(verified && args.namesAndEmailsComplete);
 }
 
 /**
@@ -223,9 +238,12 @@ export function shouldRelaxPaidSessionSignatureTrackGates(args: {
   paidSessionActive: boolean;
   visibleDealBody: boolean;
   namesAndEmailsComplete: boolean;
+  hasVerifiedPaidReviewAuthority?: boolean;
 }): boolean {
+  const verified =
+    args.hasVerifiedPaidReviewAuthority ?? canEnablePaidCommercialActions();
   return Boolean(
-    args.paidSessionActive && args.visibleDealBody && args.namesAndEmailsComplete,
+    verified && args.paidSessionActive && args.visibleDealBody && args.namesAndEmailsComplete,
   );
 }
 
@@ -351,8 +369,12 @@ export function shouldBlockPaidSessionFinalReviewSendForCorpus(args: {
   paidSessionFinalReviewDecisionReady: boolean;
   visibleFinalReviewCorpusLen: number;
   minimumVisibleCorpusLen?: number;
+  hasVerifiedPaidReviewAuthority?: boolean;
 }): boolean {
   if (!args.corpusBlocked) return false;
+  const verified =
+    args.hasVerifiedPaidReviewAuthority ?? canEnablePaidCommercialActions();
+  if (!verified) return true;
   const minimumVisibleCorpusLen = Math.max(1, args.minimumVisibleCorpusLen ?? 200);
   return !(
     args.paidSessionFinalReviewDecisionReady &&
@@ -394,9 +416,13 @@ export function canMountPaidSessionFinalReviewShell(args: {
   paidSessionVisibleDealBody: boolean;
   namesAndEmailsComplete: boolean;
   finalReviewOpened: boolean;
+  hasVerifiedPaidReviewAuthority?: boolean;
 }): boolean {
+  const verified =
+    args.hasVerifiedPaidReviewAuthority ?? canEnablePaidCommercialActions();
   return Boolean(
-    args.paidSessionVisibleDealBody &&
+    verified &&
+      args.paidSessionVisibleDealBody &&
       args.namesAndEmailsComplete &&
       args.finalReviewOpened,
   );
@@ -412,6 +438,7 @@ export function shouldBypassPaidProReviewShellWithoutCorpus(args: {
   paidSessionVisibleDealBody: boolean;
   namesAndEmailsComplete: boolean;
   finalReviewOpened: boolean;
+  hasVerifiedPaidReviewAuthority?: boolean;
 }): boolean {
   if (!args.blockWithoutCanonicalCorpus) return false;
   if (args.canonicalFirstReviewActive) return false;
@@ -458,10 +485,13 @@ export function shouldTeardownPaidProSignerMetadataFinalizedLatch(args: {
   hasPaidProSourceOfTruth: boolean;
   paidSessionVisibleDealBody: boolean;
   shouldSkipPaidSessionReviewHydrateWait: boolean;
+  hasVerifiedPaidReviewAuthority?: boolean;
 }): boolean {
   if (!args.latch) return false;
   if (args.hasPaidProSourceOfTruth) return false;
-  if (args.paidSessionVisibleDealBody || args.shouldSkipPaidSessionReviewHydrateWait) {
+  const verified =
+    args.hasVerifiedPaidReviewAuthority ?? canEnablePaidCommercialActions();
+  if (verified && (args.paidSessionVisibleDealBody || args.shouldSkipPaidSessionReviewHydrateWait)) {
     return false;
   }
   return true;

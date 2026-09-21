@@ -169,6 +169,41 @@ describe("guided VS01 bridge handoff regression (failure shape)", () => {
     expect(assertBad.reason).toBe("corpus_too_short");
   });
 
+  it("accepts review-first N-party paper with named By: execution lines", () => {
+    const prefix = "The parties will jointly develop, validate, and operate a regulated platform. ".repeat(40);
+    const corpus = [
+      prefix,
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      "",
+      "Lumen Bioinformatics Inc.",
+      "By: Dr. Elena Vasquez Title: Chief Scientific Officer Date: ________",
+      "",
+      "Thalassa Data Systems LLC",
+      "By: Marcus Webb Title: President Date: ________",
+      "",
+      "Coastal Meridian Analytics LLC",
+      "By: Priya Nair Title: Vice President of Operations Date: ________",
+      "",
+      "Vanguard Regulatory Sciences Ltd.",
+      "By: James O'Sullivan Title: Managing Director Date: ________",
+    ].join("\n");
+    const named = assertGuidedProVs01BridgeCorpusReady(
+      buildGuidedVs01SigningHandoff({
+        corpusText: corpus,
+        source: "accepted_review",
+      }),
+    );
+    expect(named.ok).toBe(true);
+    const stale = assertGuidedProVs01BridgeCorpusReady(
+      buildGuidedVs01SigningHandoff({
+        corpusText: corpus,
+        source: "canonical_working_draft",
+      }),
+    );
+    expect(stale.ok).toBe(false);
+    expect(stale.reason).toBe("corpus_source_not_finalized_signer_applied");
+  });
+
   it("aligns final review display, VS01 handoff, and signing track on the same finalized signer corpus", () => {
     const corpus = aiAutomationCorpus();
     const staleServer = `${corpus}\n\nStale server_full_document_text appendix.`;

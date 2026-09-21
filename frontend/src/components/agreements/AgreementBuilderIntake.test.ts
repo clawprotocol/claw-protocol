@@ -54,7 +54,15 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const p = join(__dirname, "AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");
     expect(s).toContain("mergePaidProAuthoritativeDraftFieldsFromApi");
+    expect(s).toContain("retainAuthorizedApiPartiesAfterIntakeDefaults");
+    expect(s).toContain("applySuppliedContentFactsToAuthorizedPaper");
     expect(s).toMatch(/coerceDraftFromApiPayload\([\s\S]{0,220}mergePaidProAuthoritativeDraftFieldsFromApi/m);
+    expect(s).toMatch(
+      /runIntakeDefaultsAndRoles[\s\S]{0,400}retainAuthorizedApiPartiesAfterIntakeDefaults/,
+    );
+    expect(s).toMatch(
+      /verifiedResumePaper && \(draft != null \|\| productionResumeHydratedRef\.current\)/,
+    );
   });
 
   it("hydrate shape: server_full_document_text length + render source keeps review (not intake)", () => {
@@ -884,7 +892,11 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(signing).toContain("[guided-signing-confirmation-mounted]");
     expect(intake).toContain("logGuidedFinalReviewSendSignatureStart");
     expect(intake).toContain("handleGuidedSigningConfirmationContinue");
-    expect(intake).toContain("openConfirmModal: true");
+    const continueIdx = intake.indexOf("const handleGuidedSigningConfirmationContinue = React.useCallback");
+    const continueBlock = intake.slice(continueIdx, continueIdx + 700);
+    expect(continueBlock).toContain("completeGuidedSigningHandoff(intent)");
+    expect(continueBlock).not.toContain("openConfirmModal");
+    expect(continueBlock).not.toContain("setPremiumSendConfirmOpen(true)");
     expect(intake).toContain("enterGuidedSignatureTrackRoute");
     expect(intake).toContain("resolveGuidedSigningPersistAgreementId");
     expect(intake).toContain("pinnedFinalizedSignerCorpusHashRef");
@@ -897,10 +909,33 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("adding_signature_fields");
     expect(intake).toContain("signing_packet_ready");
     const sendIdx = intake.indexOf("const handleProSendForSignature = React.useCallback");
-    const sendBlock = intake.slice(sendIdx, sendIdx + 5500);
+    const sendBlock = intake.slice(sendIdx, sendIdx + 9500);
     expect(sendBlock).toContain('continueGuidedFinalReviewToSigning({ intent: "signature" })');
     expect(sendBlock).toContain("canProceedGuidedFinalReviewToSigning");
     expect(sendBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
+    expect(sendBlock).toContain("lockAndMintSigningInvitesFromPersistedDraft");
+    expect(sendBlock).toContain("signatureConfirmationSlotsFromPersistedParties");
+    expect(intake).toContain("enterGuidedSignatureTrackRoute:in_flight_wait");
+    expect(intake).toContain("owner_delivery_track");
+    expect(intake).toContain("isPersistedSignatureDeliveryTrack");
+    expect(intake).toContain("confirmed_signer_details_revision");
+    expect(intake).toContain("paperHasConfirmedParties");
+    expect(intake).toContain("reusedUnchangedAccepted");
+    expect(intake).not.toMatch(/if \(!alreadyAccepted\) \{/);
+    expect(intake).toContain("acceptedReviewCorpusRef.current ||");
+    expect(intake).toContain("agreementDocumentTextRef.current ||");
+    expect(intake).toContain("if (!finalized) return;");
+    expect(intake).toContain("fetchCanonicalReviewSnapshot({ agreementId: recoveredSigningAgreementId })");
+    expect(intake).toContain("enterGuidedSignatureTrackRoute:recover_accepted_server");
+    expect(intake).toContain("lockAndMintSigningInvitesFromPersistedDraft");
+    expect(intake).toContain("handleProSendForSignature:persisted_mint_ok");
+    expect(intake).toContain("handleProSendForSignature:persisted_mint_fail");
+    expect(intake).toContain("parseCreateAgreementIdFromSearch() ||");
+    expect(intake).toContain("reusedAcceptedSnapshot &&");
+    expect(intake).toContain("retainAuthorizedApiPartiesAfterIntakeDefaults(");
+    expect(intake).toContain("mergePaidProAuthoritativeDraftFieldsFromApi(live, server.draft)");
+    expect(intake).toContain("pendingPlain ||");
+    expect(intake).toContain("guidedSignatureTrackPromiseRef");
     const guidedProceedIdx = sendBlock.indexOf(
       "if (canProceedGuidedFinalReviewToSigning && paidProSignatureDetailsReady)",
     );
@@ -1117,6 +1152,8 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(enterBlock).toMatch(
       /\(acceptedPaidProAuthorityActive[\s\S]*?\)\s*&&\s*!paidProSignatureDetailsReady/,
     );
+    expect(enterBlock).toContain("finalReviewSendIntentRef.current = intent");
+    expect(enterBlock).toContain('handlePremiumSendModePick("signature")');
     const reviewOnlyIdx = enterBlock.indexOf('if (intent === "review_only")');
     const signerGateIdx = enterBlock.search(
       /\(acceptedPaidProAuthorityActive[\s\S]*?\)\s*&&\s*!paidProSignatureDetailsReady/,
@@ -1133,6 +1170,14 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
 
 describe("paid Pro runtime authority establishment (intake wiring)", () => {
   const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+
+  it("production resume keeps persisted 3–4 party rows and hydrates signer UI from them", () => {
+    expect(intake).toContain("shouldKeepPersistedApiPartiesOnResume");
+    expect(intake).toContain("liveSignerUiFieldsFromDraftParties");
+    expect(intake).toContain("acceptedReviewCorpusRef.current = resumeCorpus");
+    expect(intake).toContain("finalizedSigningCorpusRef.current = resumeCorpus");
+    expect(intake).toContain("draftParties: draft?.parties ?? []");
+  });
 
   it("Prepare handoff fails closed without agreement id (cannot bypass Prepare authority)", () => {
     const frag = extractBalancedDecl(
@@ -1200,6 +1245,15 @@ describe("paid Pro runtime authority establishment (intake wiring)", () => {
     expect(htmlBlock).toContain('return ""');
     expect(htmlBlock).toMatch(/hasPaidProSourceOfTruth\(\)[\s\S]{0,200}return "";/);
   });
+
+  it("does not read displayPolishedPaidProPlain before that binding is declared", () => {
+    const htmlIdx = intake.indexOf("const premiumReadonlyAgreementHtml = useMemo");
+    const polishedIdx = intake.indexOf("const displayPolishedPaidProPlain = useMemo");
+    expect(htmlIdx).toBeGreaterThan(-1);
+    expect(polishedIdx).toBeGreaterThan(htmlIdx);
+    const htmlBlock = extractBalancedDecl(intake, "const premiumReadonlyAgreementHtml = useMemo");
+    expect(htmlBlock).not.toContain("displayPolishedPaidProPlain");
+  });
 });
 
 describe("homepage starter_review mount (no paid Pro SoT)", () => {
@@ -1244,5 +1298,11 @@ describe("homepage starter_review mount (no paid Pro SoT)", () => {
     expect(intake).toContain("CREATE_FLOW_PREPARATION_FAILSAFE_MESSAGE");
     expect(intake).toContain("CREATE_FLOW_PREPARATION_FAILSAFE_EDIT_LABEL");
     expect(intake).toContain('data-testid="create-flow-prep-failsafe"');
+  });
+
+  it("send-for-review prefers the bound Apply snapshot over a guided shrink", () => {
+    expect(intake).toContain("preferBoundReviewRevisionOverDisplayCorpus");
+    expect(intake).toContain("verified_server_canonical_review_snapshot");
+    expect(intake).toContain("partiesPayloadPreservingIds");
   });
 });

@@ -146,9 +146,10 @@ function reconcileExecutionRolesBeforeFreezeCommit(text: string): string {
 
   const identities = buildCorpusRoleIdentitiesForExecutionReconcile(body);
   const client = identities.find((i) => i.blockHeading.trim().toUpperCase() === "CLIENT");
-  const provider = identities.find(
-    (i) => i.blockHeading.trim().toUpperCase() === "SERVICE PROVIDER",
-  );
+  const provider = identities.find((i) => {
+    const heading = i.blockHeading.trim().toUpperCase();
+    return heading === "SERVICE PROVIDER" || heading === "CONSULTANT";
+  });
   if (!client?.partyDisplayName?.trim() || !provider?.partyDisplayName?.trim()) return body;
 
   const reconciled = reconcileExecutionBlockToRoleIdentities(body, [client, provider]);
@@ -297,6 +298,11 @@ export type PreparePaidProFreezeCandidateArgs = {
   generationOutcome?: string | null;
   reviewSessionId?: string | null;
   surface?: string;
+  /**
+   * User-approved Apply/save. Persist the approved paper; do not rematerialize
+   * opening, title, dates, or family from older intake, draft fields, or templates.
+   */
+  preserveApprovedRevision?: boolean;
 };
 
 export type PaidProFreezeCandidatePrepResult = {
@@ -348,6 +354,43 @@ export function logPaidProFreezeCandidateDecision(payload: {
 }
 
 /** Normalize server/prepared text through the same pre-freeze transform chain as SoT establishment. */
+function preparePreservedApprovedRevisionFreezeCandidate(
+  args: PreparePaidProFreezeCandidateArgs,
+  inputTrimmed: string,
+): PaidProFreezeCandidatePrepResult {
+  const reviewParties = resolvePartiesForReviewRender({
+    draft: args.draft ?? null,
+    intakeText: args.intakeText ?? null,
+  });
+  const parties: CanonicalAgreementSnapshotParty[] = reviewParties
+    .map((p) => ({
+      name: p.partyLegalName.trim(),
+      role: null,
+      email: p.signerEmail?.trim() || null,
+      partyAddress: p.partyAddress?.trim() || null,
+    }))
+    .filter((p) => p.name.length >= 2);
+  let text = inputTrimmed;
+  const repairs = ["freeze_prep_preserved_approved_revision"];
+  const partyNames = parties.map((p) => p.name);
+  for (let pass = 0; pass < 2; pass++) {
+    const placeholderRepair = repairAgreementTemplatePlaceholders(text, {
+      intakeRaw: args.intakeText ?? "",
+      partyNames,
+    });
+    text = placeholderRepair.text;
+    repairs.push(...placeholderRepair.repaired);
+    if (placeholderRepair.repaired.length === 0) break;
+  }
+  return {
+    text,
+    hash: hashPaidProCorpus(text),
+    reviewParties,
+    parties,
+    repairs,
+  };
+}
+
 export function preparePaidProFreezeCandidateText(
   args: PreparePaidProFreezeCandidateArgs,
 ): PaidProFreezeCandidatePrepResult {
@@ -355,6 +398,9 @@ export function preparePaidProFreezeCandidateText(
   const surface = args.surface ?? "paid_pro_freeze_candidate";
   const repairs: string[] = [];
   const inputTrimmed = trim(args.text);
+  if (args.preserveApprovedRevision) {
+    return preparePreservedApprovedRevisionFreezeCandidate(args, inputTrimmed);
+  }
   // Latched accepted server_full_draft preserves operative prose byte-for-byte (Test245), but a
   // confirmed Legal Party Identity Authority violation must be repaired before SoT freeze. A
   // latched corpus is not allowed to bind a signer slot to a different or scope-contaminated party.
@@ -942,6 +988,11 @@ function repairPaidProCanonicalNoticeAuthorityAtFreeze(
   args: PreparePaidProFreezeCandidateArgs,
   surface: string,
 ): string {
+  // User-approved Apply/accept already chose the operative notice bytes. Do not
+  // rematerialize Email from signer/reviewer access identity (Silver Mesa notices@).
+  if (args.preserveApprovedRevision) {
+    return repairFusedNoticesHeadingToPriorClause(safeForCommit).text;
+  }
   const noticeFinalize = finalizePaidProCanonicalNoticeAuthorityForFreeze(safeForCommit, {
     reviewParties: prep.reviewParties,
     draft: args.draft ?? null,

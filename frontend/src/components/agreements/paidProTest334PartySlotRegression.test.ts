@@ -174,7 +174,10 @@ describe("paidProTest334PartySlotRegression", () => {
       "By: __________________________",
       "Name: __________________________",
     ].join("\n");
-    establishPaidProSourceOfTruth({ text: raw, source: "server_full_draft" });
+    expect(raw.trim().length).toBe(431);
+    expect(() =>
+      establishPaidProSourceOfTruth({ text: raw, source: "server_full_draft" }),
+    ).toThrow(/mislabeled_server_full_draft_below_substantive_min/);
     const authority = buildLivePaidProSignerMetadataAuthority({
       partyCount: 2,
       recipient1Name: RED_MESA,

@@ -17,6 +17,8 @@ type Props = {
   tailPaddingClass: string;
   compactTopPadding: boolean;
   authoritativeSource: string;
+  /** Display-only title chrome. Never written back into frozen corpus bytes. */
+  displayTitleChrome?: string | null;
 };
 
 export function PaidProCanonicalPlainReviewDocument({
@@ -24,6 +26,7 @@ export function PaidProCanonicalPlainReviewDocument({
   tailPaddingClass,
   compactTopPadding,
   authoritativeSource,
+  displayTitleChrome,
 }: Props) {
   const sid = useId().replace(/:/g, "");
   const blocks = classifyPaidProDocumentBlocks(plain);
@@ -69,6 +72,9 @@ export function PaidProCanonicalPlainReviewDocument({
       }
     >
       <div className="premium-doc-body" data-testid="simple-pro-final-review-paid-sot-body">
+        {displayTitleChrome && !blocks.some((b) => b.kind === "document_title") ? (
+          <h1 className="text-center uppercase tracking-[0.04em]">{displayTitleChrome}</h1>
+        ) : null}
         {blocks.map(({ block, blockIndex, kind, firstLine }) => {
           if (kind === "document_title") {
             return (

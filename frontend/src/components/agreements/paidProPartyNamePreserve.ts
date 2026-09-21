@@ -15,7 +15,45 @@ import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { maskEmailAddresses, unmaskEmailAddresses } from "./paidProEmailMask";
 import { US_STATE_NAMES_ENGLISH } from "./partyFormat";
 
+/** Header may omit the colon (`If to North Star Manufacturing LLC`). */
 const IF_TO_NOTICE_HEADER_RE = /^If to\s+(.+?)\s*:?\s*$/i;
+
+/**
+ * Recognized operative-section headings. Shared with canonical party extraction so
+ * document titles such as "SCOPE OF SERVICES" can never become legal-entity authority.
+ * Numbered legal-party lines (`2. Summit AI Consulting LLC`) still match via entity suffix.
+ */
+const AGREEMENT_SECTION_HEADING_PARTY_PREFIX_RE =
+  /^(?:PARTIES(?:\s+AND\s+ROLES)?|INDEPENDENT CONTRACTOR AND ACCESS|SCOPE OF SERVICES|WARRANTIES AND COMPLIANCE|LIMITATION OF LIABILITY|INTELLECTUAL PROPERTY|CONFIDENTIALITY|GOVERNING LAW|NOTICES|TERMINATION|DISPUTE RESOLUTION|INDEMNIFICATION|ELECTRONIC SIGNATURES|ENTIRE AGREEMENT|MISCELLANEOUS|FEES AND PAYMENT|COMMERCIAL SAFEGUARDS|TERM\b|CLIENT\.)/i;
+
+/** True when a candidate is an agreement section heading, not a contractual party. */
+export function isAgreementSectionHeadingPartyName(name: string): boolean {
+  const t = (name || "").replace(/^\s*\d+(?:\.\d+)*\.?\s+/, "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (AGREEMENT_SECTION_HEADING_PARTY_PREFIX_RE.test(t)) return true;
+  // Chrome "New York" + "Commercial safeguards" must not fuse into a third legal party.
+  if (
+    !/\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Ltd\.?|Limited|Company)\b/i.test(t) &&
+    US_STATE_NAMES_ENGLISH.some((state) => new RegExp(`^${state.replace(/\s+/g, "\\s+")}\\s+Commercial$`, "i").test(t))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+const TITLE_CASE_NON_PERSON_MENTION_RE =
+  /^(?:Platform Developer|Data Infrastructure Provider|Analytics Integrator|Regulatory Compliance Advisor|Initial Term|Acceptance Criteria|Insurance Requirements|Confidential Information|Intellectual Property|San Diego|Los Angeles|Cambridge|Charlotte|Harrisburg)$/i;
+
+const INCOMPLETE_PERSON_MENTION_RE = /^[A-Z][a-z]+\s+[A-Z]'$/;
+
+/** Title-case role, heading, city, or truncated-name fragments are never people. */
+export function isTitleCaseNonPersonMention(name: string): boolean {
+  const t = (name || "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (isAgreementSectionHeadingPartyName(t)) return true;
+  if (TITLE_CASE_NON_PERSON_MENTION_RE.test(t)) return true;
+  return INCOMPLETE_PERSON_MENTION_RE.test(t);
+}
 
 export type PaidProNoticeBlockLogPayload = {
   partyId: string;
@@ -57,6 +95,26 @@ function escapeRe(s: string): string {
 }
 
 /** Collapse adjacent duplicate legal-entity phrases (malformed notice headers / entity lines). */
+function stripRedundantTrailingEntityToken(phrase: string, entity: string): string | null {
+  const norm = (value: string) =>
+    value
+      .replace(/\s+/g, " ")
+      .replace(/\.+(?=\s|$)/g, "")
+      .trim()
+      .toLowerCase();
+  const entityNorm = norm(entity);
+  const phraseNorm = norm(phrase);
+  if (!entityNorm || !phraseNorm.startsWith(entityNorm)) return null;
+  const extra = phraseNorm.slice(entityNorm.length).trim();
+  if (!extra) return entity;
+  const entityTokens = entityNorm.split(/\s+/).filter(Boolean);
+  const extraTokens = extra.split(/\s+/).filter(Boolean);
+  if (extraTokens.length > 0 && extraTokens.every((token) => entityTokens.includes(token))) {
+    return entity;
+  }
+  return null;
+}
+
 export function collapseDuplicatedLegalEntityPhrase(
   phrase: string,
   fullNames?: readonly string[],
@@ -67,6 +125,11 @@ export function collapseDuplicatedLegalEntityPhrase(
   for (const full of names) {
     const entity = full.trim();
     if (!entity) continue;
+    const redundant = stripRedundantTrailingEntityToken(out, entity);
+    if (redundant) {
+      out = redundant;
+      continue;
+    }
     const escaped = escapeRe(entity);
     const re = new RegExp(`(${escaped})\\s+\\1`, "gi");
     if (re.test(out)) {
@@ -90,9 +153,10 @@ export function collapseDuplicatedIfToHeaderLines(text: string, fullNames: reado
   let changed = false;
   const out = lines.map((line) => {
     const trimmed = line.trim();
-    const match = trimmed.match(/^If to\s+(.+?)\s*:?\s*$/i);
+    const match = trimmed.match(IF_TO_NOTICE_HEADER_RE);
     if (!match?.[1]) return line;
     const entity = collapseDuplicatedLegalEntityPhrase(match[1].trim(), fullNames);
+    if (!fullNames.some((full) => partyLegalNamesMatch(entity, full))) return line;
     const normalized = `If to ${entity}:`;
     if (trimmed === normalized) return line;
     changed = true;
@@ -166,10 +230,16 @@ export function collapseDuplicateNoticeEntityLines(text: string, fullNames: read
     const ifToMatch = trimmed.match(IF_TO_NOTICE_HEADER_RE);
 
     if (ifToMatch) {
+      const candidate = collapseDuplicatedLegalEntityPhrase((ifToMatch[1] ?? "").trim(), fullNames);
+      const knownParty = fullNames.some((full) => partyLegalNamesMatch(candidate, full));
+      if (!knownParty) {
+        out.push(line);
+        continue;
+      }
       if (inNoticeBlock) flushNoticeLog();
       inNoticeBlock = true;
       sawEntityLineInBlock = false;
-      headerEntity = collapseDuplicatedLegalEntityPhrase((ifToMatch[1] ?? "").trim(), fullNames);
+      headerEntity = candidate;
       const normalizedHeader = `If to ${headerEntity}:`;
       blockRenderedLines = [normalizedHeader];
       removedDuplicateInBlock = false;
@@ -192,13 +262,13 @@ export function collapseDuplicateNoticeEntityLines(text: string, fullNames: read
         out.push(line);
         continue;
       }
-      if (/^Attn:/i.test(trimmed) || /^Email(?:\s+for\s+Notice)?\s*:/i.test(trimmed)) {
+      if (
+        /^Attn:/i.test(trimmed) ||
+        /^Email(?:\s+for\s+Notice)?\s*:/i.test(trimmed) ||
+        /^Address(?:\s+for\s+Notice)?\s*:/i.test(trimmed)
+      ) {
+        // Stay inside this party's stanza so later entity-only dupes still collapse.
         blockRenderedLines.push(trimmed);
-        flushNoticeLog();
-        inNoticeBlock = false;
-        sawEntityLineInBlock = false;
-        headerEntity = "";
-        blockRenderedLines = [];
         out.push(line);
         continue;
       }
@@ -274,11 +344,35 @@ export function shortFormsFromLegalName(full: string): string[] {
   return [...new Set(forms)].filter((f) => f.length >= 3 && f.length < t.length).sort((a, b) => b.length - a.length);
 }
 
+const STREET_DESIGNATOR_AHEAD_RE =
+  /^\s*(?:Street|St\.?|Road|Rd\.?|Avenue|Ave\.?|Boulevard|Blvd\.?|Drive|Dr\.?|Lane|Ln\.?|Way|Court|Ct\.?|Place|Pl\.?|Parkway|Pkwy\.?|Highway|Hwy\.?|Circle|Cir\.?|Trail|Terrace|Ter\.?)\b/i;
+const HOUSE_NUMBER_BEFORE_RE = /\d+[A-Za-z]?[ \t]+$/;
+const GIVEN_NAME_BEFORE_RE = /(?:^|[^A-Za-z])[A-Z][a-z]+(?:-[A-Z][a-z]+)?[ \t]+$/;
+
+/**
+ * True when a party short-form match sits inside a confirmed person name or postal address
+ * (e.g. "Avery Oak", "1 Oak Street") rather than a truncated company alias.
+ */
+export function shouldPreservePartyShortFormMatch(
+  text: string,
+  offset: number,
+  matchLength: number,
+): boolean {
+  if (offset < 0 || matchLength < 1 || offset >= (text || "").length) return false;
+  const before = text.slice(Math.max(0, offset - 48), offset);
+  const after = text.slice(offset + matchLength, offset + matchLength + 32);
+  if (HOUSE_NUMBER_BEFORE_RE.test(before)) return true;
+  if (STREET_DESIGNATOR_AHEAD_RE.test(after)) return true;
+  if (GIVEN_NAME_BEFORE_RE.test(before) && /^(?:$|[\s.,;:'")\]])/.test(after)) return true;
+  return false;
+}
+
 /** Hard cap for paid-Pro recital/signature party lists (never body-derived phrase lists). */
 export const MAX_AUTHORITATIVE_RECITAL_PARTIES = 12;
 
 const DISALLOWED_PARTY_PHRASE_RE: readonly RegExp[] = [
   /^the\s+parties$/i,
+  /^parties(?:\s+and\s+roles)?$/i,
   /^collectively$/i,
   /^each\s+a\s+["']?party["']?$/i,
   /^party$/i,
@@ -326,6 +420,8 @@ const DISALLOWED_PARTY_PHRASE_RE: readonly RegExp[] = [
   /^total\s+contract\s+value:?/i,
   /^contract\s+value:?/i,
   /^total\s+project\s+fee:?/i,
+  /^commercial\s+safeguards\b/i,
+  new RegExp(`^(?:${US_STATE_ALT})\\s+commercial$`, "i"),
 ];
 
 function normPartyLabel(s: string): string {
@@ -403,7 +499,7 @@ const OCCUPATIONAL_OR_JOB_TITLE_PARTY_RE =
   /^(?:(?:a|an|the)\s+)?(?:freelance|independent)?\s*(?:product\s+|ui\s+|ux\s+|graphic\s+|web\s+|software\s+|mobile\s+)?(?:designer|developer|engineer|consultant|contractor|freelancer|attorney|lawyer|accountant|ceo|cto|cfo|coo|founder|president|manager|director|officer|analyst|specialist|architect)(?:\s+(?:and|&)\s+[a-z]+)?$/i;
 
 const EXECUTIVE_OR_SIGNER_TITLE_PARTY_RE =
-  /^(?:chief\s+(?:executive|operating|financial|technology|marketing|security|product|legal|information|revenue|people|compliance)\s+officer|managing\s+partner|general\s+partner|vice\s+president(?:\s+(?:of\s+)?[\w&/-]+)?|vp(?:\s+(?:of\s+)?[\w&/-]+)?|authorized\s+signatory|signatory)$/i;
+  /^(?:chief\s+(?:executive|operating|financial|technology|marketing|security|product|legal|information|revenue|people|compliance|science)\s+officer|managing\s+(?:member|director|partner)|general\s+partner|vice\s+president(?:\s+(?:of\s+)?[\w&/-]+)?|vp(?:\s+(?:of\s+)?[\w&/-]+)?|authorized\s+signatory|signatory)$/i;
 
 export function isOccupationalOrJobTitlePartyName(name: string): boolean {
   const t = (name || "").replace(/\s+/g, " ").trim();
@@ -412,7 +508,18 @@ export function isOccupationalOrJobTitlePartyName(name: string): boolean {
   if (OCCUPATIONAL_OR_JOB_TITLE_PARTY_RE.test(t)) return true;
   if (EXECUTIVE_OR_SIGNER_TITLE_PARTY_RE.test(t)) return true;
   // Bare title tokens that leak as party rows.
-  return /^(?:ceo|cto|cfo|coo|founder|president|director|manager|officer)$/i.test(t);
+  return /^(?:ceo|cto|cfo|coo|cpo|founder|president|director|manager|officer|member)$/i.test(t);
+}
+
+/** Safeguard bullets and clause fragments must never become legal-party slots. */
+export function isContractProsePartyName(name: string): boolean {
+  const t = (name || "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (ENTITY_SUFFIX.test(t) && t.length <= 80 && !/:\s+/.test(t)) return false;
+  if (/^No authority to bind\b/i.test(t)) return true;
+  if (/^Authority,\s+representations\b/i.test(t)) return true;
+  if (t.length > 80) return true;
+  return /:\s*.{12,}\b(?:shall|will|must|may not|has no authority|provider|contractor|company)\b/i.test(t);
 }
 
 /** Reject contract prose fragments mistaken for party names. */
@@ -448,6 +555,8 @@ function looksLikeUsPostalAddressLine(name: string): boolean {
 /** True when the label looks like a full legal entity (intake-authoritative), not body prose or titles. */
 export function isAuthoritativeLegalEntityName(name: string): boolean {
   const raw = (name || "").replace(/\s+/g, " ").trim();
+  if (isAgreementSectionHeadingPartyName(raw)) return false;
+  if (isContractProsePartyName(raw)) return false;
   if (looksLikeAuthorizedSignersBulletLine(raw)) return false;
   // Human signer + title lines must never qualify as legal entities
   // (e.g. "Ethan Cole, Authorized Signatory." from "Acme LLC signer: …" intake).
@@ -570,6 +679,21 @@ export function resolveAuthoritativePartiesForRecitalPolish(
   return [];
 }
 
+/** True when tail already continues the legal name, ignoring Inc vs Inc. punctuation. */
+function textStartsWithLegalNameRemainder(text: string, remainder: string): boolean {
+  const norm = (value: string) =>
+    value
+      .replace(/\s+/g, " ")
+      .replace(/\.+(?=\s|$|[.,;:'")\]])/g, "")
+      .toLowerCase();
+  const expected = norm(remainder).replace(/^\s+/, "");
+  if (!expected) return true;
+  const actual = norm(text).replace(/^\s+/, "");
+  if (!actual.startsWith(expected)) return false;
+  const after = actual.slice(expected.length);
+  return after === "" || /^[\s.,;:'")\]]/.test(after);
+}
+
 function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly string[]): string {
   const pairs: { short: string; full: string }[] = [];
   for (const full of fullNames) {
@@ -593,6 +717,15 @@ function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly str
     return /^(?:Client|Service\s+Provider|Party\s+\d+)$/i.test(match.trim());
   };
 
+  const shortUsedByOtherParty = (short: string, full: string): boolean => {
+    const key = short.replace(/\s+/g, " ").trim().toLowerCase();
+    return fullNames.some((other) => {
+      if (!other || other === full) return false;
+      if (other.replace(/\s+/g, " ").toLowerCase().startsWith(`${key} `)) return true;
+      return shortFormsFromLegalName(other).some((form) => form.replace(/\s+/g, " ").trim().toLowerCase() === key);
+    });
+  };
+
   let out = text;
   for (const { short, full } of pairs) {
     const re = new RegExp(
@@ -601,13 +734,19 @@ function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly str
     );
     const next = out.replace(re, (match, offset) => {
       if (typeof offset !== "number") return full;
+      if (shouldPreservePartyShortFormMatch(out, offset, match.length)) return match;
       if (isRoleLabelInNoticeRegion(offset, match)) return match;
       const window = out.slice(Math.max(0, offset - 8), offset + match.length + 16);
       if (/\[\[LDG_(?:EMAIL|URL)_\d+\]\]/i.test(window)) return match;
-      const tail = out.slice(offset + match.length);
+      const fromMatch = out.slice(offset);
+      if (fullNames.some((name) => textStartsWithLegalNameRemainder(fromMatch, name))) return match;
+      if (shortUsedByOtherParty(short, full)) return match;
+      const tail = fromMatch.slice(match.length);
       const remainder = full.slice(match.length);
-      if (remainder && tail.toLowerCase().startsWith(remainder.toLowerCase())) return match;
-      if (out.slice(offset).toLowerCase().startsWith(full.toLowerCase())) return match;
+      // Inc vs Inc. (and other suffix punctuation) is the same legal name, not a
+      // missing short form. Expanding here creates "Inc. Manufacturing".
+      if (remainder && textStartsWithLegalNameRemainder(tail, remainder)) return match;
+      if (textStartsWithLegalNameRemainder(fromMatch, full)) return match;
       return full;
     });
     if (next !== out) out = next;

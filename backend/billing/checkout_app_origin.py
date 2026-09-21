@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 from backend.config.deployment_runtime import claw_environment
 from backend.security.safe_redirect import is_allowlisted_internal_path, resolve_safe_redirect_path
@@ -86,3 +86,32 @@ def build_checkout_cancel_url(*, agreement_id: str, origin: Optional[str] = None
     app_origin = _normalize_origin(origin or resolve_checkout_app_origin())
     aid = (agreement_id or "").strip() or "__claw_create_checkout__"
     return f"{app_origin}/app/checkout/{aid}"
+
+
+_PORTAL_PAYMENT_QUERY_KEYS = frozenset(
+    {
+        "premiumcompletion",
+        "checkout_session_id",
+        "session_id",
+        "payment_intent",
+        "setup_intent",
+    }
+)
+
+
+def build_portal_return_url(*, return_to: str, origin: Optional[str] = None) -> str:
+    """Allowlisted app return after Customer Portal. Never a payment-success URL."""
+    app_origin = _normalize_origin(origin or resolve_checkout_app_origin())
+    path = resolve_safe_redirect_path(return_to, "/app/billing")
+    if not is_allowlisted_internal_path(path):
+        path = "/app/billing"
+    parsed = urlparse(path)
+    kept = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key.lower() not in _PORTAL_PAYMENT_QUERY_KEYS
+    ]
+    cleaned = parsed._replace(query=urlencode(kept, doseq=True)).geturl() or "/app/billing"
+    if not is_allowlisted_internal_path(cleaned):
+        cleaned = "/app/billing"
+    return f"{app_origin}{cleaned}"

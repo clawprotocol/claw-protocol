@@ -30,6 +30,13 @@ import {
   peekPremiumSenderSignFirst,
   type PremiumSendIntent,
 } from "./premiumSendIntent";
+import { resolvePremiumSenderFirstSigningPath } from "./premiumSenderFirstSigningRoute";
+import { lockAuthoritativeVersionAndMintSigningInvites } from "./paidProDirectSigningLockAndInvite";
+import {
+  persistAcceptedSigningPacket,
+  shouldOpenSenderFirstProfessionalSign,
+} from "./persistAcceptedSigningPacket";
+import { mintRecipientAccessTokenResult } from "../../agreement/recipientAccessApi";
 import {
   mintSimpleDoneReviewRecipientLinkRows,
   reviewLinkMintFailureUserCopy,
@@ -71,12 +78,40 @@ export type PaidProPostRecipientSetupFailure = {
 export type PaidProPostRecipientSetupResult =
   | {
       ok: true;
-      destination: "vs01" | "done" | "dashboard";
+      destination: "vs01" | "done" | "dashboard" | "professional_sign";
       ownerRoutePath: string;
       alreadyReady?: boolean;
       userMessage?: string;
+      /** Minted counterparty review links — not recipient-email count. */
+      linkCount?: number;
     }
   | { ok: false; failure: PaidProPostRecipientSetupFailure };
+
+export function countUsableReviewRecipientLinks(
+  rows: ReadonlyArray<{ reviewHref?: string | null }>,
+): number {
+  return rows.filter((row) => String(row.reviewHref || "").trim().length > 0).length;
+}
+
+/** Owner signing party is the draft party whose workflow role is owner — never array position. */
+export function resolveOwnerSigningPartyId(draft: AgreementDraft | null | undefined): string | null {
+  const parties = Array.isArray(draft?.parties) ? draft.parties : [];
+  const owners = parties.filter((party) => String(party.role ?? "").trim().toLowerCase() === "owner");
+  if (owners.length !== 1) return null;
+  const id = String(owners[0]?.id ?? "").trim();
+  return id || null;
+}
+
+/**
+ * Recipient-approve is allowed for an owner-stamped legal party only at 3+ named parties.
+ * Two-party owners use workspace, so minting them a review-approve link is unusable.
+ */
+export function shouldIncludeOwnerReviewLink(draft: AgreementDraft | null | undefined): boolean {
+  const named = (Array.isArray(draft?.parties) ? draft.parties : []).filter((party) =>
+    String(party?.name ?? "").trim(),
+  ).length;
+  return named >= 3;
+}
 
 /** Paid/pro paths that already confirmed recipients in intake — skip `/app/send` “Prepare review link”. */
 export function shouldSkipPaidProPrepareReviewLinkInterstitial(params: {
@@ -97,7 +132,10 @@ export function shouldSkipPaidProPrepareReviewLinkInterstitial(params: {
 
 const reviewLinkHandoffInFlight = new Map<
   string,
-  Promise<{ ok: true; alreadyReady: boolean } | { ok: false; failure: PaidProPostRecipientSetupFailure }>
+  Promise<
+    | { ok: true; alreadyReady: boolean; linkCount: number }
+    | { ok: false; failure: PaidProPostRecipientSetupFailure }
+  >
 >();
 
 async function mintAndPersistReviewLinksForHandoff(
@@ -108,7 +146,7 @@ async function mintAndPersistReviewLinksForHandoff(
   logSource?: string,
   agreementCorpusSource?: string | null,
 ): Promise<
-  | { ok: true; alreadyReady: boolean }
+  | { ok: true; alreadyReady: boolean; linkCount: number }
   | { ok: false; failure: PaidProPostRecipientSetupFailure }
 > {
   const id = agreementId.trim();
@@ -138,7 +176,7 @@ async function mintAndPersistReviewLinksForHandoffUnlocked(
   logSource?: string,
   agreementCorpusSource?: string | null,
 ): Promise<
-  | { ok: true; alreadyReady: boolean }
+  | { ok: true; alreadyReady: boolean; linkCount: number }
   | { ok: false; failure: PaidProPostRecipientSetupFailure }
 > {
   const draftForMint = mergeDraftWithReviewFirstPinnedCorpus(draft, id);
@@ -182,7 +220,7 @@ async function mintAndPersistReviewLinksForHandoffUnlocked(
     const minted = await mintSimpleDoneReviewRecipientLinkRows({
       agreementId: id,
       draft: draftForMint,
-      includeOwnerWithReadyReviewEmail: true,
+      includeOwnerWithReadyReviewEmail: shouldIncludeOwnerReviewLink(draftForMint),
       signingCorpusPlain: signingCorpusPlain || undefined,
       signingCorpusSource: signingCorpusPlain
         ? (agreementCorpusSource ?? "review_first_pinned_corpus").trim() || "review_first_pinned_corpus"
@@ -205,7 +243,7 @@ async function mintAndPersistReviewLinksForHandoffUnlocked(
         source: logSource ?? null,
         recipientCount: linkRows.length,
       });
-      return { ok: true, alreadyReady: true };
+      return { ok: true, alreadyReady: true, linkCount: countUsableReviewRecipientLinks(linkRows) };
     }
   } catch {
     mintThrew = true;
@@ -249,7 +287,7 @@ async function mintAndPersistReviewLinksForHandoffUnlocked(
     recipients: linkRows,
     agreementPartyDisplayNames: orderedAuthoritativePartyDisplayNames(draftForMint.parties),
   });
-  return { ok: true, alreadyReady: false };
+  return { ok: true, alreadyReady: false, linkCount: countUsableReviewRecipientLinks(linkRows) };
 }
 
 export type ReviewSentHandoffResult = {
@@ -318,7 +356,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
   draft: AgreementDraft;
   premiumSendIntent: PremiumSendIntent;
   recipientSetup?: RecipientSetupEmailInput | null;
-  onReviewLinksReady?: (info: { alreadyReady: boolean }) => void;
+  onReviewLinksReady?: (info: { alreadyReady: boolean; linkCount: number }) => void;
   logSource: string;
   /** Final agreement plain text for VS01 signature-block anchor placement. */
   agreementCorpusText?: string | null;
@@ -369,7 +407,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
           reviewEmailDeliveryAttempted: true,
           reviewInviteEmailsSent: true,
         });
-        options.onReviewLinksReady?.({ alreadyReady: true });
+        options.onReviewLinksReady?.({ alreadyReady: true, linkCount: minted.linkCount });
         void options.navigate(route.path);
         return {
           ok: true,
@@ -377,6 +415,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
           ownerRoutePath: route.path,
           alreadyReady: true,
           userMessage: REVIEW_LINKS_ALREADY_READY_MESSAGE,
+          linkCount: minted.linkCount,
         };
       }
       return {
@@ -446,18 +485,104 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
       if (route.destination === "dashboard") {
         writeCreateReviewAgreementResumeId(id);
       }
-      options.onReviewLinksReady?.({ alreadyReady });
+      options.onReviewLinksReady?.({ alreadyReady, linkCount: minted.linkCount });
       void options.navigate(route.path);
       return {
         ok: true,
         destination: route.destination,
         ownerRoutePath: route.path,
         alreadyReady,
+        linkCount: minted.linkCount,
         ...(alreadyReady ? { userMessage: REVIEW_LINKS_ALREADY_READY_MESSAGE } : {}),
       };
     } finally {
       clearReviewFirstMintInFlight();
     }
+  }
+
+  const lockedInvite = await lockAuthoritativeVersionAndMintSigningInvites({
+    agreementId: id,
+    draft: options.draft,
+    recipientSetup: options.recipientSetup ?? null,
+  });
+  if (!lockedInvite.ok) {
+    return {
+      ok: false,
+      failure: {
+        agreementId: id,
+        reason: "vs01_seed",
+        userMessage:
+          "We could not lock this version or create participant-bound signing invitations. Confirm the required signer details and try again.",
+        premiumSendIntent: options.premiumSendIntent,
+      },
+    };
+  }
+  const ownerPartyId = lockedInvite.ownerPartyId;
+  const mintAllRequiredSignTokens = lockedInvite.mintAllRequiredSignTokens;
+  const professional = await resolvePremiumSenderFirstSigningPath({
+    agreementId: id,
+    ownerPartyId,
+  });
+  const mintKey =
+    (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env
+      ?.VITE_RECIPIENT_LINK_MINT_KEY || "";
+  for (const participantId of lockedInvite.requiredParticipantIds) {
+    const minted = await mintRecipientAccessTokenResult(
+      id,
+      { mode: "sign", role: "signer", recipient_party_id: participantId },
+      mintKey,
+    );
+    if (!minted.ok) {
+      return {
+        ok: false,
+        failure: {
+          agreementId: id,
+          reason: "vs01_seed",
+          userMessage:
+            "We could not create a participant-bound signing invitation. Confirm the required signer details and try again.",
+          premiumSendIntent: options.premiumSendIntent,
+        },
+      };
+    }
+  }
+  const acceptedPacket = await persistAcceptedSigningPacket({ agreementId: id });
+  if (acceptedPacket.ok) {
+    markSimpleFlowSent(id);
+    emitActionCompleted("send", { agreementId: id });
+    return { ok: true, destination: "vs01", ownerRoutePath: "" };
+  }
+  if (
+    acceptedPacket.reason !== "accepted_get_missing" &&
+    acceptedPacket.reason !== "status_not_accepted" &&
+    acceptedPacket.reason !== "rejected_pending"
+  ) {
+    return {
+      ok: false,
+      failure: {
+        agreementId: id,
+        reason: "vs01_seed",
+        userMessage:
+          "We could not bind the accepted revision into a signing packet. Reload the agreement and try again.",
+        premiumSendIntent: options.premiumSendIntent,
+      },
+    };
+  }
+
+  if (
+    shouldOpenSenderFirstProfessionalSign({
+      mintAllRequiredSignTokens,
+      persistedParties: lockedInvite.draft.parties || [],
+    }) &&
+    professional?.path
+  ) {
+    markSimpleFlowSent(id);
+    emitActionCompleted("send", { agreementId: id });
+    void options.navigate(professional.path);
+    return {
+      ok: true,
+      destination: "professional_sign",
+      ownerRoutePath: professional.path,
+    };
   }
 
   const resolvedHandoff = resolvePaidSessionSignatureTrackHandoff({
@@ -484,25 +609,20 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
 
   if (options.premiumSendIntent === "signature" && handoff && !options.relaxPaidSessionCorpusAssert) {
     const corpusAssert = assertGuidedProVs01BridgeCorpusReady(handoff);
-    if (!corpusAssert.ok) {
+    if (corpusAssert.ok) {
+      writeGuidedVs01SigningHandoffSession(handoff);
+    } else {
+      // Invitations are already minted. Do not report "Links were not created" or
+      // "not ready for signing" after a server-confirmed lock — that split the
+      // owner surface from the recorded sign tokens.
       logGuidedProVs01BridgeCorpusBlocked({
         agreementId: id,
         source: options.logSource,
         reason: corpusAssert.reason,
+        mintedInvitesPreserved: true,
         ...corpusAssert.diagnostics,
       });
-      return {
-        ok: false,
-        failure: {
-          agreementId: id,
-          reason: "vs01_seed",
-          userMessage:
-            "The finalized agreement is not ready for signing yet. Return to final review and try again.",
-          premiumSendIntent: options.premiumSendIntent,
-        },
-      };
     }
-    writeGuidedVs01SigningHandoffSession(handoff);
   }
   if (options.relaxPaidSessionCorpusAssert && handoff) {
     writeGuidedVs01SigningHandoffSession(handoff);

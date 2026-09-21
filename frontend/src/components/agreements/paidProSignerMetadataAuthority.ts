@@ -33,12 +33,13 @@ import {
 import { normalizeCanonicalPartyAddress } from "./canonicalPartyStructuredAddress";
 import {
   authorityPartiesFromIntakeSignerMetadata,
+  isBoilerplateLegalPartyPhrase,
   mergeIntakeSignerMetadataIntoAuthorityParties,
   resolveAuthorityPartyLegalNameField,
 } from "./intakeSignerMetadataAuthority";
 import { resolveAuthoritativeLegalPartyIdentities } from "./legalPartyIdentityAuthority";
 import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
-import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { isAgreementSectionHeadingPartyName, isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
   fromRecipientMetadata,
@@ -299,11 +300,36 @@ export function partyLegalNamesMatch(a: string, b: string): boolean {
   return na.startsWith(`${nb} `) || nb.startsWith(`${na} `);
 }
 
+/** Distinct named legal parties from draft/UI rows. Keeps individual names such as Alex Rivera. */
+export function uniqueNamedLegalPartyNames(names: readonly string[] | null | undefined): string[] {
+  const out: string[] = [];
+  for (const raw of names ?? []) {
+    const label = String(raw ?? "").trim();
+    if (isAgreementSectionHeadingPartyName(label)) continue;
+    const cleaned =
+      resolveAuthorityPartyLegalNameField(label, "") ||
+      sanitizeAuthorityPartyLegalName(label);
+    if (cleaned.length < 2) continue;
+    if (isAgreementSectionHeadingPartyName(cleaned) || isBoilerplateLegalPartyPhrase(cleaned)) continue;
+    if (out.some((existing) => partyLegalNamesMatch(existing, cleaned))) continue;
+    out.push(cleaned);
+  }
+  return out;
+}
+
 function resolveUiSlotIndexForLegalEntity(
   ui: LiveSignerMetadataUiState,
   legalName: string,
   fallbackIndex: number,
 ): number {
+  const fallbackUiLegal = partyLegalNameForIndex(ui, fallbackIndex);
+  if (
+    isAgreementSectionHeadingPartyName(fallbackUiLegal) ||
+    !resolveAuthorityPartyLegalNameField(fallbackUiLegal, "")
+  ) {
+    // Heading/empty legal-entity slot at this index still holds that party's signer contact.
+    return fallbackIndex;
+  }
   const legal = resolveAuthorityPartyLegalNameField(legalName.trim(), "");
   if (!legal) return fallbackIndex;
   const max = Math.max(ui.partyCount, 2);
@@ -561,9 +587,14 @@ export function buildPaidProSignerMetadataParties(
           },
           ui.partyCount,
         );
+  const uniqueDraftLegalNames = uniqueNamedLegalPartyNames(opts?.draftPartyNames);
+  const uniqueFrozenLegalNames = uniqueNamedLegalPartyNames(frozenNames);
+  const preferDraftLegalList =
+    uniqueDraftLegalNames.length >= 3 && uniqueDraftLegalNames.length > uniqueFrozenLegalNames.length;
   const completeUiLegalEntities = Array.from({ length: count }, (_, index) =>
     partyLegalNameForIndex(ui, index).trim(),
   );
+  const uniqueUiLegalNames = uniqueNamedLegalPartyNames(completeUiLegalEntities);
   const signerContactKeys = new Set(
     ui.partySignerNames
       .map((name) => normalizedLegalNameKey(name))
@@ -573,13 +604,26 @@ export function buildPaidProSignerMetadataParties(
   // Do not re-run the intake extraction heuristic here: it can reject valid corrected names and
   // resurrect a stale frozen manifest. A signer name copied into a legal-entity field is not a
   // complete UI authority, though; in that case retain the canonical intake/manifest identity.
+  // Individual added parties (Alex Rivera) may use the same string for legal name and signer.
   const hasCompleteUiLegalEntityAuthority =
     completeUiLegalEntities.length >= 2 &&
-    completeUiLegalEntities.every(
-      (name) => name.length >= 2 && !signerContactKeys.has(normalizedLegalNameKey(name)),
-    );
+    uniqueUiLegalNames.length === completeUiLegalEntities.length &&
+    completeUiLegalEntities.every((name) => {
+      if (name.length < 2) return false;
+      if (isAgreementSectionHeadingPartyName(name) || !resolveAuthorityPartyLegalNameField(name, "")) {
+        return false;
+      }
+      const key = normalizedLegalNameKey(name);
+      if (!signerContactKeys.has(key)) return true;
+      return uniqueDraftLegalNames.some((draftName) => partyLegalNamesMatch(draftName, name));
+    });
+  const resolvedCount = preferDraftLegalList
+    ? uniqueDraftLegalNames.length
+    : hasCompleteUiLegalEntityAuthority && uniqueUiLegalNames.length > count
+      ? uniqueUiLegalNames.length
+      : count;
   const parties: PaidProSignerMetadataParty[] = [];
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < resolvedCount; i++) {
     const frozenLegal = (frozenNames[i] ?? "").trim();
     const authorityLegal = authorityIdentities[i]?.legalEntityName ?? "";
     const uiLegal = partyLegalNameForIndex(ui, i);
@@ -590,15 +634,18 @@ export function buildPaidProSignerMetadataParties(
         source: "metadata_authority",
       });
     const draftLegalClean = resolveAuthorityPartyLegalNameField(
-      (opts?.draftPartyNames?.[i] ?? "").trim(),
+      (uniqueDraftLegalNames[i] ?? opts?.draftPartyNames?.[i] ?? "").trim(),
       "",
     );
     // Legal Party Authority wins over corrupted draft fragments / wrong UI names.
     // Metadata and draft rows may enrich slots but must not substitute intake legal identities.
+    // A frozen/UI Client/SP list that duplicates Ironvale must not drop an added individual.
     const resolvedLegal =
-      opts?.preferCompleteUiLegalEntityAuthority && hasCompleteUiLegalEntityAuthority && uiLegalClean
+      preferDraftLegalList && draftLegalClean
+        ? draftLegalClean
+        : opts?.preferCompleteUiLegalEntityAuthority && hasCompleteUiLegalEntityAuthority && uiLegalClean
         ? uiLegalClean
-        : hasFrozenManifest && frozenLegal
+        : hasFrozenManifest && frozenLegal && !preferDraftLegalList
         ? frozenLegal
         : authorityIdentities.length >= 2 && authorityLegal
           ? authorityLegal
@@ -622,14 +669,16 @@ export function buildPaidProSignerMetadataParties(
   const explicitFinalizeAuthority = Boolean(
     opts?.preferCompleteUiLegalEntityAuthority && hasCompleteUiLegalEntityAuthority,
   );
-  const filled = explicitFinalizeAuthority
-    ? parties
-    : fillPartyLegalNamesFromFrozenManifestAndIntake(parties, opts);
-  const legalEntitiesForMerge = explicitFinalizeAuthority
-    ? filled.map((p) => p.partyLegalName)
-    : hasFrozenManifest
-      ? frozenNames.slice(0, count)
-      : filled.map((p) => p.partyLegalName);
+  const filled =
+    explicitFinalizeAuthority || preferDraftLegalList
+      ? parties
+      : fillPartyLegalNamesFromFrozenManifestAndIntake(parties, opts);
+  const legalEntitiesForMerge =
+    explicitFinalizeAuthority || preferDraftLegalList
+      ? filled.map((p) => p.partyLegalName)
+      : hasFrozenManifest
+        ? frozenNames.slice(0, count)
+        : filled.map((p) => p.partyLegalName);
   return mergeIntakeSignerMetadataIntoAuthorityParties(
     filled,
     opts?.intakeText,

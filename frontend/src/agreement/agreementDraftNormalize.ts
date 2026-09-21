@@ -1,4 +1,9 @@
-import type { AgreementDraft, AgreementParty } from "./agreementTypes";
+import type {
+  AgreementDraft,
+  AgreementOwnerDeliveryTrack,
+  AgreementParty,
+  Vs01SigningPacketDraftRecordV1,
+} from "./agreementTypes";
 import type { PaymentRequestPayload } from "./paymentRequestTypes";
 import { normalizePaymentRequestFromApi } from "./paymentRequestTypes";
 import {
@@ -8,6 +13,15 @@ import {
   textContainsUnresolvedIdentityPlaceholders,
 } from "./partyPlaceholderDisplay";
 import { collapseDraftPartyRows } from "../components/agreements/partySlotIdentityNormalize";
+
+/** Persist only explicit review/signature tracks. Unknown values cannot unlock a workflow. */
+export function normalizeAgreementOwnerDeliveryTrack(
+  value: unknown,
+): AgreementOwnerDeliveryTrack | null {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (v === "review" || v === "signature") return v;
+  return null;
+}
 
 function coerceStr(v: unknown): string {
   if (v == null) return "";
@@ -54,6 +68,61 @@ function fallbackRoleForPartyIndex(idx: number): string {
   return "party";
 }
 
+/**
+ * Preserve accepted snapshot corpus bytes exactly. Placeholder scrub would
+ * change the digest and make lock-bound owner signed-view fail closed.
+ */
+export function normalizeAcceptedReviewSnapshotFromApi(
+  raw: unknown,
+): AgreementDraft["accepted_review_snapshot_v1"] | undefined {
+  if (raw == null || typeof raw !== "object") return undefined;
+  const rec = raw as Record<string, unknown>;
+  if (String(rec.status || "").toLowerCase() !== "accepted") return undefined;
+  const corpusPlain = typeof rec.corpusPlain === "string" ? rec.corpusPlain : "";
+  const snapshotId = coerceStr(rec.snapshotId);
+  const corpusSha256 = coerceStr(rec.corpusSha256).toLowerCase();
+  const corpusLength = Number(rec.corpusLength || 0) || corpusPlain.length;
+  if (!snapshotId || !/^[0-9a-f]{64}$/.test(corpusSha256) || corpusPlain.length < 80) return undefined;
+  if (corpusLength && corpusLength !== corpusPlain.length) return undefined;
+  return {
+    status: "accepted",
+    snapshotId,
+    corpusSha256,
+    corpusLength,
+    corpusPlain,
+    acceptedAt: coerceStr(rec.acceptedAt) || undefined,
+  };
+}
+
+/**
+ * Preserve only the server fully-executed snapshot authority needed by
+ * owner view-signed retrieval. Does not copy portable/packet chrome and
+ * does not rewrite corpus text.
+ */
+export function normalizeVs01SigningPacketFromApi(
+  raw: unknown,
+): Vs01SigningPacketDraftRecordV1 | undefined {
+  if (raw == null || typeof raw !== "object") return undefined;
+  const rec = raw as Record<string, unknown>;
+  const snapRaw = rec.fully_executed_snapshot;
+  if (snapRaw == null || typeof snapRaw !== "object") return undefined;
+  const snap = snapRaw as Record<string, unknown>;
+  const corpus_plain = coerceStr(snap.corpus_plain);
+  if (!corpus_plain) return undefined;
+  const signer_role_ids = Array.isArray(snap.signer_role_ids)
+    ? snap.signer_role_ids.map((id) => String(id ?? "").trim()).filter(Boolean)
+    : [];
+  return {
+    fully_executed_snapshot: {
+      v: typeof snap.v === "number" && Number.isFinite(snap.v) ? snap.v : 1,
+      corpus_plain,
+      corpus_hash: coerceStr(snap.corpus_hash) || undefined,
+      saved_at: coerceStr(snap.saved_at) || undefined,
+      ...(signer_role_ids.length ? { signer_role_ids } : {}),
+    },
+  };
+}
+
 /** Coerce API / LLM output into the workspace AgreementDraft shape with safe containers. */
 export function normalizeAgreementDraftFromApi(
   raw: unknown,
@@ -77,8 +146,12 @@ export function normalizeAgreementDraftFromApi(
       let role = coerceStr(pr.role) || "party";
       if (isPlaceholderPartyRole(role)) role = fallbackRoleForPartyIndex(parties.length);
       const pid = coerceStr(pr.id as string);
+      const signerName = coerceStr(pr.signerName) || coerceStr(pr.signer_name);
+      const signerTitle = coerceStr(pr.signerTitle) || coerceStr(pr.signer_title);
       const row: AgreementParty = { name, role, email: pr.email == null ? undefined : String(pr.email) };
       if (pid) row.id = pid;
+      if (signerName) row.signerName = signerName;
+      if (signerTitle) row.signerTitle = signerTitle;
       parties.push(row);
     }
   }
@@ -109,6 +182,8 @@ export function normalizeAgreementDraftFromApi(
       role: row.role || "party",
       email: row.email,
       ...(row.id ? { id: row.id } : {}),
+      ...(row.signerName ? { signerName: row.signerName } : {}),
+      ...(row.signerTitle ? { signerTitle: row.signerTitle } : {}),
     });
   }
 
@@ -151,6 +226,8 @@ export function normalizeAgreementDraftFromApi(
   const durationRaw = coerceNullStr(r.duration);
   const dueRaw = coerceNullStr(r.due_date);
   const effectiveRaw = coerceNullStr(r.effective_date);
+  const vs01SigningPacket = normalizeVs01SigningPacketFromApi(r.vs01_signing_packet_v1);
+  const acceptedReviewSnapshot = normalizeAcceptedReviewSnapshotFromApi(r.accepted_review_snapshot_v1);
 
   return {
     id,
@@ -166,6 +243,7 @@ export function normalizeAgreementDraftFromApi(
     updated_at: coerceStr(r.updated_at) || now,
     versions: normVersions,
     audit_log: normAudit,
+    owner_delivery_track: normalizeAgreementOwnerDeliveryTrack(r.owner_delivery_track),
     review_sent_at:
       r.review_sent_at == null || r.review_sent_at === "" ? null : coerceNullStr(r.review_sent_at),
     review_invite_emails_sent_at:
@@ -213,6 +291,8 @@ export function normalizeAgreementDraftFromApi(
       r.pro_redline_v1 != null && typeof r.pro_redline_v1 === "object"
         ? (r.pro_redline_v1 as Record<string, unknown>)
         : null,
+    ...(vs01SigningPacket ? { vs01_signing_packet_v1: vs01SigningPacket } : {}),
+    ...(acceptedReviewSnapshot ? { accepted_review_snapshot_v1: acceptedReviewSnapshot } : {}),
   };
 }
 

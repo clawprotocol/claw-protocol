@@ -18,6 +18,10 @@ from backend.security.vs01_document_ownership import (
     require_vs01_document_access,
     require_vs01_document_finalize_principal,
 )
+from backend.security.vs01_document_upload import (
+    DocumentUploadRejected,
+    validate_finalize_upload_bytes,
+)
 from backend.services import document_service, signature_service
 from backend.services.vs01_document_content import (
     content_type_for_meta,
@@ -106,18 +110,23 @@ def api_finalize_document(body: FinalizeDocumentRequest, request: Request) -> Di
         raise HTTPException(status_code=400, detail="invalid_base64") from exc
 
     try:
+        validate_finalize_upload_bytes(raw, body.content_type)
+    except DocumentUploadRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
         meta = document_service.finalize_document(
             raw,
-            content_type=body.content_type,
+            content_type=body.content_type or "application/pdf",
             agreement_id=aid,
             owner_org_id=owner_org or None,
             bound_party_id=(body.bound_party_id or "").strip() or None,
         )
     except ValueError as exc:
         code = str(exc)
-        if code == "empty_document":
+        if code in ("empty_document", "document_not_pdf", "document_too_large"):
             raise HTTPException(status_code=400, detail=code) from exc
-        raise HTTPException(status_code=500, detail=code) from exc
+        raise HTTPException(status_code=500, detail="document_unavailable") from exc
 
     return {"ok": True, **meta}
 

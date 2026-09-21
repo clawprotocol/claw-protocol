@@ -632,6 +632,15 @@ type FieldMeta = { text: string; confidence: number; signal: boolean; inferred: 
 const NEXT_LABELED_FIELD_BOUNDARY =
   /\b(?:term|duration|effective[\s-]date|payment|fee|compensation|rate|governing[\s-]law|jurisdiction|venue|confidentialit(?:y|ies)|ip|intellectual[\s-]property|work[-\s]?for[-\s]?hire|termination|notice|e[-\s]?signatures?|signatures?|deliverables?)\s*[:\-]/i;
 
+function isLowInformationScopeTail(tail: string): boolean {
+  const compact = tail.replace(/\s+/g, "");
+  if (compact.length < 24) return false;
+  const unique = new Set(compact.toLowerCase());
+  if (unique.size <= 3 && compact.length >= 24) return true;
+  const words = tail.split(/\s+/).filter((w) => /[A-Za-z]{3,}/.test(w));
+  return words.length < 2 && compact.length >= 40;
+}
+
 function trimScopeAtFieldBoundary(captured: string): string {
   let s = captured.replace(/\s+/g, " ").trim();
   if (!s) return s;
@@ -639,18 +648,40 @@ function trimScopeAtFieldBoundary(captured: string): string {
   if (boundaryMatch && boundaryMatch.index !== undefined && boundaryMatch.index >= 4) {
     s = s.slice(0, boundaryMatch.index).replace(/[\s,;:]+$/g, "").trim();
   }
+  const sentence = s.search(/[.!?]\s+\S/);
+  if (sentence >= 0) {
+    const tail = s.slice(sentence + 1).trim();
+    if (isLowInformationScopeTail(tail)) {
+      s = s.slice(0, sentence + 1).trim();
+    }
+  }
   return s;
 }
 
-function extractScopeAndMeta(lower: string, text: string): FieldMeta {
-  let best: FieldMeta = { text: "", confidence: 0, signal: false, inferred: false };
+function textWithoutLegalEntityNames(raw: string): string {
+  return raw.replace(
+    /\b[A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,8}\s+(?:Inc\.?|LLC|L\.L\.C\.|Ltd\.?|Corp\.?|Corporation|Co\.|Company|LP|LLP)\b\.?/g,
+    " ",
+  );
+}
 
-  const labeled = text.match(/\b(?:scope|purpose|services?|work|tasks?)\s*[:\-]\s*([^\n]+)/i);
+function extractScopeAndMeta(lower: string, text: string, lineSource?: string): FieldMeta {
+  let best: FieldMeta = { text: "", confidence: 0, signal: false, inferred: false };
+  const labeledSource = lineSource && /\n/.test(lineSource) ? lineSource : text;
+
+  const labeled = labeledSource.match(/\b(?:scope|purpose|services?|work|tasks?)\s*[:\-]\s*([^\n]+)/i);
   if (labeled) {
     const trimmed = trimScopeAtFieldBoundary(labeled[1]);
     const t = normalizeIntakeFieldText(trimmed, 220);
     if (t)
       return { text: t, confidence: 0.92, signal: true, inferred: t.length < 28 && !/[.!?]/.test(t) };
+  }
+
+  const scopeIs = labeledSource.match(/\b(?:the\s+)?(?:scope|purpose)\s+is\s+([^.!\n]+)/i);
+  if (scopeIs?.[1]) {
+    const trimmed = trimScopeAtFieldBoundary(scopeIs[1]);
+    const t = normalizeIntakeFieldText(trimmed, 220);
+    if (t) return { text: t, confidence: 0.92, signal: true, inferred: false };
   }
 
   const hiringProvide = text.match(
@@ -712,7 +743,7 @@ function extractScopeAndMeta(lower: string, text: string): FieldMeta {
   }
   if (
     /\b(?:biotech|pharmaceutical|manufacturing|supply chain|regulatory|medical device|healthcare analytics)\b/i.test(
-      lower,
+      textWithoutLegalEntityNames(text).toLowerCase(),
     )
   ) {
     const industryScope = text.match(
@@ -1277,7 +1308,7 @@ export function parseIntakeToStructuredAgreement(raw: string): IntakeStructuredA
   const lower = text.toLowerCase();
   const paymentField = extractIntakePayment(text);
   const partyEx = extractStructuredParties(text, lower, rawTrim);
-  const scopeMeta = extractScopeAndMeta(lower, text);
+  const scopeMeta = extractScopeAndMeta(lower, text, rawTrim);
   const termMeta = extractTermAndMeta(lower, text);
   let scope = scopeMeta.text;
   const payment = extractPaymentLine(text, paymentField);

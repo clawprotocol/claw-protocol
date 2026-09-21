@@ -37,7 +37,7 @@ describe("Test274 review-link persist blocker", () => {
 
   it("persist network failure does not clear pinned authoritative corpus", () => {
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const block = intake.slice(handoffIdx, handoffIdx + 12000);
+    const block = intake.slice(handoffIdx, handoffIdx + 18000);
     expect(block).toContain('restorePinnedFinalizedSignerCorpus("guided_review_first_handoff_persist")');
     expect(block).toContain("auditPaidProReviewLinkGenerationCorpus(bodyPlain)");
     expect(block).not.toMatch(
@@ -55,6 +55,10 @@ describe("Test274 review-link persist blocker", () => {
   it("retry re-invokes completeGuidedPaidProReviewFirstHandoff with same handoff entry", () => {
     expect(intake).toContain('"simple_pro_review_first_retry"');
     expect(intake).toContain("setReviewLinkPersistFailureDiagnostics(null)");
+    const remedyIdx = intake.indexOf("const handleJourneyActionRemedy = () => {");
+    const remedyBlock = intake.slice(remedyIdx, remedyIdx + 900);
+    expect(remedyBlock).toContain('actionId === "create_links"');
+    expect(remedyBlock).toContain('completeGuidedPaidProReviewFirstHandoff("simple_pro_review_first_retry")');
   });
 
   it("successful review handoff routes via paid Pro post-recipient owner path", () => {
@@ -112,7 +116,7 @@ describe("Test278 review-first persist regression", () => {
 
   it("failReviewFirstPersist surfaces HTTP status, detail, and endpoint in user message", () => {
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const block = intake.slice(handoffIdx, handoffIdx + 10000);
+    const block = intake.slice(handoffIdx, handoffIdx + 16000);
     expect(block).toContain("formatReviewLinkPersistUserMessage");
     expect(block).toContain("logReviewFirstPersistInvariantViolation");
     expect(block).toContain("paid_pro_corpus_and_signer_metadata_persist_failed");

@@ -5,6 +5,7 @@ import {
   markWorkspaceProEntitlementResolvedForTests,
 } from "../../agreement/agreementProFunnelGate";
 import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
+import { setOrgId } from "../../launch/orgContext";
 import {
   clearCurrentSessionProEntitlementMarkers,
   markCurrentSessionFreeStarterIntent,
@@ -74,6 +75,7 @@ describe("TEST492 — paid /app/create local_parse then pipeline acceptance", ()
   });
 
   it("workspace pro entitlement skips free-starter latch when React tier is stale free", () => {
+    setOrgId("user-test-492-paid");
     markWorkspaceProEntitlementResolvedForTests(true);
     expect(
       resolveSkipFreeStarterCreateSubmit({
@@ -84,6 +86,7 @@ describe("TEST492 — paid /app/create local_parse then pipeline acceptance", ()
   });
 
   it("after pipeline acceptance on workspace pro user, Free Starter shell/conversion surfaces block", () => {
+    setOrgId("user-test-492-paid");
     markCurrentSessionFreeStarterIntent();
     markWorkspaceProEntitlementResolvedForTests(true);
     markPaidProPipelineValidationPassed({ text: ACCEPTED_PAID_BODY, source: "server_full_draft" });

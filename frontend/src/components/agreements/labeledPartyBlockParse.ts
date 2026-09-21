@@ -379,7 +379,8 @@ function applyStackedPartyLine(block: LabeledPartyBlock, line: string): void {
     !block.address &&
     !isIntakeSectionLabelLine(t) &&
     !isStructuredPromptSectionLabelToken(t) &&
-    !isInvalidPartyMetadataValue(t)
+    !isInvalidPartyMetadataValue(t) &&
+    isAddressContinuationLine(t)
   ) {
     block.address = cleanFieldValue(t);
   }

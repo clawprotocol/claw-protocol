@@ -17,6 +17,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(dotenv_path=_REPO_ROOT / ".env", override=False)
 
 from backend.security.ai_airlock import run_ai_airlock
+from backend.security.agreement_identity import (
+    AgreementIdentityError, IDENTITY_TOKEN, restore_agreement_identities,
+)
 from backend.security.privilege_policy import AirlockPolicyProfile, first_privilege_airlock_block_diagnostic
 
 
@@ -139,6 +142,7 @@ def _messages_after_user_airlock(
     *,
     airlock_profile: AirlockPolicyProfile = "default",
     airlock_log_context: Optional[str] = None,
+    identity_bindings: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     user_idx = 0
@@ -147,7 +151,11 @@ def _messages_after_user_airlock(
             out.append(msg)
             continue
         raw = _user_content_text_for_airlock(msg.get("content"))
-        airlock_result = run_ai_airlock(raw, policy_profile=airlock_profile)
+        if identity_bindings is not None and IDENTITY_TOKEN.search(raw):
+            raise AgreementIdentityError("reserved_identity_token_in_input")
+        airlock_result = run_ai_airlock(
+            raw, policy_profile=airlock_profile, identity_bindings=identity_bindings,
+        )
         if airlock_result.blocked:
             codes = tuple(airlock_result.policy_decision.reason_codes)
             diag = first_privilege_airlock_block_diagnostic(raw, policy_profile=airlock_profile)
@@ -259,12 +267,59 @@ def call_legal_llm(
             "[claw-llm] call_legal_llm dropping unexpected kwargs keys=%s",
             sorted(kwargs.keys()),
         )
+    from backend.llm_acceptance_stub import acceptance_stub_enabled, stub_legal_llm_completion
+    from backend.quality_eval_live_replay import replay_legal_llm_completion
+
+    replayed = replay_legal_llm_completion(messages, call_purpose=call_purpose)
+    if replayed is not None:
+        if usage_sink is not None:
+            usage_sink.append(
+                {
+                    "call_purpose": (call_purpose or airlock_log_context or "live_replay"),
+                    "requested_model": model or DEFAULT_MODEL,
+                    "returned_model": "live-replay",
+                    "finish_reason": "stop",
+                    "status": "ok",
+                }
+            )
+        return replayed
+
+    if acceptance_stub_enabled():
+        text = stub_legal_llm_completion(messages, call_purpose=call_purpose)
+        if usage_sink is not None:
+            usage_sink.append(
+                {
+                    "call_purpose": (call_purpose or airlock_log_context or "acceptance_stub"),
+                    "requested_model": model or DEFAULT_MODEL,
+                    "returned_model": "acceptance-stub",
+                    "finish_reason": "stop",
+                    "status": "ok",
+                }
+            )
+        return text
     profile: AirlockPolicyProfile = airlock_profile
+    identity_bindings = {} if profile == "agreement_outbound" else None
     outbound_messages = _messages_after_user_airlock(
         messages,
         airlock_profile=profile,
         airlock_log_context=airlock_log_context,
+        identity_bindings=identity_bindings,
     )
+    if identity_bindings is not None:
+        # Bind only tokens actually sent after minimization, not omitted input.
+        sent_tokens = set(IDENTITY_TOKEN.findall("\n".join(
+            _user_content_text_for_airlock(m.get("content"))
+            for m in outbound_messages if m.get("role") == "user"
+        )))
+        identity_bindings = {k: v for k, v in identity_bindings.items() if k in sent_tokens}
+        if identity_bindings:
+            outbound_messages = [*outbound_messages, {"role": "system", "content": (
+                "Privacy binding: identifiers such as [ORG_1] or [EMAIL_1] in the user data "
+                "represent supplied identities, not missing facts. Preserve each exact token "
+                "and its party/role everywhere it is needed, including extracted parties and "
+                "agreement text. Do not guess, rename, omit, or invent identity tokens. "
+                "The application restores the supplied identities after your response."
+            )}]
     client = _get_client()
     requested_model = model or DEFAULT_MODEL
     resolved_model = requested_model
@@ -272,6 +327,16 @@ def call_legal_llm(
     tokens_param = next(iter(tokens_kwargs.keys()))
     purpose = (call_purpose or airlock_log_context or "unspecified").strip() or "unspecified"
     repair = (repair_status or "none").strip() or "none"
+    from backend.quality_eval_budget import configured_budget, QualityEvalBlocked
+
+    budget = configured_budget()
+    reservation = None
+    if budget is not None:
+        if str(client.base_url).rstrip("/") != "https://api.openai.com/v1":
+            raise QualityEvalBlocked("unapproved_provider_endpoint")
+        client = client.with_options(max_retries=0, timeout=90.0)
+        reservation = budget.reserve(model=resolved_model, messages=outbound_messages,
+                                     max_tokens=max_tokens, purpose=purpose, repair=repair)
     started = time.perf_counter()
 
     try:
@@ -282,6 +347,8 @@ def call_legal_llm(
             **tokens_kwargs,
         )
     except Exception as exc:
+        if budget is not None and reservation:
+            budget.finish(reservation, failed=True)
         latency_ms = int((time.perf_counter() - started) * 1000)
         fail_record = {
             "call_purpose": purpose,
@@ -314,6 +381,8 @@ def call_legal_llm(
     print(f"[premium-api-ok] model={resolved_model} tokens_param={tokens_param} status=ok")
     log.info("[premium-api-ok] model=%s tokens_param=%s status=ok", resolved_model, tokens_param)
     u = getattr(resp, "usage", None)
+    if budget is not None and reservation:
+        budget.finish(reservation, usage=u, model=getattr(resp, "model", None))
     choice0 = resp.choices[0] if getattr(resp, "choices", None) else None
     finish_reason = getattr(choice0, "finish_reason", None) if choice0 is not None else None
     returned_model = getattr(resp, "model", None) or resolved_model
@@ -341,7 +410,10 @@ def call_legal_llm(
     _privacy_safe_llm_telemetry(record)
     if usage_sink is not None:
         usage_sink.append(record)
-    return (resp.choices[0].message.content or "").strip()
+    text = (resp.choices[0].message.content or "").strip()
+    if identity_bindings is not None and finish_reason == "stop":
+        text = restore_agreement_identities(text, identity_bindings)
+    return text
 
 
 def embed_texts(
@@ -356,6 +428,9 @@ def embed_texts(
     """
     if not texts:
         return []
+    if os.getenv("CLAW_QUALITY_EVAL_BUDGET_PATH"):
+        from backend.quality_eval_budget import QualityEvalBlocked
+        raise QualityEvalBlocked("embedding_outside_quality_eval")
     minimized_inputs: List[str] = []
     for user_message_index, t in enumerate(texts):
         airlock_result = run_ai_airlock(t)

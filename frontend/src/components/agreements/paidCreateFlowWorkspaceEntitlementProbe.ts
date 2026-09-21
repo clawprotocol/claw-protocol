@@ -4,7 +4,10 @@
  */
 
 import { subscriptionTierForAccess } from "../../access/subscriptionEntitlementCache";
-import { readCachedWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
+import {
+  readCachedWorkspaceProEntitlement,
+  readExplicitWorkspaceProBillingResolution,
+} from "../../agreement/agreementProFunnelGate";
 import { tierAllowsAdvancedFullDraftReveal } from "./agreementAdvancedDraftAccess";
 
 export function resolveWorkspaceProSubscriptionEntitled(): boolean {
@@ -13,5 +16,9 @@ export function resolveWorkspaceProSubscriptionEntitled(): boolean {
 }
 
 export function resolveCreateFlowWorkspaceProEntitled(): boolean {
-  return resolveWorkspaceProSubscriptionEntitled() || readCachedWorkspaceProEntitlement();
+  return (
+    resolveWorkspaceProSubscriptionEntitled() ||
+    readCachedWorkspaceProEntitlement() ||
+    readExplicitWorkspaceProBillingResolution()
+  );
 }

@@ -136,10 +136,10 @@ def test_api_finalize_get_sign_prep(docs_dir):
 
 def test_api_sign_prep_invalid_manifest(docs_dir):
     client = TestClient(app)
-    raw = b"x"
+    raw = b"%PDF-1.4 x"
     fin = client.post(
         "/v1/documents",
-        json={"content_base64": base64.b64encode(raw).decode("ascii")},
+        json={"content_base64": base64.b64encode(raw).decode("ascii"), "content_type": "application/pdf"},
     )
     doc_id = fin.json()["document_id"]
 

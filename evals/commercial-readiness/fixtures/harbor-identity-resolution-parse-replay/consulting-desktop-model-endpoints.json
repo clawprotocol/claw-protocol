@@ -1,0 +1,60 @@
+[
+  {
+    "path": "/api/agreements/parse",
+    "status": 200,
+    "request": { "ai_model_class": "premium" },
+    "body": {
+      "draft": {
+        "title": "Consulting Services Agreement",
+        "jurisdiction": "Delaware",
+        "parties": [
+          { "name": "Harbor Peak Analytics LLC", "role": "Consultant" },
+          { "name": "Ironvale Manufacturing Inc", "role": "Client" },
+          { "name": "Alex Rivera", "role": "party" },
+          { "name": "Riley Chen", "role": "party" }
+        ],
+        "purpose": "Harbor Peak Analytics LLC will provide AI workflow implementation consulting services to Ironvale Manufacturing Inc.",
+        "payment_terms": "Ironvale Manufacturing Inc will pay Harbor Peak Analytics LLC a fixed fee of $48,000."
+      },
+      "extract": {
+        "material_asks": [],
+        "agreement_family_hint": "services",
+        "confidence": "high"
+      }
+    }
+  },
+  {
+    "path": "/api/agreements/parse",
+    "status": 200,
+    "request": { "ai_model_class": "basic" },
+    "body": {
+      "draft": {
+        "title": "Consulting Services Agreement",
+        "jurisdiction": "Delaware",
+        "parties": [
+          { "name": "Harbor Peak Analytics LLC", "role": "Consultant" },
+          { "name": "Ironvale Manufacturing Inc", "role": "Client" },
+          { "name": "Alex Rivera", "role": "party" },
+          { "name": "Riley Chen", "role": "party" }
+        ],
+        "purpose": "AI workflow implementation",
+        "payment_terms": "Fixed fee $48,000"
+      },
+      "extract": { "material_asks": [], "confidence": "medium" }
+    }
+  },
+  {
+    "path": "/api/agreements/premium-full-draft",
+    "status": 200,
+    "body": {
+      "title": "Consulting Services Agreement",
+      "agreement_family": "services_agreement",
+      "generation_ok": true,
+      "generation_outcome": "ok",
+      "document_text": "CONSULTING SERVICES AGREEMENT\n\nThis Consulting Services Agreement (the \"Agreement\") is entered into by and between Harbor Peak Analytics LLC (\"Consultant\") and Ironvale Manufacturing Inc. (\"Client\").\n\n1. PARTIES AND ROLES. Consultant is an independent professional services firm. Client is retaining Consultant to perform the services described in this Agreement. Consultant's authorized signer is ________. Client's authorized signer is ________.\n\n2. SCOPE OF SERVICES. Consultant shall perform AI workflow implementation for Client, including discovery, implementation planning, configuration, and knowledge transfer. Consultant shall not invent additional counterparties or change the commercial bargain without a written amendment.\n\n3. FEES AND PAYMENT. Client shall pay a fixed fee of $48,000 for the services. The fee is not a subscription and is not an estimate.\n\n4. TERM AND DURATION. The initial term is twelve months. The Agreement ends at the close of the initial term unless the parties sign an extension.\n\n5. COMPLETION. Completion is Client's written confirmation that the implemented AI workflow is in operational use.\n\n6. OBLIGATIONS. Consultant shall perform the services in a professional manner and keep Client reasonably informed. Client shall provide timely access to systems, stakeholders, and information reasonably required for the work.\n\n7. INTELLECTUAL PROPERTY. Consultant retains ownership of pre-existing tools. Client owns deliverables after payment. Each party keeps its pre-existing intellectual property.\n\n8. CONFIDENTIALITY. Each party shall protect the other party's non-public information and use it only to perform this Agreement.\n\n9. LIMITATION OF LIABILITY. Except for confidentiality breaches or willful misconduct, each party's aggregate liability is limited to the $48,000 fixed fee.\n\n10. GOVERNING LAW. This Agreement is governed by the laws of the State of Delaware, without regard to conflict-of-law rules.\n\n11. NOTICES. Notices shall be sent to each party's designated email address.\n\n12. TERMINATION. Either party may terminate for material breach after written notice and a ten-day opportunity to cure.\n\n13. ENTIRE AGREEMENT. This Agreement is the entire agreement. Electronic signatures are valid.\n\nIN WITNESS WHEREOF, the parties have executed this Agreement.\n\nConsultant: Harbor Peak Analytics LLC   By: ________   Title: ________   Date: ________\n\nClient: Ironvale Manufacturing Inc.   By: ________   Title: ________   Date: ________\n",
+      "authoritative_draft": "CONSULTING SERVICES AGREEMENT\n\nThis Consulting Services Agreement (the \"Agreement\") is entered into by and between Harbor Peak Analytics LLC (\"Consultant\") and Ironvale Manufacturing Inc. (\"Client\").\n\n1. PARTIES AND ROLES. Consultant is an independent professional services firm. Client is retaining Consultant to perform the services described in this Agreement. Consultant's authorized signer is ________. Client's authorized signer is ________.\n\n2. SCOPE OF SERVICES. Consultant shall perform AI workflow implementation for Client, including discovery, implementation planning, configuration, and knowledge transfer. Consultant shall not invent additional counterparties or change the commercial bargain without a written amendment.\n\n3. FEES AND PAYMENT. Client shall pay a fixed fee of $48,000 for the services. The fee is not a subscription and is not an estimate.\n\n4. TERM AND DURATION. The initial term is twelve months. The Agreement ends at the close of the initial term unless the parties sign an extension.\n\n5. COMPLETION. Completion is Client's written confirmation that the implemented AI workflow is in operational use.\n\n6. OBLIGATIONS. Consultant shall perform the services in a professional manner and keep Client reasonably informed. Client shall provide timely access to systems, stakeholders, and information reasonably required for the work.\n\n7. INTELLECTUAL PROPERTY. Consultant retains ownership of pre-existing tools. Client owns deliverables after payment. Each party keeps its pre-existing intellectual property.\n\n8. CONFIDENTIALITY. Each party shall protect the other party's non-public information and use it only to perform this Agreement.\n\n9. LIMITATION OF LIABILITY. Except for confidentiality breaches or willful misconduct, each party's aggregate liability is limited to the $48,000 fixed fee.\n\n10. GOVERNING LAW. This Agreement is governed by the laws of the State of Delaware, without regard to conflict-of-law rules.\n\n11. NOTICES. Notices shall be sent to each party's designated email address.\n\n12. TERMINATION. Either party may terminate for material breach after written notice and a ten-day opportunity to cure.\n\n13. ENTIRE AGREEMENT. This Agreement is the entire agreement. Electronic signatures are valid.\n\nIN WITNESS WHEREOF, the parties have executed this Agreement.\n\nConsultant: Harbor Peak Analytics LLC   By: ________   Title: ________   Date: ________\n\nClient: Ironvale Manufacturing Inc.   By: ________   Title: ________   Date: ________\n",
+      "key_terms_found": ["AI workflow implementation", "$48,000", "Delaware"],
+      "missing_material_info": []
+    }
+  }
+]

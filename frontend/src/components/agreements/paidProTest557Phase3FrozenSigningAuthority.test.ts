@@ -11,6 +11,7 @@ import {
   extractRequiredSigningActions,
   loadFrozenSigningAuthority,
   readFrozenSigningAuthoritySnapshot,
+  readFrozenSigningAuthoritySnapshotForAgreement,
   resolveFrozenPartyByAgreementPartyId,
   resolveFrozenSignerByRecordId,
   resolveSigningStatusCounts,
@@ -47,6 +48,8 @@ import {
 } from "../../vs01/paidProTest463Fixtures";
 import { resolveVs01RecipientIdentityFromAuthority } from "../../vs01/vs01RecipientIdentityAuthority";
 import { bootstrapVs01RecipientSigningAuthority } from "../../vs01/vs01RecipientAuthorityBootstrap";
+import * as recipientAccessApi from "../../agreement/recipientAccessApi";
+import * as vs01SigningPacketServer from "../../vs01/vs01SigningPacketServer";
 import { buildSigningInviteTargetsFromHandoff } from "../../vs01/vs01SigningInviteDelivery";
 import { resolveRecipientInitialsEnabled } from "../../vs01/vs01RecipientSignerMarksHydration";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
@@ -63,6 +66,7 @@ function clearAllBrowserSigningAuthority() {
         const k = sessionStorage.key(i);
         if (
           k?.startsWith("claw_frozen_signing_authority_v1:") ||
+          k?.startsWith("claw_frozen_signing_authority_agreement_v1:") ||
           k?.startsWith("claw_signer_execution_authority_v1:") ||
           k?.startsWith("claw_starter_paid_party_handoff_v1:")
         ) {
@@ -94,7 +98,7 @@ function resetPhase3Isolation() {
   clearLegalPartyAuthoritySessionForTests();
 }
 
-function freezeTwoPartySnapshot(intake = TEST550_CEDAR_NORTHWIND_INTAKE) {
+function freezeTwoPartySnapshot(intake = TEST550_CEDAR_NORTHWIND_INTAKE, agreementId?: string) {
   const authority = establishLegalPartyAuthorityFromIntake(intake);
   writeStarterToPaidPartyHandoff(intake, authority);
   attachSignerToParty({
@@ -145,12 +149,91 @@ function freezeTwoPartySnapshot(intake = TEST550_CEDAR_NORTHWIND_INTAKE) {
     intakeText: intake,
     authorityParties: parties,
     replaceExisting: true,
+    ...(agreementId
+      ? { agreementId, persistFrozenToBackend: false }
+      : {}),
   });
   return { authority, snap, frozen: readFrozenSigningAuthoritySnapshot() };
 }
 
 describe("paidProTest557 Phase 3 frozen signing authority", () => {
   afterEach(() => resetPhase3Isolation());
+
+  it("binds durable draft party ids for Harbor / Ironvale / Alex", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc";
+    const parties = [
+      {
+        partyIndex: 0,
+        partyLegalName: harbor,
+        signerEmail: "pat.harbor@harbor.test",
+        signerName: "Pat Harbor",
+        signerTitle: "",
+        partyAddress: "",
+      },
+      {
+        partyIndex: 1,
+        partyLegalName: ironvale,
+        signerEmail: "sam.ironvale@ironvale.test",
+        signerName: "Sam Ironvale",
+        signerTitle: "",
+        partyAddress: "",
+      },
+      {
+        partyIndex: 2,
+        partyLegalName: "Alex Rivera",
+        signerEmail: "alex.rivera@advisor.test",
+        signerName: "Alex Rivera",
+        signerTitle: "",
+        partyAddress: "",
+      },
+    ];
+    setConsumedPaidProSignerMetadataAuthority({
+      parties,
+      source: "live_ui",
+      hash: "",
+      updatedAt: Date.now(),
+    });
+    const manifest = buildCanonicalFinalPartyManifestFromAuthority(
+      { parties, source: "live_ui", hash: "", updatedAt: Date.now() },
+      { draftPartyNames: [harbor, ironvale, "Alex Rivera"] },
+    );
+    createAuthoritativeSigningSnapshot({
+      corpus:
+        "CONSULTING AGREEMENT\n\nIN WITNESS WHEREOF\n\nCONSULTANT:\nHarbor Peak Analytics LLC\n\nCLIENT:\nIronvale Manufacturing Inc\n\nADVISOR:\nAlex Rivera",
+      signerMetadata: authorityPartiesToRecipientMetadata(parties),
+      partyManifest: manifest,
+      signatureBlockModel: buildCanonicalSignerManifest({ identities: [], signFirst: true }),
+      authorityParties: parties,
+      replaceExisting: true,
+      draftParties: [
+        { id: "65cc52e7-8f7d-4ee9-ba95-45a2d5eddf68", name: harbor, role: "Consultant" },
+        { id: "5f009b46-ac4f-436f-a188-e520725f54c1", name: `${ironvale}.`, role: "Client" },
+        { id: "97ef5b01-384d-45e5-8320-42d87cc1f38c", name: "Alex Rivera", role: "Advisor" },
+      ],
+    });
+    const frozen = readFrozenSigningAuthoritySnapshot();
+    expect(frozen?.parties.map((party) => party.legalEntityName)).toEqual([
+      harbor,
+      ironvale,
+      "Alex Rivera",
+    ]);
+    expect(frozen?.parties.map((party) => party.agreementPartyId)).toEqual([
+      "65cc52e7-8f7d-4ee9-ba95-45a2d5eddf68",
+      "5f009b46-ac4f-436f-a188-e520725f54c1",
+      "97ef5b01-384d-45e5-8320-42d87cc1f38c",
+    ]);
+    expect(frozen?.signers.map((signer) => signer.signerName)).toEqual([
+      "Pat Harbor",
+      "Sam Ironvale",
+      "Alex Rivera",
+    ]);
+    expect(frozen?.parties.map((party) => party.agreementRole)).toEqual([
+      "Consultant",
+      "Client",
+      "Advisor",
+    ]);
+  });
 
   it("Case 1 — two-party packet snapshot preserves stable IDs and corpus hash", () => {
     const { snap, frozen } = freezeTwoPartySnapshot();
@@ -314,15 +397,29 @@ describe("paidProTest557 Phase 3 frozen signing authority", () => {
     });
     expect(enabled).toBe(true);
     expect(portable.initialsPolicy.enabled).toBe(true);
+    vi.spyOn(recipientAccessApi, "validateRecipientAccessToken").mockResolvedValue({
+      ok: true,
+      data: {
+        ok: true,
+        agreement_id: TEST463_AG,
+        mode: "sign",
+        locked_version_id: "v1",
+        recipient_party_id: portable.roles[1]?.partyId ?? "",
+      },
+    });
+    vi.spyOn(vs01SigningPacketServer, "fetchPublicVs01SigningPacket").mockResolvedValue({
+      ok: true,
+      portable,
+    });
     const boot = await bootstrapVs01RecipientSigningAuthority({
       agreementId: TEST463_AG,
       documentId: portable.seed.documentId,
+      recipientAccessToken: "tok_557_initials",
       urlSignerRoleId: portable.roles[1]?.roleId ?? null,
       urlCounterpartyId: portable.roles[1]?.vs01CounterpartyId ?? portable.roles[1]?.partyId ?? "",
       urlRecipientIndex: 1,
       urlRecipientName: portable.roles[1]?.entityName ?? "",
       urlRecipientEmail: portable.roles[1]?.signerEmail ?? "",
-      cachedPortable: portable,
     });
     expect(boot.ok).toBe(true);
     if (!boot.ok || !("initialsEnabled" in boot)) return;
@@ -422,6 +519,21 @@ describe("paidProTest557 Phase 3 frozen signing authority", () => {
     expect(readFrozenSigningAuthoritySnapshot()?.agreementSessionId).not.toBe(
       firstFrozen?.agreementSessionId,
     );
+  });
+
+  it("keeps freeze readable by agreement id after a remount session bump", () => {
+    const agreementId = "agr-durable-freeze-session-race";
+    const { frozen } = freezeTwoPartySnapshot(TEST550_CEDAR_NORTHWIND_INTAKE, agreementId);
+    expect(frozen?.agreementId).toBe(agreementId);
+    expect(readFrozenSigningAuthoritySnapshotForAgreement(agreementId)?.frozenCorpusHash).toBe(
+      frozen?.frozenCorpusHash,
+    );
+    bumpAgreementGenerationId();
+    expect(readFrozenSigningAuthoritySnapshot()).toBeNull();
+    const afterBump = readFrozenSigningAuthoritySnapshotForAgreement(agreementId);
+    expect(afterBump?.agreementId).toBe(agreementId);
+    expect(afterBump?.frozenCorpusHash).toBe(frozen?.frozenCorpusHash);
+    expect(afterBump?.signers).toHaveLength(2);
   });
 
   it("Case 19 — frozen snapshot readable without owner session handoff", () => {
@@ -626,15 +738,29 @@ describe("paidProTest557 Phase 3 frozen signing authority", () => {
 
   it("Case 21 — VS01 lifecycle uses durable portable packet", async () => {
     const { portable } = buildTest463FourPartyPreparePacket();
+    vi.spyOn(recipientAccessApi, "validateRecipientAccessToken").mockResolvedValue({
+      ok: true,
+      data: {
+        ok: true,
+        agreement_id: TEST463_AG,
+        mode: "sign",
+        locked_version_id: "v1",
+        recipient_party_id: portable.roles[0]?.partyId ?? "",
+      },
+    });
+    vi.spyOn(vs01SigningPacketServer, "fetchPublicVs01SigningPacket").mockResolvedValue({
+      ok: true,
+      portable,
+    });
     const boot = await bootstrapVs01RecipientSigningAuthority({
       agreementId: TEST463_AG,
       documentId: portable.seed.documentId,
+      recipientAccessToken: "tok_557_lifecycle",
       urlSignerRoleId: portable.roles[0]?.roleId ?? null,
       urlCounterpartyId: portable.roles[0]?.vs01CounterpartyId ?? portable.roles[0]?.partyId ?? "",
       urlRecipientIndex: 0,
       urlRecipientName: portable.roles[0]?.entityName ?? "",
       urlRecipientEmail: portable.roles[0]?.signerEmail ?? "",
-      cachedPortable: portable,
     });
     expect(boot.ok).toBe(true);
   });

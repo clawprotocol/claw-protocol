@@ -6,6 +6,7 @@ import {
   invalidateWorkspaceProEntitlementCache,
   markWorkspaceProEntitlementResolvedForTests,
 } from "../../agreement/agreementProFunnelGate";
+import { setOrgId } from "../../launch/orgContext";
 import {
   resolveAuthoritativeCreateFlowReviewShell,
   shouldShowCreateFlowStarterProRefineUpsell,
@@ -44,10 +45,12 @@ import { resolveFreeStarterReviewShellActive } from "./freeStarterReviewShell";
 import { sanitizeSignerPartyLegalEntityDisplay } from "./signerPartyLegalEntityDisplaySanitizer";
 import {
   TEST505_ACCEPTED_PAID_BODY,
+  TEST505_AGREEMENT_ID,
   TEST505_AUTHORIZED_SIGNER_BULLET_1,
   TEST505_AUTHORIZED_SIGNER_BULLET_2,
   TEST505_HARBOR_PEAK,
   TEST505_INTAKE,
+  TEST505_ORGANIZATION_ID,
   TEST505_PREPARED_FREEZE_CANDIDATE_HASH,
   TEST505_RECIPIENT_CANDIDATES,
   TEST505_RED_MESA,
@@ -66,6 +69,8 @@ function seedReturningPaidAcceptance(): void {
   commitAcceptedPaidProCorpusHandoffSync({
     corpusPlain: TEST505_ACCEPTED_PAID_BODY,
     pipelineSource: "server_full_draft",
+    agreementId: TEST505_AGREEMENT_ID,
+    organizationId: TEST505_ORGANIZATION_ID,
   });
   establishPaidProSourceOfTruth({
     text: TEST505_ACCEPTED_PAID_BODY,
@@ -78,6 +83,7 @@ describe("TEST505 — returning paid stale UI suppression + metadata-only signer
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
+    setOrgId(TEST505_ORGANIZATION_ID);
     resetPaidProPipelineTestIsolation();
     clearFrozenPremiumSessionBodiesForTests();
     clearPaidProSourceOfTruth();
@@ -234,6 +240,9 @@ describe("TEST505 — returning paid stale UI suppression + metadata-only signer
       surface: "finalize_paid_pro_signer_metadata",
       signatureRegionOnly: true,
       repairRecital: false,
+      agreementId: TEST505_AGREEMENT_ID,
+      organizationId: TEST505_ORGANIZATION_ID,
+      expectedFrozenHash: frozenHash,
     });
     expect(hashPaidProCorpus(hydrated.corpus)).toBe(frozenHash);
     expect(hydrated.corpus).toBe(TEST505_ACCEPTED_PAID_BODY.trim());

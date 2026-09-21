@@ -2,6 +2,9 @@
 
 import type { PaymentRequestPayload } from "./paymentRequestTypes";
 
+/** Owner-chosen send track persisted on the agreement draft (`PATCH owner_delivery_track`). */
+export type AgreementOwnerDeliveryTrack = "review" | "signature";
+
 export type AgreementParty = {
   id?: string;
   name: string;
@@ -33,6 +36,11 @@ export type AgreementDraft = {
   versions: Array<{ version: number; created_at: string; note?: string | null }>;
   audit_log: Array<{ event_type: string; at: string; field?: string | null; value?: unknown }>;
   review_sent_at?: string | null;
+  /**
+   * Owner-chosen delivery track persisted on the draft. Absent/`null` is not
+   * signature. Unknown server values must be dropped at normalize.
+   */
+  owner_delivery_track?: AgreementOwnerDeliveryTrack | null;
   /** ISO timestamp when review invite emails were successfully sent (idempotency guard). */
   review_invite_emails_sent_at?: string | null;
   workspace_archived_at?: string | null;
@@ -53,6 +61,40 @@ export type AgreementDraft = {
   rendered_document_text?: string | null;
   /** Pro review redline v1 (server JSON); optional. */
   pro_redline_v1?: Record<string, unknown> | null;
+  /**
+   * Server VS01 packet record. Owner signed-artifact retrieval reads
+   * `fully_executed_snapshot` from this field — do not drop on normalize.
+   */
+  vs01_signing_packet_v1?: Vs01SigningPacketDraftRecordV1 | null;
+  /**
+   * Accepted review snapshot. Owner signed-view and lock binding read this
+   * corpus as-is — never placeholder-scrub already-accepted paper.
+   */
+  accepted_review_snapshot_v1?: AcceptedReviewSnapshotDraftV1 | null;
   /** Creator/admin is coordinating only — not a legal party or signer. */
   creator_coordinator_only?: boolean;
+};
+
+/** Server-persisted fully executed snapshot (snake_case API keys). */
+export type Vs01FullyExecutedSnapshotDraftV1 = {
+  v?: number;
+  corpus_plain: string;
+  corpus_hash?: string;
+  saved_at?: string;
+  signer_role_ids?: string[];
+};
+
+/** Narrow packet wrapper required by owner executed-artifact retrieval. */
+export type Vs01SigningPacketDraftRecordV1 = {
+  fully_executed_snapshot?: Vs01FullyExecutedSnapshotDraftV1 | null;
+};
+
+/** Server-accepted review snapshot. Corpus bytes are authority, not display copy. */
+export type AcceptedReviewSnapshotDraftV1 = {
+  status?: string;
+  snapshotId?: string;
+  corpusSha256?: string;
+  corpusLength?: number;
+  corpusPlain?: string;
+  acceptedAt?: string;
 };

@@ -485,17 +485,25 @@ export function buildVs01PrepareSigningRolesForBridge(args: {
   creatorEmail: string;
   ownerSignerName?: string;
   ownerSignerTitle?: string;
+  creatorSignerName?: string;
+  creatorSignerTitle?: string;
   counterparties: Vs01Counterparty[];
   bridge?: Pick<AgreementVs01BridgeSession, "creatorIsParty" | "legalParties"> | null;
 }): Vs01PrepareSigningRole[] {
-  const creatorIsParty = resolveBridgeCreatorIsParty(args.bridge);
-  const legalParties = args.bridge?.legalParties;
+  const sessionHints = args as {
+    creatorIsParty?: boolean;
+    legalParties?: AgreementVs01BridgeSession["legalParties"];
+  };
+  const creatorIsParty = resolveBridgeCreatorIsParty(
+    args.bridge ?? { creatorIsParty: sessionHints.creatorIsParty, legalParties: sessionHints.legalParties },
+  );
+  const legalParties = args.bridge?.legalParties ?? sessionHints.legalParties;
   return buildVs01PrepareSigningRoles({
     agreementId: args.agreementId,
     creatorName: args.creatorName,
     creatorEmail: args.creatorEmail,
-    ownerSignerName: args.ownerSignerName,
-    ownerSignerTitle: args.ownerSignerTitle,
+    ownerSignerName: args.ownerSignerName ?? args.creatorSignerName,
+    ownerSignerTitle: args.ownerSignerTitle ?? args.creatorSignerTitle,
     counterparties: args.counterparties,
     creatorIsParty,
     legalParties,

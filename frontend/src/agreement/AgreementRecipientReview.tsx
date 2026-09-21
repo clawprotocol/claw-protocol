@@ -52,11 +52,18 @@ import { VoiceAugmentedTextArea } from "../launch/VoiceAugmentedControl";
 import { buildRecipientNegotiationHints } from "../vs01/recipientNegotiationHints";
 import { featureFlags } from "../config/featureFlags";
 import {
+  ESIGN_CONSENT_CHECKBOX_LABEL,
+  ESIGN_CONSENT_INTENT_STATEMENT,
   ESIGN_INTENT_SIGN_AGREEMENT_ACTION,
   NOT_LEGAL_ADVICE,
   PRODUCT_NOT_LAW_FIRM,
   RECORDS_DOWNLOAD_KEEP_COPY_SHORT,
 } from "../compliance/disclosureCopy";
+import {
+  confirmDraftedCeremonyCompletion,
+  recipientCompletionUserMessage,
+  versionedRecipientConsentIntent,
+} from "../vs01/vs01RecipientCompletionContract";
 import { NegotiationTimelineView } from "../vs01/NegotiationTimelineView";
 import {
   buildNegotiationTimelineCurrentStatus,
@@ -66,9 +73,11 @@ import {
 } from "../vs01/negotiationTimeline";
 import { detectChangedSnapshotFields } from "./negotiationMemory";
 import {
+  fetchRecipientAgreementDraft,
   finalizeRecipientProposalApi,
   postSigningCeremonyComplete,
   postSigningCeremonyStart,
+  recoverDraftedCeremonyCompletion,
   recipientApproveCurrentApi,
   stageRecipientProposalApi,
   type RecipientProposalSubmitBody,
@@ -77,9 +86,20 @@ import {
   isAgreementMarkedSignedInAudit,
   isParticipantSignatureComplete,
   pendingSignatureCount,
+  signatureCompletedParticipantIds,
 } from "./pendingSignatureDerive";
+import {
+  evaluateAcceptedSignatureAttempt,
+  requiredCompletionParticipants,
+} from "../launch/simpleProduct/acceptedSigningCompletionAuthority";
+import { downloadCompletedSignedAgreementPdf } from "./completedSignedAgreementPdfDownload";
+import { CREATOR_DOWNLOAD_PDF_LABEL } from "../launch/creatorDashboardCopy";
 import { normalizeAgreementDraftFromApi } from "./agreementDraftNormalize";
 import { auditHasRecipientApprovalForParticipant } from "./participantModel";
+import {
+  recipientApprovalPostIsAmbiguous,
+  recipientApprovalRecordedOnIntendedRevision,
+} from "./recipientApprovalReconcile";
 import { recipientLinkTokenFingerprint } from "./recipientLinkTokenFingerprint";
 import { logReviewStateSource } from "../components/agreements/reviewFlowDebugLog";
 import {
@@ -114,6 +134,33 @@ import {
   RECIPIENT_SIGN_RECORD_SUBLINE,
 } from "./recipientReviewTrustCopy";
 import { RECIPIENT_APPROVED_LAWDOG_PROMO_LINE } from "./recipientPublicReviewChrome";
+import {
+  selectRecipientReviewAuthorityMeta,
+  type RecipientReviewAuthorityMeta,
+} from "./recipientReviewAuthorityMeta";
+import {
+  agreementMagicLinkPath,
+  agreementReviewPath,
+  agreementReviewPathWithParticipant,
+  parseAgreementReviewPath,
+  type RecipientLinkRole,
+} from "./agreementRecipientReviewPaths";
+import { agreementSigningPath, parseAgreementSignPath } from "./agreementRecipientSigningPaths";
+import {
+  overlayAuthorizedSignerIdentity,
+  remountBundleToLockedVersion,
+  signPaperAuthorityClosed,
+} from "./recipientSigningLockedVersion";
+
+export type { RecipientLinkRole };
+export {
+  agreementMagicLinkPath,
+  agreementReviewPath,
+  agreementReviewPathWithParticipant,
+  parseAgreementReviewPath,
+  agreementSigningPath,
+  parseAgreementSignPath,
+};
 import type { LawdogViewerContext } from "./lawdogViewerContext";
 import { RecipientApprovedWaitingPanel } from "./RecipientApprovedWaitingPanel";
 import {
@@ -124,6 +171,9 @@ import {
   type PostApprovalPanelActionKind,
   type RecipientPostApprovalPresentation,
 } from "./recipientApprovedWaitingPresentation";
+import { JourneyActionBanner } from "../components/agreements/JourneyActionBanner";
+import type { JourneyActionFeedback } from "../components/agreements/journeyActionFeedback";
+import { resolveUserActionFeedback } from "../components/agreements/userActionFeedback";
 import { deriveOwnerReviewPartyStatusRows } from "../launch/simpleProduct/ownerReviewPartyStatusChecklist";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 import { navigateCreatorPrepareSignatureLinks } from "../launch/creatorDashboardPrepareSignatureLinks";
@@ -146,6 +196,7 @@ import {
   logReviewFirstDisplayCorpusSelected,
   resolveReviewFirstDisplayCorpus,
 } from "../launch/simpleProduct/reviewFirstDisplayCorpus";
+import { resolveRecipientVisibleReviewPlain } from "./preferBoundReviewRevisionCorpus";
 import {
   RECIPIENT_BTN_CONTINUE_EDITING,
   RECIPIENT_BTN_PREVIEW_CHANGES,
@@ -294,6 +345,7 @@ import {
   writeReviewFirstSubmitInflightProposalId,
 } from "./reviewerTokenPersistence";
 import {
+  clearReviewerApprovalLocalState,
   logReviewerApprovalLocalStateApplied,
   logReviewerApprovalSubmitFailed,
   logReviewerApprovalSubmitStart,
@@ -455,10 +507,18 @@ function escapeReviewFirstCorpusHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function renderReviewFirstCorpusHtml(text: string): string {
+function documentLifecycleBanner(surface: "review" | "sign" | "completed"): string {
+  if (surface === "completed") return "Completed agreement";
+  if (surface === "sign") return "Agreement locked for signature";
+  return "Draft Agreement (non-binding template)";
+}
+
+function renderReviewFirstCorpusHtml(text: string, surface: "review" | "sign" | "completed" = "review"): string {
   return (
     "<article style='position:relative;max-width:720px;margin:0 auto'>" +
-    "<p style='text-align:center;color:#475569;font-size:12px;margin-bottom:12px'>Draft Agreement (non-binding template)</p>" +
+    "<p style='text-align:center;color:#475569;font-size:12px;margin-bottom:12px'>" +
+    escapeReviewFirstCorpusHtml(documentLifecycleBanner(surface)) +
+    "</p>" +
     "<pre style='white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.65;color:#0f172a;margin:0;padding:0;border:0;background:transparent'>" +
     escapeReviewFirstCorpusHtml(text) +
     "</pre></article>"
@@ -666,9 +726,12 @@ function scheduleAExcerpt(text: string): string {
 
 export type AgreementRecipientEntry =
   | { kind: "review"; accessGate?: { lockedVersionId: string } }
-  | { kind: "sign"; lockedVersionId: string; accessGate?: { lockedVersionId: string } };
-
-export type RecipientLinkRole = "signer" | "reviewer" | "counterparty";
+  | {
+      kind: "sign";
+      lockedVersionId: string;
+      accessGate?: { lockedVersionId: string };
+      signerRoleId?: string;
+    };
 
 export type { RecipientRevisionLineage } from "./recipientRevisionLineage";
 
@@ -801,6 +864,7 @@ export function AgreementRecipientReview({
   const [workspaceTab, setWorkspaceTab] = useState<"read" | "revise">("read");
   const [approving, setApproving] = useState(false);
   const [approvedAck, setApprovedAck] = useState(false);
+  const [journeyActionFeedback, setJourneyActionFeedback] = useState<JourneyActionFeedback | null>(null);
   const [localApprovalAt, setLocalApprovalAt] = useState<string | null>(null);
   const [bundle, setBundle] = useState<AgreementVersionBundle | null>(null);
   const [externalAiPaste, setExternalAiPaste] = useState("");
@@ -835,10 +899,15 @@ export function AgreementRecipientReview({
   const [proRedlineSuggestSuccess, setProRedlineSuggestSuccess] = useState(false);
   type CeremonyPhase = "idle" | "start_error" | "ready" | "signing" | "done";
   const [ceremonyPhase, setCeremonyPhase] = useState<CeremonyPhase>("idle");
+  const [completedSignedPdfBusy, setCompletedSignedPdfBusy] = useState(false);
+  const [completedSignedPdfError, setCompletedSignedPdfError] = useState<string | null>(null);
   const [ceremonyError, setCeremonyError] = useState<string | null>(null);
+  const [reviewAuthorityMeta, setReviewAuthorityMeta] = useState<RecipientReviewAuthorityMeta | null>(null);
+  const [boundReviewRevisionPlain, setBoundReviewRevisionPlain] = useState("");
   const [ceremonyVersionHash, setCeremonyVersionHash] = useState("");
   const [ceremonySignerName, setCeremonySignerName] = useState("");
   const [typedConfirm, setTypedConfirm] = useState("");
+  const [signConsentAccepted, setSignConsentAccepted] = useState(false);
   const [signedAtLabel, setSignedAtLabel] = useState<string | null>(null);
   const [fullyExecutedAtSign, setFullyExecutedAtSign] = useState(false);
   const ceremonyStartedRef = useRef(false);
@@ -1260,14 +1329,22 @@ export function AgreementRecipientReview({
       setCeremonyPhase("done");
       return;
     }
-    if (ceremonyStartedRef.current) return;
-    ceremonyStartedRef.current = true;
     let cancel = false;
     void (async () => {
+      const recovered = await recoverDraftedCeremonyCompletion(
+        agreementId,
+        { participantId: participantPid, lockedVersionId: entry.lockedVersionId },
+        recipientAccessToken,
+      );
+      if (cancel) return;
+      if (recovered.ok) {
+        setFullyExecutedAtSign(Boolean(recovered.fully_executed));
+        setCeremonyPhase("done");
+        return;
+      }
       const r = await postSigningCeremonyStart(agreementId, participantPid, recipientAccessToken);
       if (cancel) return;
       if (!r.ok) {
-        ceremonyStartedRef.current = false;
         setCeremonyError(r.error || "Could not start signing.");
         setCeremonyPhase("start_error");
         return;
@@ -1282,8 +1359,10 @@ export function AgreementRecipientReview({
     };
   }, [
     entry.kind,
-    draft,
-    bundle,
+    entry.kind === "sign" ? entry.lockedVersionId : "",
+    draft?.id,
+    draft?.updated_at,
+    bundle?.currentVersionId,
     signingLinkInvalidMessage,
     agreementId,
     participantPid,
@@ -2068,14 +2147,74 @@ export function AgreementRecipientReview({
           locked_at?: string;
           locked_by?: string;
           content_sha256?: string;
+          accepted_snapshot_id?: string;
+          accepted_snapshot_digest?: string;
+        } | null;
+        accepted_review_snapshot?: {
+          agreement_id?: string;
+          snapshot_id?: string;
+          locked_version_id?: string;
+          corpus_sha256?: string;
+          corpus_length?: number;
+          corpus_plain?: string;
+          status?: string;
+          participant_id?: string;
+        } | null;
+        authority_mode?: string;
+        legacy_pre_cutover?: boolean;
+        review_revision?: {
+          agreement_id?: string;
+          snapshot_id?: string;
+          locked_version_id?: string;
+          corpus_sha256?: string;
+          corpus_length?: number;
+          corpus_plain?: string;
+          status?: string;
+          participant_id?: string;
         } | null;
       };
-      const d = normalizeAgreementDraftFromApi(payload?.draft ?? null, {
+      let d = normalizeAgreementDraftFromApi(payload?.draft ?? null, {
         fallbackAgreementId: agreementId,
       });
+      if (d && entry.kind === "sign") {
+        d = overlayAuthorizedSignerIdentity(d, payload.draft);
+      }
+      const authorityMeta = selectRecipientReviewAuthorityMeta({
+        agreementId,
+        signingLock: payload.signing_lock,
+        reviewRevision: payload.review_revision,
+        acceptedReviewSnapshot: payload.accepted_review_snapshot,
+      });
+      const sl = payload.signing_lock;
+      if (entry.kind === "sign") {
+        const tokenLv = entry.lockedVersionId.trim();
+        if (
+          signPaperAuthorityClosed({
+            tokenLockedVersionId: tokenLv,
+            meta: authorityMeta,
+            lockSha: sl?.content_sha256,
+            snapSha: payload.accepted_review_snapshot?.corpus_sha256,
+            acceptedSnapshotId: sl?.accepted_snapshot_id,
+            acceptedSnapshotDigest: sl?.accepted_snapshot_digest,
+            authorityMode: payload.authority_mode,
+            legacyPreCutover: payload.legacy_pre_cutover,
+          })
+        ) {
+          setDraft(null);
+          setRenderedHtml("");
+          setBoundReviewRevisionPlain("");
+          setReviewAuthorityMeta(null);
+          setBundle(null);
+          setError("This link is invalid or expired. Request a new link from the sender.");
+          return;
+        }
+      }
       setDraft(d);
+      setReviewAuthorityMeta(authorityMeta);
       if (!d) {
         setRenderedHtml("");
+        setBoundReviewRevisionPlain("");
+        setReviewAuthorityMeta(null);
         setError(
           "This agreement could not be loaded from this link. Ask the sender for a fresh link and confirm the full URL was copied.",
         );
@@ -2095,11 +2234,22 @@ export function AgreementRecipientReview({
       }
       const rp = JSON.parse(rrBody) as { rendered_html?: unknown };
       const html = String(rp?.rendered_html || "");
+      const snapPlain = String(
+        payload.accepted_review_snapshot?.corpus_plain || payload.review_revision?.corpus_plain || "",
+      ).trim();
+      setBoundReviewRevisionPlain(snapPlain);
       const reviewFirstCorpus = resolveReviewFirstDisplayCorpus(d, "reviewer");
+      const visibleReviewPlain = resolveRecipientVisibleReviewPlain({
+        boundRevisionPlain: snapPlain,
+        displayCorpus: reviewFirstCorpus?.text,
+        parties: d.parties,
+      });
       const effectiveHtml =
-        reviewFirstCorpus && reviewFirstCorpus.text.trim().length >= 500
-          ? renderReviewFirstCorpusHtml(reviewFirstCorpus.text)
-          : html;
+        entry.kind === "sign" && snapPlain
+          ? renderReviewFirstCorpusHtml(snapPlain, "sign")
+          : visibleReviewPlain.length >= 500
+            ? renderReviewFirstCorpusHtml(visibleReviewPlain, "review")
+            : html;
       if (entry.kind === "review" && reviewFirstCorpus) {
         logReviewFirstDisplayCorpusSelected({
           agreementId,
@@ -2120,15 +2270,17 @@ export function AgreementRecipientReview({
         b = ensureInitialVersion(agreementId, d, effectiveHtml, recipientVersionStoreScope);
       }
       const signingLockPresentInPayload = Object.prototype.hasOwnProperty.call(payload, "signing_lock");
-      const sl = payload.signing_lock;
       const lv = typeof sl?.locked_version_id === "string" ? sl.locked_version_id.trim() : "";
-      if (lv) {
+      const signLv = entry.kind === "sign" ? entry.lockedVersionId.trim() : "";
+      const remountLv = lv || signLv;
+      if (remountLv && (lv || entry.kind === "sign")) {
+        b = remountBundleToLockedVersion(b, remountLv, effectiveHtml);
         b = {
           ...b,
           finalizedForSigning: true,
           signingLock: {
             locked: true,
-            lockedVersionId: lv,
+            lockedVersionId: remountLv,
             lockedAt: typeof sl?.locked_at === "string" ? sl.locked_at : undefined,
             lockedBy: "owner",
           },
@@ -2154,11 +2306,23 @@ export function AgreementRecipientReview({
         recipientApprovedInAudit: auditHasRecipientApprovalForParticipant(d.audit_log, participantPid),
       });
     } catch (e: unknown) {
+      setDraft(null);
+      setRenderedHtml("");
+      setBoundReviewRevisionPlain("");
+      setReviewAuthorityMeta(null);
+      setBundle(null);
       setError(e instanceof Error ? e.message : "Could not load agreement.");
     } finally {
       setLoading(false);
     }
-  }, [agreementId, entry.kind, recipientAccessToken, recipientVersionStoreScope, participantPid]);
+  }, [
+    agreementId,
+    entry.kind,
+    entry.kind === "sign" ? entry.lockedVersionId : "",
+    recipientAccessToken,
+    recipientVersionStoreScope,
+    participantPid,
+  ]);
 
   const draftSanitizeContext = useMemo(() => {
     if (!draft) return "";
@@ -2187,21 +2351,29 @@ export function AgreementRecipientReview({
   );
   const reviewFirstDocumentHtml = useMemo(() => {
     const corpusResult = resolveReviewFirstDisplayCorpus(draft, "reviewer");
-    const corpus = corpusResult?.text.trim();
+    const corpus = resolveRecipientVisibleReviewPlain({
+      boundRevisionPlain: boundReviewRevisionPlain,
+      displayCorpus: corpusResult?.text,
+      parties: draft?.parties,
+    });
     return buildReviewFirstDocumentDisplayHtml({
       serverHtml: renderedHtmlDisplay,
       corpusText: corpus,
       partyNames: authoritativePartyNames,
       draft,
       surface: "reviewer",
-      selectedCorpusSource: corpusResult?.source,
+      selectedCorpusSource: boundReviewRevisionPlain.trim().length >= 500 ? "review_revision" : corpusResult?.source,
       agreementId,
     });
-  }, [agreementId, authoritativePartyNames, draft, renderedHtmlDisplay]);
+  }, [agreementId, authoritativePartyNames, boundReviewRevisionPlain, draft, renderedHtmlDisplay]);
   const reviewFirstUsesPremiumDocument = useMemo(() => {
-    const corpus = resolveReviewFirstDisplayCorpus(draft, "reviewer")?.text.trim() || "";
+    const corpus = resolveRecipientVisibleReviewPlain({
+      boundRevisionPlain: boundReviewRevisionPlain,
+      displayCorpus: resolveReviewFirstDisplayCorpus(draft, "reviewer")?.text,
+      parties: draft?.parties,
+    });
     return corpus.length >= 500;
-  }, [draft]);
+  }, [boundReviewRevisionPlain, draft]);
 
   useLayoutEffect(() => {
     if (entry.kind !== "review" || viewerLike || !reviewFirstUsesPremiumDocument) return;
@@ -3315,6 +3487,8 @@ export function AgreementRecipientReview({
       instruction: preview.revisionText,
       proposer_id: proposerId,
       proposer_display_name: proposerDisplayNameForApi,
+      snapshot_id: reviewAuthorityMeta?.snapshotId || "",
+      expected_digest: reviewAuthorityMeta?.corpusSha256 || "",
       draft: {
         title: d.title,
         jurisdiction: d.jurisdiction,
@@ -3609,12 +3783,34 @@ export function AgreementRecipientReview({
 
   async function acceptCurrentDraft() {
     if (viewerLike) return;
+    if (approving) return;
+    if (recipientApprovedInAudit || approvedAck) {
+      setJourneyActionFeedback(
+        resolveUserActionFeedback({
+          actor: "recipient",
+          action: "approve_review",
+          outcome: "already_complete",
+        }),
+      );
+      return;
+    }
+    const blockApprove = (message: string) => {
+      setError(message);
+      setJourneyActionFeedback(
+        resolveUserActionFeedback({
+          actor: "recipient",
+          action: "approve_review",
+          outcome: "blocked",
+          remainder: message,
+        }),
+      );
+    };
     if (needsPersonalizedLink) {
-      setError("Use the personal review link from the sender (it includes your participant id).");
+      blockApprove("Use the personal review link from the sender (it includes your participant id).");
       return;
     }
     if (reviewerProposalAwaitingOwner) {
-      setError(REVIEWER_AWAITING_OWNER_APPROVE_BLOCKED_COPY);
+      blockApprove(REVIEWER_AWAITING_OWNER_APPROVE_BLOCKED_COPY);
       return;
     }
     if (
@@ -3625,7 +3821,7 @@ export function AgreementRecipientReview({
       return;
     }
     if (bundle && isSigningLockActive(bundle)) {
-      setError("Review is closed on this agreement — you can still read the document.");
+      blockApprove("Review is closed on this agreement — you can still read the document.");
       return;
     }
     const pidForApprove = await resolveParticipantIdForApprovalSubmit();
@@ -3640,47 +3836,78 @@ export function AgreementRecipientReview({
         agreementIdShort,
         reason: "missing_participant_id",
       });
-      setError(REVIEW_FIRST_SUBMIT_MISSING_PARTICIPANT_MESSAGE);
+      blockApprove(REVIEW_FIRST_SUBMIT_MISSING_PARTICIPANT_MESSAGE);
       return;
     }
     setApproving(true);
     setError(null);
-    const localRecord = writeReviewerApprovalLocalState({
-      agreementId,
-      participantPartyId: pidForApprove,
-      recipientAccessToken,
-    });
-    setApprovedAck(true);
-    setLocalApprovalAt(localRecord.approvedAt);
-    logReviewerApprovalLocalStateApplied({
-      agreementIdShort,
-      participantPartyId: pidForApprove || null,
-      approvedAt: localRecord.approvedAt,
-    });
+    setJourneyActionFeedback(
+      resolveUserActionFeedback({ actor: "recipient", action: "approve_review", outcome: "working" }),
+    );
     try {
       const r = await recipientApproveCurrentApi(agreementId, {
         participant_id: partiesHaveIds ? pidForApprove : undefined,
         participant_display_name: partiesHaveIds ? proposerDisplayNameForApi : undefined,
+        snapshot_id: reviewAuthorityMeta?.snapshotId || "",
+        expected_digest: reviewAuthorityMeta?.corpusSha256 || "",
         recipientAccessToken,
       });
+      let authoritativeDraft = r.ok && r.draft
+        ? normalizeAgreementDraftFromApi(r.draft, { fallbackAgreementId: agreementId })
+        : null;
       if (!r.ok) {
-        logReviewerApprovalSubmitFailed({
-          agreementIdShort,
-          participantPartyId: pidForApprove || null,
-          error: r.error ?? "unknown",
-        });
-        throw new Error(
-          humanizeRecipientActionError(r.error, "Couldn't record approval. Please try again."),
-        );
+        if (recipientApprovalPostIsAmbiguous(r)) {
+          const reconciled = await fetchRecipientAgreementDraft(agreementId, recipientAccessToken);
+          if (
+            reconciled.ok &&
+            reconciled.draft &&
+            recipientApprovalRecordedOnIntendedRevision(reconciled.draft.audit_log, {
+              participantId: pidForApprove,
+              snapshotId: reviewAuthorityMeta?.snapshotId || "",
+              digest: reviewAuthorityMeta?.corpusSha256 || "",
+            })
+          ) {
+            authoritativeDraft = reconciled.draft;
+          }
+        }
+        if (!authoritativeDraft) {
+          logReviewerApprovalSubmitFailed({
+            agreementIdShort,
+            participantPartyId: pidForApprove || null,
+            error: r.error ?? "unknown",
+          });
+          throw new Error(
+            humanizeRecipientActionError(r.error, "Couldn't record approval. Please try again."),
+          );
+        }
       }
-      if (r.draft) {
-        const merged = normalizeAgreementDraftFromApi(r.draft, { fallbackAgreementId: agreementId });
-        if (merged) setDraft(merged);
+      const localRecord = writeReviewerApprovalLocalState({
+        agreementId,
+        participantPartyId: pidForApprove,
+        recipientAccessToken,
+      });
+      setApprovedAck(true);
+      setLocalApprovalAt(localRecord.approvedAt);
+      logReviewerApprovalLocalStateApplied({
+        agreementIdShort,
+        participantPartyId: pidForApprove || null,
+        approvedAt: localRecord.approvedAt,
+      });
+      if (authoritativeDraft) {
+        setDraft(authoritativeDraft);
       }
       logReviewerApprovalSubmitSuccess({
         agreementIdShort,
         participantPartyId: pidForApprove || null,
       });
+      setJourneyActionFeedback(
+        resolveUserActionFeedback({
+          actor: "recipient",
+          action: "approve_review",
+          outcome: "succeeded",
+          allReviewsComplete: resolveAllReviewPartiesApproved(authoritativeDraft || draft),
+        }),
+      );
       if (import.meta.env.MODE !== "test") {
         // eslint-disable-next-line no-console
         console.info("[reviewer-approval-authoritative-server-success]", {
@@ -3693,12 +3920,34 @@ export function AgreementRecipientReview({
         participantPid: pidForApprove || null,
         hasResponseDraft: Boolean(r.draft),
       });
-      await refresh();
-      recipientAcceptTransitionDiag("post_approve_refresh_dispatched", {
-        agreementId,
-      });
+      try {
+        await refresh();
+        recipientAcceptTransitionDiag("post_approve_refresh_dispatched", {
+          agreementId,
+        });
+      } catch {
+        recipientAcceptTransitionDiag("post_approve_refresh_failed", {
+          agreementId,
+        });
+      }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Could not record approval.");
+      const message = e instanceof Error ? e.message : "Could not record approval.";
+      clearReviewerApprovalLocalState({
+        agreementId,
+        participantPartyId: pidForApprove,
+        recipientAccessToken,
+      });
+      setApprovedAck(false);
+      setLocalApprovalAt(null);
+      setError(message);
+      setJourneyActionFeedback(
+        resolveUserActionFeedback({
+          actor: "recipient",
+          action: "approve_review",
+          outcome: "failed",
+          remainder: message,
+        }),
+      );
     } finally {
       setApproving(false);
     }
@@ -3713,13 +3962,23 @@ export function AgreementRecipientReview({
   if (!draft) {
     return (
       <div className="vs01-agreement-review-inner p-6">
-        <p className="text-sm text-rose-300">{error || "Agreement not found."}</p>
+        <p className="text-sm text-rose-300" role="alert" data-testid="recipient-review-load-error">
+          {error || "Agreement not found."}
+        </p>
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
           If you contact support, include this agreement ID:{" "}
           <span className="font-mono text-slate-400 break-all">{agreementId}</span>
         </p>
+        <button
+          type="button"
+          className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3"
+          data-testid="recipient-review-load-retry"
+          onClick={() => void refresh()}
+        >
+          Try again
+        </button>
         {onClose ? (
-          <button type="button" className="btn mt-3 text-xs" onClick={onClose}>
+          <button type="button" className="btn mt-3 ml-2 text-xs" onClick={onClose}>
             Close
           </button>
         ) : null}
@@ -4483,7 +4742,13 @@ export function AgreementRecipientReview({
   if (entry.kind === "sign" && bundle && !signingLinkInvalidMessage && draft) {
     const lockedVersionId = entry.lockedVersionId;
     const lockedVer = bundle.versions.find((v) => v.id === lockedVersionId)!;
-    const signingLine = ceremonySignerName || proposerDisplayNameForApi;
+    const intendedParty =
+      draft.parties?.find((p) => (p.id || "").trim() === participantPid) || null;
+    const signingLine =
+      ceremonySignerName ||
+      intendedParty?.signerName ||
+      intendedParty?.name ||
+      proposerDisplayNameForApi;
     const { pending, total } = pendingSignatureCount({
       draft,
       agreementFullySigned: agreementFullyExecuted,
@@ -4508,6 +4773,43 @@ export function AgreementRecipientReview({
 
     async function handleRecordSignature() {
       if (!draft) return;
+      if (!signConsentAccepted) {
+        setCeremonyError("Confirm the electronic-signature consent before selecting Agree and sign.");
+        return;
+      }
+      const acceptedSnap = draft.accepted_review_snapshot_v1;
+      const packetRec = draft.vs01_signing_packet_v1 as {
+        accepted_review_snapshot_id?: string;
+        accepted_review_snapshot_digest?: string;
+        portable?: {
+          seed?: { corpusPlain?: string };
+          envelopeProvenance?: { acceptedSoTDigest?: string };
+        };
+      } | null | undefined;
+      const lock = bundle?.signingLock as
+        | { accepted_snapshot_id?: string; accepted_snapshot_digest?: string }
+        | undefined;
+      const allowed = evaluateAcceptedSignatureAttempt({
+        tokenMode: entry.kind,
+        tokenPartyId: tokenValidatedPartyId || participantPid,
+        targetPartyId: participantPid,
+        signedParticipantIds: [...signatureCompletedParticipantIds(draft)],
+        requiredParticipantIds: requiredCompletionParticipants(draft.parties || []).map((row) => row.partyId),
+        agreementId,
+        tokenAgreementId: agreementId,
+        acceptedSnapshotId: acceptedSnap?.snapshotId,
+        acceptedDigest: acceptedSnap?.corpusSha256,
+        lockSnapshotId: lock?.accepted_snapshot_id,
+        lockDigest: lock?.accepted_snapshot_digest,
+        packetSnapshotId: packetRec?.accepted_review_snapshot_id,
+        packetDigest:
+          packetRec?.accepted_review_snapshot_digest || packetRec?.portable?.envelopeProvenance?.acceptedSoTDigest,
+        packetCorpus: packetRec?.portable?.seed?.corpusPlain || acceptedSnap?.corpusPlain,
+      });
+      if (!allowed.ok) {
+        setCeremonyError(recipientCompletionUserMessage(403, allowed.reason));
+        return;
+      }
       setCeremonyPhase("signing");
       setCeremonyError(null);
       const r = await postSigningCeremonyComplete(
@@ -4516,11 +4818,46 @@ export function AgreementRecipientReview({
           participant_id: participantPid,
           typed_name: typedConfirm.trim(),
           locked_version_id: lockedVersionId,
+          consent: versionedRecipientConsentIntent(),
+          ...(entry.kind === "sign" && entry.signerRoleId
+            ? { signer_role_id: entry.signerRoleId }
+            : {}),
         },
         recipientAccessToken
       );
       if (!r.ok) {
-        setCeremonyError(typeof r.error === "string" ? r.error : "Could not record signature.");
+        const recovered = await recoverDraftedCeremonyCompletion(
+          agreementId,
+          { participantId: participantPid, lockedVersionId },
+          recipientAccessToken,
+        );
+        if (recovered.ok) {
+          setFullyExecutedAtSign(Boolean(recovered.fully_executed));
+          setCeremonyPhase("done");
+          await refresh();
+          return;
+        }
+        setCeremonyError(
+          recipientCompletionUserMessage(0, typeof r.error === "string" ? r.error : "", typeof r.error === "string" ? r.error : undefined),
+        );
+        setCeremonyPhase("ready");
+        return;
+      }
+      const recordedPid = String(r.participant_id || "").trim();
+      if (participantPid && recordedPid && recordedPid !== participantPid) {
+        setCeremonyError(recipientCompletionUserMessage(200, "completion_confirmation_mismatch"));
+        setCeremonyPhase("ready");
+        return;
+      }
+      if (
+        !confirmDraftedCeremonyCompletion({
+          agreementId,
+          participantId: recordedPid || participantPid,
+          lockedVersionId: String(r.locked_version_id || lockedVersionId).trim(),
+          response: r,
+        })
+      ) {
+        setCeremonyError(recipientCompletionUserMessage(200, "completion_confirmation_mismatch"));
         setCeremonyPhase("ready");
         return;
       }
@@ -4537,7 +4874,7 @@ export function AgreementRecipientReview({
       await refresh();
     }
 
-    const signPrimaryDisabled = ceremonyPhase !== "ready";
+    const signPrimaryDisabled = ceremonyPhase !== "ready" || !signConsentAccepted;
 
     if (ceremonyPhase === "start_error") {
       return (
@@ -4556,15 +4893,23 @@ export function AgreementRecipientReview({
     }
 
     return (
-      <div className="fixed inset-0 z-[200] flex flex-col overflow-y-auto bg-slate-950 text-slate-100">
+      <div
+        className="fixed inset-0 z-[200] flex flex-col overflow-y-auto bg-slate-950 text-slate-100"
+        data-testid="recipient-public-sign-route"
+      >
         <header className="sticky top-0 z-10 border-b border-slate-800/90 bg-slate-950/95 px-4 py-4 backdrop-blur sm:px-8">
           <div className="mx-auto max-w-3xl">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <h1 className="text-lg font-semibold tracking-tight text-white sm:text-xl">
-                  {RECIPIENT_PUBLIC_HERO_TITLE}
+                <h1
+                  className="text-lg font-semibold tracking-tight text-white sm:text-xl"
+                  data-testid="recipient-sign-heading"
+                >
+                  Review and sign
                 </h1>
-                <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-400">{RECIPIENT_PUBLIC_HERO_SUBTITLE}</p>
+                <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-400">
+                  Read the locked agreement, then complete only your signature.
+                </p>
                 {recipientTrustCueStrip()}
               </div>
               {onClose ? (
@@ -4596,6 +4941,7 @@ export function AgreementRecipientReview({
                   : "border-sky-700/45 bg-sky-950/35 text-sky-50"
               }`}
               role="status"
+              data-testid="recipient-sign-complete-status"
             >
               <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
                 <JoyMilestoneMark className="shrink-0 scale-90" />
@@ -4609,6 +4955,38 @@ export function AgreementRecipientReview({
                         All required signers have completed this agreement.
                       </p>
                       <p className="mt-2 text-xs leading-relaxed text-emerald-100/90">{RECIPIENT_SIGN_RECORD_SUBLINE}</p>
+                      <button
+                        type="button"
+                        className="mt-4 inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+                        data-testid="recipient-completed-signed-download-pdf"
+                        disabled={completedSignedPdfBusy}
+                        onClick={() => {
+                          void (async () => {
+                            setCompletedSignedPdfBusy(true);
+                            setCompletedSignedPdfError(null);
+                            try {
+                              await downloadCompletedSignedAgreementPdf({
+                                agreementId,
+                                title: draft?.title,
+                                readHeaders: recipientAgreementReadHeaders(agreementId, recipientAccessToken),
+                              });
+                            } catch (e: unknown) {
+                              setCompletedSignedPdfError(
+                                e instanceof Error ? e.message : "Could not download PDF.",
+                              );
+                            } finally {
+                              setCompletedSignedPdfBusy(false);
+                            }
+                          })();
+                        }}
+                      >
+                        {completedSignedPdfBusy ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
+                      </button>
+                      {completedSignedPdfError ? (
+                        <p className="mt-2 text-xs text-amber-100/95" role="alert">
+                          {completedSignedPdfError}
+                        </p>
+                      ) : null}
                     </>
                   ) : null}
                   {!showCelebrate && signingLine ? (
@@ -4646,10 +5024,36 @@ export function AgreementRecipientReview({
               1. Final agreement
             </h2>
             <p className="text-xs text-slate-500">Read-only — this is the version locked for signature.</p>
+            {reviewAuthorityMeta ? (
+              <dl
+                className="grid gap-3 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-3 sm:grid-cols-3"
+                data-testid="recipient-review-authority-meta"
+                data-snapshot-id={reviewAuthorityMeta.snapshotId}
+                data-participant-id={reviewAuthorityMeta.participantId}
+                data-review-status={reviewAuthorityMeta.status}
+                data-locked-version-id={reviewAuthorityMeta.lockedVersionId}
+                data-corpus-length={String(reviewAuthorityMeta.corpusLength)}
+                data-corpus-sha256={reviewAuthorityMeta.corpusSha256}
+              >
+                <div>
+                  <dt className="text-[11px] uppercase tracking-wide text-slate-500">Version</dt>
+                  <dd className="mt-1 break-all font-mono text-xs text-slate-100">{reviewAuthorityMeta.lockedVersionId}</dd>
+                </div>
+                <div>
+                  <dt className="text-[11px] uppercase tracking-wide text-slate-500">Length</dt>
+                  <dd className="mt-1 text-sm font-medium text-slate-100">{reviewAuthorityMeta.corpusLength}</dd>
+                </div>
+                <div>
+                  <dt className="text-[11px] uppercase tracking-wide text-slate-500">SHA-256</dt>
+                  <dd className="mt-1 break-all font-mono text-[11px] text-slate-100">{reviewAuthorityMeta.corpusSha256}</dd>
+                </div>
+              </dl>
+            ) : null}
             <div className="rounded-xl border border-slate-700 bg-white p-6 text-slate-900 shadow-lg sm:p-8">
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Document</div>
               <div
                 className="prose mt-4 max-w-none text-[0.9375rem] leading-relaxed text-slate-900"
+                data-testid="recipient-document-shell"
                 dangerouslySetInnerHTML={{
                   __html: scrubAgreementHtml(lockedVer.rendered_html || "") || "<p>No preview yet.</p>",
                 }}
@@ -4661,11 +5065,25 @@ export function AgreementRecipientReview({
             <h2 id="sig-confirm-id" className="text-sm font-semibold text-slate-200">
               2. Participant confirmation
             </h2>
-            <div className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-4 sm:px-5">
+            <div
+              className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-4 sm:px-5"
+              data-testid="recipient-sign-identity"
+            >
               <p className="text-sm text-slate-200">
                 You are signing as:{" "}
                 <span className="font-semibold text-white">{signingLine || "Signer"}</span>
               </p>
+              {intendedParty ? (
+                <ul className="mt-2 space-y-1 text-xs text-slate-400">
+                  <li>Legal entity: {intendedParty.name}</li>
+                  {intendedParty.signerName ? <li>Name: {intendedParty.signerName}</li> : null}
+                  <li>
+                    Role: {intendedParty.signerTitle || intendedParty.role}
+                    {entry.kind === "sign" && entry.signerRoleId ? ` (${entry.signerRoleId})` : ""}
+                  </li>
+                  <li>Action: Sign this locked agreement</li>
+                </ul>
+              ) : null}
               {draft.parties?.some((p) => (p.id || "").trim()) ? (
                 <p className="mt-2 text-[11px] text-slate-500">
                   Record hash: <span className="font-mono text-slate-400">{shortHash}</span>
@@ -4681,10 +5099,42 @@ export function AgreementRecipientReview({
                     onChange={(e) => setTypedConfirm(e.target.value)}
                     placeholder={signingLine || "Full legal name"}
                     autoComplete="name"
+                    data-testid="recipient-sign-typed-name"
                   />
                 </label>
               ) : null}
             </div>
+            {draft.parties?.some((p) => (p.id || "").trim() && (p.id || "").trim() !== participantPid) ? (
+              <div
+                className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-4 sm:px-5"
+                data-testid="recipient-sign-other-parties"
+              >
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Other parties</p>
+                <ul className="mt-2 space-y-3">
+                  {draft.parties
+                    .filter((p) => (p.id || "").trim() && (p.id || "").trim() !== participantPid)
+                    .map((p) => (
+                      <li key={p.id} className="text-sm text-slate-300">
+                        <p className="font-medium text-slate-100">{p.name}</p>
+                        <p className="text-xs text-slate-500">
+                          {p.signerName || p.name}
+                          {p.signerTitle ? ` · ${p.signerTitle}` : ""}
+                          {p.role ? ` · ${p.role}` : ""}
+                        </p>
+                        <input
+                          type="text"
+                          disabled
+                          readOnly
+                          value=""
+                          aria-label={`Signing field for ${p.name} (read only)`}
+                          className="mt-2 w-full cursor-not-allowed rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-500"
+                          data-testid={`recipient-sign-other-field-${p.id}`}
+                        />
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            ) : null}
           </section>
 
           <section className="space-y-3 pb-4 sm:pb-8" aria-labelledby="sig-action">
@@ -4694,6 +5144,18 @@ export function AgreementRecipientReview({
             {!signDone ? (
               <>
                 <p className="text-sm leading-relaxed text-slate-300">{ESIGN_INTENT_SIGN_AGREEMENT_ACTION}</p>
+                <p className="text-sm leading-relaxed text-slate-400">{ESIGN_CONSENT_INTENT_STATEMENT}</p>
+                <label className="flex items-start gap-2 text-sm text-slate-300" data-testid="recipient-sign-consent-label">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    data-testid="recipient-sign-consent"
+                    checked={signConsentAccepted}
+                    disabled={ceremonyPhase === "signing"}
+                    onChange={(e) => setSignConsentAccepted(e.target.checked)}
+                  />
+                  <span>{ESIGN_CONSENT_CHECKBOX_LABEL}</span>
+                </label>
                 <p className="text-sm leading-relaxed text-slate-400">{RECORDS_DOWNLOAD_KEEP_COPY_SHORT}</p>
                 <p className="text-xs leading-relaxed text-slate-500">
                   {PRODUCT_NOT_LAW_FIRM} {NOT_LEGAL_ADVICE} This action is recorded with your participant identity, a
@@ -4705,9 +5167,10 @@ export function AgreementRecipientReview({
                     type="button"
                     className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-600 px-4 py-3.5 text-base font-semibold text-white shadow-lg shadow-emerald-950/40 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-w-[14rem]"
                     disabled={signPrimaryDisabled}
+                    data-testid="recipient-sign-action"
                     onClick={() => void handleRecordSignature()}
                   >
-                    {ceremonyPhase === "signing" ? "Signing…" : "Review and sign"}
+                    {ceremonyPhase === "signing" ? "Signing…" : "Agree and sign"}
                   </button>
                 </div>
               </>
@@ -4726,9 +5189,10 @@ export function AgreementRecipientReview({
               type="button"
               className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-600 px-4 py-3.5 text-base font-semibold text-white shadow-lg shadow-emerald-950/40 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={signPrimaryDisabled}
+              data-testid="recipient-sign-action"
               onClick={() => void handleRecordSignature()}
             >
-              {ceremonyPhase === "signing" ? "Signing…" : "Review and sign"}
+              {ceremonyPhase === "signing" ? "Signing…" : "Agree and sign"}
             </button>
           </div>
         ) : null}
@@ -5213,6 +5677,21 @@ export function AgreementRecipientReview({
         </div>
       ) : null}
 
+      {journeyActionFeedback ? (
+        <JourneyActionBanner
+          feedback={journeyActionFeedback}
+          onDismiss={() => setJourneyActionFeedback(null)}
+          onRemedy={
+            journeyActionFeedback.kind === "failed"
+              ? () => {
+                  setJourneyActionFeedback(null);
+                  void acceptCurrentDraft();
+                }
+              : undefined
+          }
+        />
+      ) : null}
+
       {entry.kind === "review" &&
       !viewerLike &&
       (recipientApprovedInAudit || approvedAck) &&
@@ -5359,6 +5838,31 @@ export function AgreementRecipientReview({
           { label: "Parties", value: activeSummaryParties },
         ]}
       />
+      {reviewAuthorityMeta ? (
+        <dl
+          className="grid gap-3 px-1 py-1 text-left sm:grid-cols-3"
+          data-testid="recipient-review-authority-meta"
+          data-snapshot-id={reviewAuthorityMeta.snapshotId}
+          data-participant-id={reviewAuthorityMeta.participantId}
+          data-review-status={reviewAuthorityMeta.status}
+          data-locked-version-id={reviewAuthorityMeta.lockedVersionId}
+          data-corpus-length={String(reviewAuthorityMeta.corpusLength)}
+          data-corpus-sha256={reviewAuthorityMeta.corpusSha256}
+        >
+          <div className="min-w-0">
+            <dt className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Version</dt>
+            <dd className="mt-1 break-all font-mono text-xs text-slate-100">{reviewAuthorityMeta.lockedVersionId}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Length</dt>
+            <dd className="mt-1 text-sm font-medium text-slate-100">{reviewAuthorityMeta.corpusLength}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Corpus hash</dt>
+            <dd className="mt-1 break-all font-mono text-[11px] text-slate-100">{reviewAuthorityMeta.corpusSha256}</dd>
+          </div>
+        </dl>
+      ) : null}
 
       <ReviewDocumentFrame
         className="overflow-hidden"
@@ -6378,113 +6882,4 @@ export function AgreementRecipientReview({
       ) : null}
     </div>
   );
-}
-
-export function agreementReviewPath(agreementId: string): string {
-  return `/agreements/${encodeURIComponent(agreementId)}/review`;
-}
-
-/** Review link scoped to one participant (``?p=`` party id + ``?role=``). */
-export function agreementReviewPathWithParticipant(
-  agreementId: string,
-  partyId: string,
-  role: RecipientLinkRole = "reviewer"
-): string {
-  const q = new URLSearchParams();
-  q.set("p", partyId);
-  q.set("role", role);
-  return `${agreementReviewPath(agreementId)}?${q.toString()}`;
-}
-
-/**
- * Handoff URL for signers. Production: pass ``accessToken`` (HMAC minted by API). Legacy: ``lockedVersionId`` query ``v=``.
- */
-export function agreementSigningPath(
-  agreementId: string,
-  lockedVersionId: string,
-  accessToken?: string | null,
-  participantPartyId?: string | null
-): string {
-  const a = encodeURIComponent(agreementId);
-  const q = new URLSearchParams();
-  if (accessToken && accessToken.trim()) {
-    q.set("t", accessToken.trim());
-    if (participantPartyId?.trim()) q.set("p", participantPartyId.trim());
-    return `/agreements/${a}/sign?${q.toString()}`;
-  }
-  q.set("v", lockedVersionId);
-  if (participantPartyId?.trim()) q.set("p", participantPartyId.trim());
-  return `/agreements/${a}/sign?${q.toString()}`;
-}
-
-function parseRecipientRoleParam(search: string): RecipientLinkRole | undefined {
-  const q = search.startsWith("?") ? search.slice(1) : search;
-  const r = new URLSearchParams(q).get("role")?.trim().toLowerCase();
-  if (r === "signer") return "signer";
-  if (r === "reviewer") return "reviewer";
-  if (r === "counterparty" || r === "recipient" || r === "viewer") return "counterparty";
-  return undefined;
-}
-
-/** Primary recipient deep link: ``/agreements/{id}/review?t=…`` (no account required). */
-export function agreementMagicLinkPath(agreementId: string, token: string): string {
-  const a = encodeURIComponent(agreementId);
-  const t = encodeURIComponent(token.trim());
-  return `/agreements/${a}/review?t=${t}`;
-}
-
-export function parseAgreementReviewPath(
-  pathname: string,
-  search: string = ""
-): { agreementId: string; token?: string; role?: RecipientLinkRole; participantPartyId?: string } | null {
-  const path = pathname.replace(/\/$/, "");
-  const q = search.startsWith("?") ? search.slice(1) : search;
-  const params = new URLSearchParams(q);
-  const t = params.get("t") || params.get("token") || undefined;
-  let m = path.match(/^\/agreements\/([^/]+)\/review$/);
-  if (!m) {
-    /**
-     * Legacy recipient-link compatibility only:
-     * `/app/agreements/:id` without a token is now treated as owner workspace v1 route.
-     */
-    if (!t) return null;
-    m = path.match(/^\/app\/agreements\/([^/]+)$/);
-  }
-  if (!m) return null;
-  const agreementId = decodeURIComponent(m[1]);
-  const role = parseRecipientRoleParam(search);
-  const p = params.get("p");
-  const participantPartyId = p?.trim() ? p.trim() : undefined;
-  const base = {
-    agreementId,
-    ...(role ? { role } : {}),
-    ...(participantPartyId ? { participantPartyId } : {}),
-  };
-  return t ? { ...base, token: t } : base;
-}
-
-export function parseAgreementSignPath(
-  pathname: string,
-  search: string
-): { agreementId: string; versionId?: string; token?: string; participantPartyId?: string } | null {
-  const m = pathname.replace(/\/$/, "").match(/^\/agreements\/([^/]+)\/sign$/);
-  if (!m) return null;
-  const agreementId = decodeURIComponent(m[1]);
-  const q = rawSearchToParams(search);
-  const t = q.get("t") || q.get("token");
-  const p = q.get("p")?.trim();
-  const participantPartyId = p || undefined;
-  if (t) return { agreementId, token: t, ...(participantPartyId ? { participantPartyId } : {}) };
-  const vid = q.get("v");
-  if (!vid) return null;
-  return {
-    agreementId,
-    versionId: decodeURIComponent(vid),
-    ...(participantPartyId ? { participantPartyId } : {}),
-  };
-}
-
-function rawSearchToParams(search: string): URLSearchParams {
-  const raw = search.startsWith("?") ? search.slice(1) : search;
-  return new URLSearchParams(raw);
 }

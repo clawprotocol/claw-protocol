@@ -1,12 +1,9 @@
 import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
 import { recipientAgreementReadHeaders } from "../agreement/recipientAccessApi";
 import { refreshCachedAccessToken } from "../auth/authAccessTokenCache";
-import { apiUrl, resolveApiBase } from "../lib/clawApi";
+import { apiUrl } from "../lib/clawApi";
+import { ownerApiFetch } from "../lib/ownerApiClient";
 import { getVs01UrlBootstrap } from "./vs01UrlBootstrap";
-
-function apiBase(): string {
-  return resolveApiBase().replace(/\/$/, "");
-}
 
 function messageFromJsonBody(data: unknown, fallback: string): string {
   if (typeof data !== "object" || data === null) return fallback;
@@ -41,8 +38,6 @@ export async function finalizeDocument(
   contentBase64: string,
   contentType?: string
 ): Promise<FinalizeDocumentResponse> {
-  const base = apiBase();
-  const url = `${base}/v1/documents`;
   const body: { content_base64: string; content_type?: string } = {
     content_base64: contentBase64,
   };
@@ -50,7 +45,7 @@ export async function finalizeDocument(
     body.content_type = contentType.trim();
   }
 
-  const res = await fetch(url, {
+  const res = await ownerApiFetch("/v1/documents", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(body),
@@ -88,14 +83,12 @@ export async function createSignSession(
   documentId: string,
   contentSha256: string
 ): Promise<CreateSignSessionResponse> {
-  const base = apiBase();
-  const url = `${base}/v1/sign-sessions`;
   const body = {
     document_id: documentId,
     content_sha256: contentSha256.toLowerCase(),
   };
 
-  const res = await fetch(url, {
+  const res = await ownerApiFetch("/v1/sign-sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(body),
@@ -201,6 +194,26 @@ export async function fetchDocumentContent(
   return res.blob();
 }
 
+/** Token-bound GET of the locked PDF. Owner headers are not authority for this path. */
+export async function fetchRecipientDocumentContent(
+  documentId: string,
+  recipientAccessToken: string,
+): Promise<Blob> {
+  const enc = encodeURIComponent(documentId.trim());
+  const token = recipientAccessToken.trim();
+  const res = await fetch(apiUrl(`/v1/documents/${enc}/content`), {
+    method: "GET",
+    headers: {
+      Accept: "application/pdf, application/octet-stream, */*",
+      ...recipientAgreementReadHeaders("", token),
+    },
+  });
+  if (!res.ok) {
+    throw new Error("This PDF is not available for this signing link.");
+  }
+  return res.blob();
+}
+
 export type FieldManifestEntry = {
   field_id: string;
   page_index: number;
@@ -231,11 +244,8 @@ export async function completeSignSession(
   sessionId: string,
   payload: CompleteSignSessionPayload
 ): Promise<CompleteSignSessionResponse> {
-  const base = apiBase();
   const enc = encodeURIComponent(sessionId);
-  const url = `${base}/v1/sign-sessions/${enc}/complete`;
-
-  const res = await fetch(url, {
+  const res = await ownerApiFetch(`/v1/sign-sessions/${enc}/complete`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(payload),
@@ -270,11 +280,8 @@ export type GetReceiptResponse = {
  * GET /v1/receipts/{receipt_id}
  */
 export async function getReceipt(receiptId: string): Promise<GetReceiptResponse> {
-  const base = apiBase();
   const enc = encodeURIComponent(receiptId);
-  const url = `${base}/v1/receipts/${enc}`;
-
-  const res = await fetch(url, {
+  const res = await ownerApiFetch(`/v1/receipts/${enc}`, {
     method: "GET",
     headers: { Accept: "application/json" },
   });
@@ -301,11 +308,11 @@ export async function getReceipt(receiptId: string): Promise<GetReceiptResponse>
  * GET /v1/receipts/{receipt_id}/bundle — verification zip bytes.
  */
 export async function downloadBundle(receiptId: string): Promise<Blob> {
-  const base = apiBase();
   const enc = encodeURIComponent(receiptId);
-  const url = `${base}/v1/receipts/${enc}/bundle`;
-
-  const res = await fetch(url, { method: "GET" });
+  const res = await ownerApiFetch(`/v1/receipts/${enc}/bundle`, {
+    method: "GET",
+    headers: { Accept: "application/zip, application/octet-stream" },
+  });
 
   if (!res.ok) {
     const text = await res.text();

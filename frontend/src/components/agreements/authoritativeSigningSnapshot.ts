@@ -190,6 +190,8 @@ export type CreateAuthoritativeSigningSnapshotArgs = {
   agreementId?: string | null;
   /** When false, skip backend POST (caller awaits persist and treats 403 as blocking). */
   persistFrozenToBackend?: boolean;
+  /** Durable workspace parties — frozen authority must reuse these ids, not party_* hashes. */
+  draftParties?: readonly { id?: string | null; name?: string | null }[] | null;
 };
 
 /**
@@ -352,6 +354,7 @@ export function createAuthoritativeSigningSnapshot(
     authoritativeSnapshot: authoritativeSigningSnapshot,
     intakeText: args.intakeText ?? null,
     persistToBackend: args.persistFrozenToBackend !== false,
+    draftParties: args.draftParties ?? null,
   });
   return authoritativeSigningSnapshot;
 }

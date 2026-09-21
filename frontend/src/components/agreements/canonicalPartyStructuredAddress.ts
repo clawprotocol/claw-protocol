@@ -77,6 +77,13 @@ export function isPartyAddressBoundaryLine(line: string | null | undefined): boo
   if (looksLikeStackedPartyLegalEntityLine(t) && !t.includes(":")) return true;
   if (/\bdraft\s+a\s+(?:detailed\s+)?(?:agreement|contract)\b/i.test(t)) return true;
   if (/\bunder\s+which\b/i.test(t) && t.length > 40) return true;
+  if (
+    /\b(?:this agreement is governed by|law governs\b|provider fees\b|revenue sharing among)\b/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
   return false;
 }
 

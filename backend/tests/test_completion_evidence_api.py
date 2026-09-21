@@ -164,12 +164,51 @@ def _create_agreement_with_parties(client: TestClient, party_count: int) -> str:
     return aid
 
 
+def _consent() -> dict:
+    from backend.services.vs01_completion_evidence import (
+        CONSENT_ACTION,
+        CONSENT_INTENT_STATEMENT,
+        CONSENT_INTENT_VERSION,
+    )
+
+    return {
+        "accepted": True,
+        "intent_version": CONSENT_INTENT_VERSION,
+        "intent_statement": CONSENT_INTENT_STATEMENT,
+        "action": CONSENT_ACTION,
+    }
+
+
+def _signer_token(aid: str, pid: str) -> str:
+    from backend.config.agreement_signing_token import resolve_signing_token_secret_raw
+    from backend.security.recipient_access_token import mint_recipient_access_token
+
+    return mint_recipient_access_token(
+        secret=resolve_signing_token_secret_raw().encode("utf-8"),
+        agreement_id=aid,
+        locked_version_id="v1",
+        mode="sign",
+        role="signer",
+        ttl_seconds=3600,
+        recipient_party_id=pid,
+    )
+
+
 def _complete_signing(client: TestClient, aid: str, party_count: int) -> dict:
     """Complete signing for all parties and return the final response."""
-    headers = _org_headers()
+    from backend.services.agreement_signing_lock_store import write_signing_lock
+
+    write_signing_lock(aid, {"locked_version_id": "v1"})
     final_res = None
 
     for i in range(party_count):
+        role = f"role_{i}"
+        pid = f"p{i + 1}"
+        headers = (
+            _org_headers()
+            if i == 0
+            else {"X-Claw-Recipient-Access-Token": _signer_token(aid, pid)}
+        )
         with patch(
             "backend.services.email.signing_completion_delivery.maybe_send_signing_completion_emails",
             return_value=None,
@@ -181,10 +220,19 @@ def _complete_signing(client: TestClient, aid: str, party_count: int) -> dict:
                 f"/api/agreements/{aid}/vs01-signer-complete",
                 headers=headers,
                 json={
-                    "signer_role_id": f"role_{i}",
-                    "participant_id": f"p{i + 1}",
+                    "signer_role_id": role,
+                    "participant_id": pid,
                     "document_id": f"doc_{aid}",
                     "display_name": f"Signer {i + 1}",
+                    "assigned_fields": [
+                        {
+                            "field_id": f"sig_{i}",
+                            "field_type": "signature",
+                            "value": f"Signer {i + 1}",
+                            "page_index": 9,
+                        }
+                    ],
+                    "consent": _consent(),
                 },
             )
         assert res.status_code == 200, f"Party {i + 1} signing failed: {res.json()}"
@@ -373,8 +421,22 @@ class TestEvidencePackageIdempotency:
         ):
             res = client.post(
                 f"/api/agreements/{aid}/vs01-signer-complete",
-                headers=_org_headers(),
-                json={"signer_role_id": "role_1", "participant_id": "p2", "document_id": f"doc_{aid}"},
+                headers={"X-Claw-Recipient-Access-Token": _signer_token(aid, "p2")},
+                json={
+                    "signer_role_id": "role_1",
+                    "participant_id": "p2",
+                    "document_id": f"doc_{aid}",
+                    "display_name": "Signer 2",
+                    "assigned_fields": [
+                        {
+                            "field_id": "sig_1",
+                            "field_type": "signature",
+                            "value": "Signer 2",
+                            "page_index": 9,
+                        }
+                    ],
+                    "consent": _consent(),
+                },
             )
         assert res.status_code == 200
         assert res.json()["already_signed"] is True

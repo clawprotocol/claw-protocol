@@ -6,6 +6,7 @@ import type { User } from "@supabase/supabase-js";
 import { finalizeAuthenticatedSession, type PostAuthFinalizeResult } from "./postAuthFinalizer";
 
 const inflightByKey = new Map<string, Promise<PostAuthFinalizeResult>>();
+const lastByKey = new Map<string, PostAuthFinalizeResult>();
 
 export function authCallbackFinalizeKey(args: {
   userId: string;
@@ -28,8 +29,15 @@ export function finalizeAuthenticatedSessionFromAuthCallback(args: {
   });
   const existing = inflightByKey.get(key);
   if (existing) return existing;
+  const prior = lastByKey.get(key);
+  if (prior) return Promise.resolve(prior);
 
-  const promise = finalizeAuthenticatedSession(args).finally(() => {
+  const promise = finalizeAuthenticatedSession(args)
+    .then((result) => {
+      lastByKey.set(key, result);
+      return result;
+    })
+    .finally(() => {
     if (inflightByKey.get(key) === promise) {
       inflightByKey.delete(key);
     }
@@ -41,4 +49,5 @@ export function finalizeAuthenticatedSessionFromAuthCallback(args: {
 /** Test-only: reset in-flight map between unit tests. */
 export function resetAuthCallbackFinalizeDedupForTests(): void {
   inflightByKey.clear();
+  lastByKey.clear();
 }

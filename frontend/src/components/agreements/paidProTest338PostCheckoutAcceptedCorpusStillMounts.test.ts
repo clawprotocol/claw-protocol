@@ -115,6 +115,18 @@ function buildTest338PipelineAcceptedBody(): string {
     "The parties may execute this Agreement using electronic signatures and counterparts.",
     "",
     "See .signature below for authorized signers.",
+    "",
+    "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+    "",
+    "CLIENT:",
+    RED_MESA,
+    "By: __________________________",
+    "Name: Authorized Signer",
+    "",
+    "SERVICE PROVIDER:",
+    HARBOR_PEAK,
+    "By: __________________________",
+    "Name: Authorized Signer",
   ].join("\n");
   const body = `${header}${filler}\n${footer}`;
   expect(body.length).toBeGreaterThanOrEqual(LONG_PREMIUM_AUTHORITATIVE_MIN_LEN);
@@ -211,17 +223,19 @@ describe("paidProTest338PostCheckoutAcceptedCorpusStillMounts", () => {
     });
     expect(pick.plainText.length).toBeGreaterThanOrEqual(LONG_PREMIUM_AUTHORITATIVE_MIN_LEN);
 
-    // Commercial paint requires verified GET corpus (Patch 5B).
-    expect(
-      resolvePaidProFirstReviewVisibleDisplayPlain({
-        agreementId: "ag_test338",
-        draft,
-        intakeText: TEST338_INTAKE,
-        premiumPaidDocumentSurface: true,
-        premiumCheckoutCompleted: true,
-        premiumRenderSource: "server_full_draft",
-      }).plain,
-    ).toBe("");
+    // Validated server SoT may paint before GET. Local/starter bytes still cannot.
+    const preGet = resolvePaidProFirstReviewVisibleDisplayPlain({
+      agreementId: "ag_test338",
+      draft,
+      intakeText: TEST338_INTAKE,
+      premiumPaidDocumentSurface: true,
+      premiumCheckoutCompleted: true,
+      premiumRenderSource: "server_full_draft",
+    });
+    expect(preGet.plain.length).toBeGreaterThanOrEqual(LONG_PREMIUM_AUTHORITATIVE_MIN_LEN);
+    expect(["paid_pro_accepted_canonical_source_of_truth", "review_session_authority"]).toContain(
+      preGet.source,
+    );
     const sha = await sha256CorpusDigest(pipelineAcceptedBody);
     storeVerifiedCommercialDisplayCorpus({
       agreementId: "ag_test338",

@@ -1,8 +1,9 @@
-import type { AgreementDraft } from "./agreementTypes";
+import type { AgreementDraft, AgreementOwnerDeliveryTrack } from "./agreementTypes";
 import { normalizeAgreementDraftFromApi } from "./agreementDraftNormalize";
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
 import { getCachedAccessToken, refreshCachedAccessToken } from "../auth/authAccessTokenCache";
-import { recipientAgreementReadHeaders } from "./recipientAccessApi";
+import { recipientAgreementReadHeaders, validateRecipientAccessToken } from "./recipientAccessApi";
+import { confirmDraftedCeremonyAuthorizedState } from "../vs01/vs01RecipientCompletionContract";
 import { apiUrl, logClawClientWarning, resolveApiBase } from "../lib/clawApi";
 
 export type WorkspaceIndexAgreement = {
@@ -18,6 +19,8 @@ export type WorkspaceIndexAgreement = {
   locked_version_id: string | null;
   workspace_archived_at: string | null;
   review_sent_at: string | null;
+  /** Owner-chosen delivery track (review | signature). Survives dashboard resume. */
+  owner_delivery_track?: AgreementOwnerDeliveryTrack | null;
   /** True when audit log includes recipient/participant approval (reviewer accepted on link). */
   reviewer_approved?: boolean;
   /** Distinct reviewer approvals counted via participant ids (when present). */
@@ -41,6 +44,14 @@ export type WorkspaceIndexAgreement = {
     accepted_at?: string | null;
     status?: string | null;
   } | null;
+  document_kind?: "uploaded_final_pdf" | "lawdog_drafted" | string | null;
+  uploaded_final_pdf?: {
+    kind?: string | null;
+    document_id?: string | null;
+    content_sha256?: string | null;
+    page_count?: number | null;
+    label?: string | null;
+  } | null;
 };
 
 const base = () => resolveApiBase().replace(/\/$/, "");
@@ -60,7 +71,12 @@ export type WorkspaceIndexResult = {
 export async function fetchWorkspaceIndex(): Promise<WorkspaceIndexResult> {
   const url = apiUrl("/api/agreements/workspace-index");
   try {
-    const res = await fetch(url, { headers: clawAgreementHeaders() });
+    const token = (await refreshCachedAccessToken()) || getCachedAccessToken();
+    const headers = {
+      ...(clawAgreementHeaders() as Record<string, string>),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+    const res = await fetch(url, { headers });
     if (!res.ok) {
       logClawClientWarning("agreements.workspace-index", { status: res.status, url });
       return {
@@ -252,28 +268,119 @@ export async function postDraftFromPriorAgreement(sourceAgreementId: string): Pr
   }
 }
 
+export type FetchAgreementDraftError =
+  | "missing_id"
+  | "http_401"
+  | "http_403"
+  | "http_404"
+  | "http_409"
+  | "http_5xx"
+  | "http_other"
+  | "network"
+  | "normalize_failed";
+
+export type FetchAgreementDraftResult = {
+  ok: boolean;
+  draft: AgreementDraft | null;
+  status?: number;
+  error?: FetchAgreementDraftError;
+};
+
+export function classifyFetchAgreementDraftFailure(args: {
+  missingId?: boolean;
+  network?: boolean;
+  normalizeFailed?: boolean;
+  status?: number;
+}): FetchAgreementDraftError {
+  if (args.missingId) return "missing_id";
+  if (args.network) return "network";
+  if (args.normalizeFailed) return "normalize_failed";
+  const status = args.status ?? 0;
+  if (status === 401) return "http_401";
+  if (status === 403) return "http_403";
+  if (status === 404) return "http_404";
+  if (status === 409) return "http_409";
+  if (status >= 500) return "http_5xx";
+  if (status > 0) return "http_other";
+  return "network";
+}
+
 export async function fetchAgreementDraft(
   agreementId: string,
   opts?: { partyNameContext?: string },
-): Promise<{
-  ok: boolean;
-  draft: AgreementDraft | null;
-}> {
+): Promise<FetchAgreementDraftResult> {
   const id = String(agreementId || "").trim();
-  if (!id) return { ok: false, draft: null };
+  if (!id) return { ok: false, draft: null, error: classifyFetchAgreementDraftFailure({ missingId: true }) };
   try {
+    const token = (await refreshCachedAccessToken()) || getCachedAccessToken();
     const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(id)}`, {
-      headers: clawAgreementHeaders(),
+      headers: {
+        ...(clawAgreementHeaders() as Record<string, string>),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     });
-    if (!res.ok) return { ok: false, draft: null };
+    if (!res.ok) {
+      return {
+        ok: false,
+        draft: null,
+        status: res.status,
+        error: classifyFetchAgreementDraftFailure({ status: res.status }),
+      };
+    }
     const j = (await res.json()) as { draft?: unknown };
     const draft = normalizeAgreementDraftFromApi(j?.draft ?? null, {
       fallbackAgreementId: id,
       partyNameContext: opts?.partyNameContext,
     });
-    return { ok: draft != null, draft };
+    if (!draft) {
+      return {
+        ok: false,
+        draft: null,
+        status: res.status,
+        error: classifyFetchAgreementDraftFailure({ normalizeFailed: true, status: res.status }),
+      };
+    }
+    return { ok: true, draft, status: res.status };
   } catch {
-    return { ok: false, draft: null };
+    return { ok: false, draft: null, error: classifyFetchAgreementDraftFailure({ network: true }) };
+  }
+}
+
+/** Token-authorized GET of the same agreement the recipient just tried to approve. */
+export async function fetchRecipientAgreementDraft(
+  agreementId: string,
+  recipientAccessToken?: string | null,
+): Promise<FetchAgreementDraftResult> {
+  const id = String(agreementId || "").trim();
+  if (!id) return { ok: false, draft: null, error: classifyFetchAgreementDraftFailure({ missingId: true }) };
+  try {
+    const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(id)}`, {
+      headers: {
+        ...clawAgreementHeaders(),
+        ...recipientAgreementReadHeaders(id, recipientAccessToken),
+      },
+    });
+    if (!res.ok) {
+      return {
+        ok: false,
+        draft: null,
+        status: res.status,
+        error: classifyFetchAgreementDraftFailure({ status: res.status }),
+      };
+    }
+    const j = (await res.json()) as { draft?: unknown };
+    const draft = normalizeAgreementDraftFromApi(j?.draft ?? null, { fallbackAgreementId: id });
+    if (!draft) {
+      return {
+        ok: false,
+        draft: null,
+        status: res.status,
+        error: classifyFetchAgreementDraftFailure({ normalizeFailed: true, status: res.status }),
+      };
+    }
+    return { ok: true, draft, status: res.status };
+  } catch {
+    return { ok: false, draft: null, error: classifyFetchAgreementDraftFailure({ network: true }) };
   }
 }
 
@@ -285,26 +392,48 @@ export async function fetchAgreementDraftWithSigningLock(
   ok: boolean;
   draft: AgreementDraft | null;
   lockedVersionId: string | null;
+  signingLock?: {
+    locked_version_id?: string;
+    content_sha256?: string;
+    accepted_snapshot_id?: string;
+    accepted_snapshot_digest?: string;
+    accepted_snapshot_length?: number;
+  } | null;
 }> {
   const id = String(agreementId || "").trim();
-  if (!id) return { ok: false, draft: null, lockedVersionId: null };
+  if (!id) return { ok: false, draft: null, lockedVersionId: null, signingLock: null };
   try {
+    const token = (await refreshCachedAccessToken()) || getCachedAccessToken();
     const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(id)}`, {
-      headers: clawAgreementHeaders(),
+      headers: {
+        ...(clawAgreementHeaders() as Record<string, string>),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     });
-    if (!res.ok) return { ok: false, draft: null, lockedVersionId: null };
+    if (!res.ok) return { ok: false, draft: null, lockedVersionId: null, signingLock: null };
     const j = (await res.json()) as {
       draft?: unknown;
-      signing_lock?: { locked_version_id?: string } | null;
+      signing_lock?: {
+        locked_version_id?: string;
+        content_sha256?: string;
+        accepted_snapshot_id?: string;
+        accepted_snapshot_digest?: string;
+        accepted_snapshot_length?: number;
+      } | null;
     };
     const draft = normalizeAgreementDraftFromApi(j?.draft ?? null, {
       fallbackAgreementId: id,
       partyNameContext: opts?.partyNameContext,
     });
     const lv = String(j?.signing_lock?.locked_version_id || "").trim();
-    return { ok: draft != null, draft, lockedVersionId: lv || null };
+    return {
+      ok: draft != null,
+      draft,
+      lockedVersionId: lv || null,
+      signingLock: j?.signing_lock || null,
+    };
   } catch {
-    return { ok: false, draft: null, lockedVersionId: null };
+    return { ok: false, draft: null, lockedVersionId: null, signingLock: null };
   }
 }
 
@@ -365,6 +494,8 @@ export type RecipientProposalSubmitBody = {
   instruction: string;
   proposer_id: string;
   proposer_display_name?: string;
+  snapshot_id?: string;
+  expected_digest?: string;
   draft: {
     title: string;
     jurisdiction: string;
@@ -475,9 +606,17 @@ export async function rejectRecipientProposalApi(
   proposalId: string
 ): Promise<{ ok: boolean; draft?: unknown; error?: string }> {
   try {
+    const token = (await refreshCachedAccessToken()) || getCachedAccessToken();
     const res = await fetch(
       `${base()}/api/agreements/${encodeURIComponent(agreementId)}/recipient-proposal/${encodeURIComponent(proposalId)}/reject`,
-      { method: "POST", headers: clawAgreementHeaders({ "Content-Type": "application/json" }), body: "{}" }
+      {
+        method: "POST",
+        headers: {
+          ...(clawAgreementHeaders({ "Content-Type": "application/json" }) as Record<string, string>),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: "{}",
+      }
     );
     const j = (await res.json().catch(() => ({}))) as { draft?: unknown; detail?: string };
     if (res.ok) return { ok: true, draft: j.draft };
@@ -492,9 +631,17 @@ export async function applyRecipientProposalApi(
   proposalId: string
 ): Promise<{ ok: boolean; draft?: unknown; error?: string }> {
   try {
+    const token = (await refreshCachedAccessToken()) || getCachedAccessToken();
     const res = await fetch(
       `${base()}/api/agreements/${encodeURIComponent(agreementId)}/recipient-proposal/${encodeURIComponent(proposalId)}/apply`,
-      { method: "POST", headers: clawAgreementHeaders({ "Content-Type": "application/json" }), body: "{}" }
+      {
+        method: "POST",
+        headers: {
+          ...(clawAgreementHeaders({ "Content-Type": "application/json" }) as Record<string, string>),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: "{}",
+      }
     );
     const j = (await res.json().catch(() => ({}))) as { draft?: unknown; detail?: string };
     if (res.ok) return { ok: true, draft: j.draft };
@@ -510,9 +657,11 @@ export async function recipientApproveCurrentApi(
     message?: string;
     participant_id?: string;
     participant_display_name?: string;
+    snapshot_id?: string;
+    expected_digest?: string;
     recipientAccessToken?: string | null;
   }
-): Promise<{ ok: boolean; error?: string; draft?: unknown }> {
+): Promise<{ ok: boolean; error?: string; draft?: unknown; status?: number; idempotent?: boolean }> {
   try {
     const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(agreementId)}/recipient-approve`, {
       method: "POST",
@@ -524,18 +673,20 @@ export async function recipientApproveCurrentApi(
         message: opts?.message || "",
         participant_id: opts?.participant_id || "",
         participant_display_name: opts?.participant_display_name || "",
+        snapshot_id: opts?.snapshot_id || "",
+        expected_digest: opts?.expected_digest || "",
       }),
     });
     if (res.ok) {
       try {
-        const j = (await res.json()) as { draft?: unknown };
-        return { ok: true, draft: j?.draft };
+        const j = (await res.json()) as { draft?: unknown; idempotent?: boolean };
+        return { ok: true, draft: j?.draft, status: res.status, idempotent: j?.idempotent === true };
       } catch {
-        return { ok: true };
+        return { ok: true, status: res.status };
       }
     }
-    const j = (await res.json().catch(() => ({}))) as { detail?: string };
-    return { ok: false, error: j.detail || `error_${res.status}` };
+    const parsed = parseRecipientProposalApiError(res.status, await res.json().catch(() => ({})));
+    return { ok: false, error: parsed.error, status: res.status };
   } catch {
     return { ok: false, error: "network" };
   }
@@ -584,10 +735,20 @@ export async function postSigningCeremonyStart(
 
 export async function postSigningCeremonyComplete(
   agreementId: string,
-  body: { participant_id: string; typed_name: string; locked_version_id: string },
+  body: {
+    participant_id: string;
+    typed_name: string;
+    locked_version_id: string;
+    signer_role_id?: string;
+    consent?: { accepted: true; intent_version: string; intent_statement: string; action: string };
+  },
   recipientAccessToken?: string | null
 ): Promise<{
   ok: boolean;
+  status?: string;
+  agreement_id?: string;
+  participant_id?: string;
+  locked_version_id?: string;
   signed_at?: string;
   agreement_version_hash?: string;
   participant_display_name?: string;
@@ -610,6 +771,10 @@ export async function postSigningCeremonyComplete(
     if (res.ok) {
       return {
         ok: true,
+        status: typeof j.status === "string" ? j.status : undefined,
+        agreement_id: typeof j.agreement_id === "string" ? j.agreement_id : undefined,
+        participant_id: typeof j.participant_id === "string" ? j.participant_id : undefined,
+        locked_version_id: typeof j.locked_version_id === "string" ? j.locked_version_id : undefined,
         signed_at: typeof j.signed_at === "string" ? j.signed_at : undefined,
         agreement_version_hash:
           typeof j.agreement_version_hash === "string" ? j.agreement_version_hash : undefined,
@@ -629,6 +794,57 @@ export async function postSigningCeremonyComplete(
     return { ok: false, error: typeof d === "string" ? d : `error_${res.status}` };
   } catch {
     return { ok: false, error: "network" };
+  }
+}
+
+/** Token-authorized recovery: validate + GET lock, never error-text matching. */
+export async function recoverDraftedCeremonyCompletion(
+  agreementId: string,
+  args: { participantId: string; lockedVersionId: string },
+  recipientAccessToken?: string | null,
+): Promise<{
+  ok: boolean;
+  status?: string;
+  signed_at?: string;
+  fully_executed?: boolean;
+}> {
+  const token = String(recipientAccessToken || "").trim();
+  if (!token) return { ok: false };
+  const validated = await validateRecipientAccessToken(token, agreementId);
+  if (!validated.ok) return { ok: false };
+  try {
+    const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(agreementId)}`, {
+      headers: {
+        ...clawAgreementHeaders(),
+        ...recipientAgreementReadHeaders(agreementId, token),
+      },
+    });
+    if (!res.ok) return { ok: false };
+    const payload = (await res.json().catch(() => ({}))) as {
+      id?: string;
+      signing_lock?: { locked_version_id?: string } | null;
+    };
+    const gotId = String(payload.id || "").trim();
+    if (gotId && gotId !== agreementId) return { ok: false };
+    if (
+      !confirmDraftedCeremonyAuthorizedState({
+        agreementId,
+        participantId: args.participantId,
+        lockedVersionId: args.lockedVersionId,
+        validate: validated.data,
+        signingLockVersionId: payload.signing_lock?.locked_version_id ?? "",
+      })
+    ) {
+      return { ok: false };
+    }
+    const status = String(validated.data.completion_status || "").trim().toLowerCase();
+    return {
+      ok: true,
+      status,
+      fully_executed: status === "fully_executed",
+    };
+  } catch {
+    return { ok: false };
   }
 }
 
@@ -676,6 +892,9 @@ export async function postVs01SignerComplete(
     signed_date_iso?: string;
     signed_date_display?: string;
     portable_packet?: Record<string, unknown> | null;
+    assigned_fields?: Array<{ field_id: string; field_type: string; value: string; page_index?: number }>;
+    consent?: { accepted: true; intent_version: string; intent_statement: string; action: string };
+    packet_revision?: string;
   },
   recipientAccessToken?: string | null,
 ): Promise<{
@@ -684,6 +903,12 @@ export async function postVs01SignerComplete(
   fully_executed?: boolean;
   completion_emails_sent?: boolean;
   error?: string;
+  errorCode?: string;
+  status?: number;
+  retryable?: boolean;
+  completion?: Record<string, unknown>;
+  receipt_status?: string;
+  uploaded_final_pdf_receipt?: { receipt_id?: string; receipt_hash_sha256?: string } | null;
 }> {
   try {
     const res = await fetch(
@@ -699,17 +924,41 @@ export async function postVs01SignerComplete(
     );
     const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (res.ok) {
+      const receipt = j.uploaded_final_pdf_receipt;
       return {
         ok: true,
         already_signed: Boolean(j.already_signed),
         fully_executed: Boolean(j.fully_executed),
         completion_emails_sent: Boolean(j.completion_emails_sent),
+        status: res.status,
+        completion: j.completion && typeof j.completion === "object" ? (j.completion as Record<string, unknown>) : undefined,
+        receipt_status: typeof j.receipt_status === "string" ? j.receipt_status : undefined,
+        uploaded_final_pdf_receipt:
+          receipt && typeof receipt === "object"
+            ? (receipt as { receipt_id?: string; receipt_hash_sha256?: string })
+            : null,
       };
     }
-    const d = j.detail;
-    return { ok: false, error: typeof d === "string" ? d : `error_${res.status}` };
+    const parsed = (() => {
+      const d = j.detail;
+      if (typeof d === "string") return { code: d, message: d };
+      if (d && typeof d === "object") {
+        const rec = d as { code?: unknown; message?: unknown };
+        const code = typeof rec.code === "string" ? rec.code : `error_${res.status}`;
+        const message = typeof rec.message === "string" ? rec.message : code;
+        return { code, message };
+      }
+      return { code: `error_${res.status}`, message: `error_${res.status}` };
+    })();
+    return {
+      ok: false,
+      error: parsed.message,
+      errorCode: parsed.code,
+      status: res.status,
+      retryable: res.status === 503 || res.status >= 500,
+    };
   } catch {
-    return { ok: false, error: "network" };
+    return { ok: false, error: "network", errorCode: "network", status: 0, retryable: true };
   }
 }
 

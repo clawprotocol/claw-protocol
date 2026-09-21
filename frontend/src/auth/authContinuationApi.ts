@@ -2,12 +2,13 @@
  * Server-backed auth continuation transactions (survives new-tab magic links).
  */
 
-import { apiUrl, errorMessageFromResponse, readJson } from "../lib/clawApi";
+import { apiUrl, readJson } from "../lib/clawApi";
 import {
   clearGenesisDogOnboardingIntent,
   genesisDogOnboardingBindFields,
 } from "../launch/genesisReferral/genesisDogOnboardingCapture";
 import { anonymousSessionHeaders } from "./anonymousSessionHeaders";
+import { AuthContinuationFailure } from "./authUserFacingCopy";
 import type { AuthWorkflowStage } from "./authContinuationContext";
 import { logAuthDiagnostic } from "./anonymousSessionApi";
 
@@ -85,13 +86,13 @@ export async function createServerAuthContinuation(args: {
     }),
   });
   if (!res.ok) {
-    throw new Error(await errorMessageFromResponse(res, "Could not save sign-in continuation."));
+    throw new AuthContinuationFailure(await readAuthFailureCode(res, "continuation_create_failed"));
   }
   const data = (await readJson<AuthContinuationCreateResponse>(res)) as AuthContinuationCreateResponse;
   writeContinuationId(data.continuation_id);
   logAuthDiagnostic("auth_continuation_created", {
-    continuation_id: data.continuation_id,
     org_id: data.org_id,
+    has_agreement: Boolean(args.agreementId),
   });
   return data;
 }
@@ -131,17 +132,57 @@ export async function finalizeAuthOnServer(args: {
     }),
   });
   if (!res.ok) {
-    throw new Error(await errorMessageFromResponse(res, "Could not complete sign-in."));
+    throw new AuthContinuationFailure(await readAuthFailureCode(res, "finalize_failed"));
   }
-  const data = (await readJson<FinalizeAuthResponse>(res)) as FinalizeAuthResponse;
-  clearContinuationId();
-  if (genesisDog) {
-    clearGenesisDogOnboardingIntent();
+  let data: FinalizeAuthResponse = {
+    ok: true,
+    org_id: "",
+    user_id: "",
+    destination_path: "/app",
+    migrated_agreement_count: 0,
+  };
+  try {
+    const parsed = (await readJson<FinalizeAuthResponse>(res)) as FinalizeAuthResponse;
+    if (parsed && typeof parsed === "object") {
+      data = { ...data, ...parsed };
+    }
+  } catch {
+    /* HTTP 200 already consumed the continuation — do not fail closed on a parse miss. */
   }
-  logAuthDiagnostic("auth_finalize_completed", {
-    org_id: data.org_id,
-    migrated_agreement_count: data.migrated_agreement_count,
-    destination_path: data.destination_path,
-  });
-  return data;
+  try {
+    clearContinuationId();
+    if (genesisDog) {
+      clearGenesisDogOnboardingIntent();
+    }
+    logAuthDiagnostic("auth_finalize_completed", {
+      org_id: data.org_id,
+      migrated_agreement_count: data.migrated_agreement_count,
+      idempotent: Boolean(data.idempotent),
+    });
+  } catch {
+    /* Clearing helpers must not undo a successful server finalize. */
+  }
+  return {
+    ok: true,
+    org_id: String(data?.org_id || "").trim(),
+    user_id: String(data?.user_id || "").trim(),
+    destination_path: String(data?.destination_path || "/app"),
+    migrated_agreement_count: Number(data?.migrated_agreement_count || 0),
+    migrated_agreement_ids: data?.migrated_agreement_ids,
+    idempotent: Boolean(data?.idempotent),
+  };
+}
+
+async function readAuthFailureCode(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await readJson<{ detail?: unknown }>(res)) as { detail?: unknown };
+    const detail = body?.detail;
+    if (typeof detail === "object" && detail && "code" in detail) {
+      const code = String((detail as { code?: unknown }).code || "").trim();
+      if (code) return code;
+    }
+  } catch {
+    /* use fallback */
+  }
+  return fallback;
 }

@@ -18,6 +18,7 @@ import {
   detectExecutionBlockRoleInversion,
   partyLegalNamesMatch,
 } from "./paidProAcceptedCorpusPartyRoles";
+import { shouldPreserveApprovedAddedPartyExecutionTail } from "./paidProDeclaredConsultantClientPaper";
 
 const SUBSTANTIVE_ROLE_BLOCK_START_RE =
   /^(?:Client|Service Provider|Party\s+\d+)\s*:\s*$/i;
@@ -178,6 +179,14 @@ export function reconcileExecutionBlockToRoleIdentities(
 ): { text: string; repairs: number } {
   const ordered = sortIdentitiesForExecutionBlockOrder(identities);
   if (ordered.length < 2) return { text: corpus, repairs: 0 };
+  if (
+    shouldPreserveApprovedAddedPartyExecutionTail(
+      corpus,
+      ordered.map((id) => id.partyDisplayName),
+    )
+  ) {
+    return { text: corpus, repairs: 0 };
+  }
 
   const witnessIdx = corpus.search(/\bIN WITNESS WHEREOF\b/i);
   if (witnessIdx < 0) return { text: corpus, repairs: 0 };

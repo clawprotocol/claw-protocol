@@ -16,13 +16,15 @@ import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
 import {
   hasPartyMetadataLabelContamination,
+  isAgreementSectionHeadingPartyName,
   isAuthoritativeLegalEntityName,
+  isContractProsePartyName,
   isDisallowedPartyPhrase,
   isOccupationalOrJobTitlePartyName,
   isStateLegalFormOnlyName,
 } from "./paidProPartyNamePreserve";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
-import { looksLikeAuthorizedSignersBulletLine } from "./intakeSignerMetadataAuthority";
+import { isLikelyHumanSignerName, looksLikeAuthorizedSignersBulletLine } from "./intakeSignerMetadataAuthority";
 
 const STANDALONE_SUFFIX_RE =
   /^(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?$/i;
@@ -256,7 +258,7 @@ export function normalizeCommaSeparatedEntitySuffix(raw: string): string {
 }
 
 export function normalizeAgreementPartyName(raw: string): string {
-  return normalizeCommaSeparatedEntitySuffix(raw);
+  return normalizeCommaSeparatedEntitySuffix(String(raw ?? "").replace(/^\s*[-*•]\s*/, ""));
 }
 
 export function isInvalidPartySlotLegalEntity(name: string): boolean {
@@ -266,8 +268,10 @@ export function isInvalidPartySlotLegalEntity(name: string): boolean {
   if (isInternalPartyAliasToken(t)) return true;
   if (isStateLegalFormOnlyName(t)) return true;
   if (isDisallowedPartyPhrase(t)) return true;
+  if (isAgreementSectionHeadingPartyName(t)) return true;
   if (hasPartyMetadataLabelContamination(t)) return true;
   if (isOccupationalOrJobTitlePartyName(t)) return true;
+  if (isContractProsePartyName(t)) return true;
   return false;
 }
 
@@ -537,6 +541,12 @@ export function resolveAuthoritativePartySlotCount(args: {
   userExpandedPartyCount?: number;
 }): number {
   const userExpanded = Math.max(0, args.userExpandedPartyCount ?? 0);
+  const confirmedDraftParties = collapsePartySlotCandidates(args.draftPartyNames ?? []).filter(
+    (name) => isAuthoritativeLegalEntityName(name) || isLikelyHumanSignerName(name),
+  );
+  if (confirmedDraftParties.length >= 3 && confirmedDraftParties.length <= PAID_PRO_AUTHORITY_MAX_PARTIES) {
+    return confirmedDraftParties.length;
+  }
 
   const intake = String(args.intakeText ?? "").trim();
   const declaredCount = resolveDeclaredExplicitPartyCount(intake);
@@ -677,7 +687,14 @@ export function selectAuthoritativeTwoPartySlots(names: readonly string[]): stri
   return collapsed.slice(0, 2);
 }
 
-export type DraftPartyRowLike = { name: string; role?: string; email?: string; id?: string };
+export type DraftPartyRowLike = {
+  name: string;
+  role?: string;
+  email?: string;
+  id?: string;
+  signerName?: string;
+  signerTitle?: string;
+};
 
 export function partySlotListHasDriftFragments(
   names: readonly string[],
@@ -707,6 +724,33 @@ export function partySlotListHasDriftFragments(
   return false;
 }
 
+const SYNTHETIC_COLLAPSE_PARTY_ID = /^(?:party_\d+|legacy_.+|party_[0-9a-f]+:[0-9a-f]+)$/i;
+
+function isKeepableAddedPartyRow(party: DraftPartyRowLike | undefined): boolean {
+  if (!party) return false;
+  const name = normalizeAgreementPartyName(party.name);
+  if (!name || isInvalidPartySlotLegalEntity(name)) return false;
+  if (!isAuthoritativeLegalEntityName(name) && name.split(/\s+/).filter(Boolean).length < 2) return false;
+  const id = String(party.id || "").trim();
+  if (!id || SYNTHETIC_COLLAPSE_PARTY_ID.test(id)) return false;
+  return true;
+}
+
+function appendKeptAddedPartyRows(
+  collapsed: DraftPartyRowLike[],
+  parties: readonly DraftPartyRowLike[],
+): DraftPartyRowLike[] {
+  const extras = parties.filter((party) => {
+    if (!isKeepableAddedPartyRow(party)) return false;
+    return !collapsed.some(
+      (row) =>
+        partyLegalNamesMatch(row.name, party.name) ||
+        (Boolean(row.id) && Boolean(party.id) && String(row.id) === String(party.id)),
+    );
+  });
+  return extras.length ? [...collapsed, ...extras] : collapsed;
+}
+
 export function collapseDraftPartyRows(
   parties: readonly DraftPartyRowLike[],
   intakeContext?: string | null,
@@ -720,19 +764,19 @@ export function collapseDraftPartyRows(
   const authoritativeIntake =
     quoted.length >= labeled.length ? quoted : labeled.length >= 3 ? labeled : quoted.length >= 3 ? quoted : labeled;
   if (authoritativeIntake.length >= 3 && parties.length !== authoritativeIntake.length) {
-    return authoritativeIntake.map((name, index) => {
-      const prev =
-        parties.find((p) => partyLegalNamesMatch(p.name, name)) ??
-        parties[index] ??
-        parties[parties.length - 1];
+    return appendKeptAddedPartyRows(authoritativeIntake.map((name, index) => {
+      const matched = parties.find((p) => partyLegalNamesMatch(p.name, name));
+      const prev = matched ?? parties[index];
       const role = isInternalPartyAliasRole(prev?.role) ? undefined : prev?.role;
       return {
         name,
         role: role || (index === 0 ? "Client" : index === 1 ? "Service Provider" : "party"),
-        email: prev?.email,
-        id: prev?.id,
+        email: matched?.email,
+        id: matched?.id ?? prev?.id,
+        signerName: matched?.signerName,
+        signerTitle: matched?.signerTitle,
       };
-    });
+    }), parties);
   }
 
   const fromIntake = intake ? extractBetweenPartyNameList(intake) : [];
@@ -761,19 +805,22 @@ export function collapseDraftPartyRows(
   }
 
   if (collapsedNames.length >= 2 && parties.length > collapsedNames.length) {
-    return collapsedNames.map((name, index) => {
-      const prev =
-        parties.find((p) => partyLegalNamesMatch(p.name, name)) ??
-        parties[index] ??
-        parties[parties.length - 1];
-      const role = isInternalPartyAliasRole(prev?.role) ? undefined : prev?.role;
-      return {
-        name,
-        role: role || (index === 0 ? "Client" : index === 1 ? "Service Provider" : "party"),
-        email: prev?.email,
-        id: prev?.id,
-      };
-    });
+    return appendKeptAddedPartyRows(
+      collapsedNames.map((name, index) => {
+        const matched = parties.find((p) => partyLegalNamesMatch(p.name, name));
+        const prev = matched ?? parties[index];
+        const role = isInternalPartyAliasRole(prev?.role) ? undefined : prev?.role;
+        return {
+          name,
+          role: role || (index === 0 ? "Client" : index === 1 ? "Service Provider" : "party"),
+          email: matched?.email,
+          id: matched?.id ?? prev?.id,
+          signerName: matched?.signerName,
+          signerTitle: matched?.signerTitle,
+        };
+      }),
+      parties,
+    );
   }
 
   return parties

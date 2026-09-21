@@ -72,23 +72,16 @@ export function hasHomeAnonymousCreateOrigin(): boolean {
 /**
  * Returns true if authority should be granted for anonymous create.
  *
- * Authority requires BOTH:
- * 1. The sessionStorage marker exists (survives refresh within the SPA navigation)
- * 2. The fresh homepage handoff flag (history.state.clawHeroFromHome) is present
- *
- * A typed URL, bookmark, or hard refresh clears history.state, so even if a
- * stale sessionStorage marker exists from an earlier test/click, authority
- * is denied. This makes homepage guest authority one-shot per navigation.
+ * Authority is the in-memory navigation handoff (``history.state.clawHeroFromHome``).
+ * A typed URL, bookmark, or hard refresh clears that state, so a stale
+ * sessionStorage marker cannot open create. StrictMode remount keeps the
+ * same history entry, so the first-paint consume must not be required.
  */
 export function isHomeAnonymousStarterAuthorityActive(): boolean {
   if (typeof window === "undefined") return false;
   try {
     const state = window.history.state as Record<string, unknown> | null;
-    const freshHandoff = state?.clawHeroFromHome === true;
-    if (freshHandoff && hasHomeAnonymousCreateOrigin()) {
-      return true;
-    }
-    return false;
+    return state?.clawHeroFromHome === true;
   } catch {
     return false;
   }

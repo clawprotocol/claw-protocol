@@ -1,3 +1,4 @@
+import { stripRelationshipDisclaimerPhrases } from "../agreementLaunchFamilies";
 import { shouldSuppressPartyLegalNamesGuidedQuestion } from "../canonicalPartyIdentityResolver";
 import { detectAgreementFamily, type AgreementFamily } from "../agreementFamilyRouter";
 import { scanBodyMaterialPlaceholders } from "../guidedDealCompletion/bodyMaterialPlaceholderScanner";
@@ -7,13 +8,211 @@ import {
 } from "../guidedDealCompletion/semanticContractCompleteness";
 import { isConsultingDevIntake } from "../guidedDealCompletion/consultingGuidedIntake";
 import { isServicesMigrationIntake } from "../guidedDealCompletion/servicesMigrationGuidedIntake";
+import { dateMeaningMaterialItem, isDateMeaningQuestion } from "../paidProDateMeaning";
+import {
+  identityClarificationMaterialItem,
+  isIdentityClarificationQuestion,
+  identityClarificationResolved,
+  type UnresolvedIdentitySubject,
+} from "../legalPartyIdentityClarification";
+import type { BindableParty } from "../legalPartyRepresentativeBind";
+import { completionCriteriaMaterialItem, isCompletionCriteriaQuestion } from "../paidProCompletionCriteria";
+import {
+  intakeHasNamedMilestoneRecipients,
+  isMilestonePayerQuestion,
+  milestonePayerMaterialItem,
+} from "../paidProMilestonePayer";
 import type { CommercialFamilyHint, MaterialMissingItem } from "./types";
 
 const VAGUE_COMMERCIAL_RE =
   /\b(to be agreed|tbd|as discussed|standard terms|mutually agreed|confirm in writing|supplemental schedule|to be confirmed)\b/i;
 
+const FEE_AMOUNT_RE = /\$\s?\d|\bfixed\s+fee\b|\bfee\s+of\b|\b\d[\d,]+\s*(?:usd|dollars)\b/i;
+const UNRESOLVED_PAYMENT_RE =
+  /\b(?:tbd|to be (?:agreed|confirmed|determined)|unknown|undecided|not sure|later)\b/i;
+const NET_DEADLINE_RE = /\bnet\s*[- ]?(\d{1,3}|thirty|sixty|fifteen|ninety|ten|seven|fourteen)\b/i;
+const CADENCE_ONCE_RE =
+  /\b(?:invoice(?:d)?(?:\s+the\s+fixed\s+fee)?\s+(?:once|in\s+one\s+installment)|one\s+installment|lump[\s-]?sum|single\s+invoice)\b/i;
+const CADENCE_ON_DATE_RE =
+  /\b(?:invoice(?:d)?(?:\s+the\s+fixed\s+fee)?\s+(?:once\s+)?on|one\s+installment\s+on)\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})\b/i;
+const CADENCE_MONTHLY_RE =
+  /\binvoice(?:d|s)?(?:\s+the\s+fixed\s+fee)?\s+monthly\b|\bmonthly\s+invoic/i;
+const CADENCE_WEEKLY_RE =
+  /\binvoice(?:d|s)?(?:\s+the\s+fixed\s+fee)?\s+weekly\b|\bweekly\s+invoic/i;
+const CADENCE_UPON_RE = /\b(?:invoice(?:d)?\s+)?upon\s+(signing|execution|completion)\b/i;
+
+export const UNCONFIRMED_PAYMENT_TIMING_QUESTION =
+  "How should the fixed fee be invoiced, and when is payment due?";
+export const UNCONFIRMED_INVOICE_CADENCE_QUESTION = "How should the fixed fee be invoiced?";
+export const UNCONFIRMED_PAYMENT_DUE_QUESTION = "When is payment due?";
+
+const PAYMENT_SECTION_HEADING_RE =
+  /^(\d+)\.\s+(?:Fees?(?:\s+and\s+Payment)?|Payment|Compensation|Invoicing)\b\.?/im;
+/** Next top-level heading, including fees glued to "monthly.4. TERM". */
+const NEXT_TOP_LEVEL_SECTION_RE = /(?:^|\n|(?<=\.))(?:\d{1,2})\.(?!\d)\s+\S/;
+
+/** Fees/Payment clause only — Term or recital dates are not payment confirmation. */
+export function paymentSectionText(doc: string): string {
+  const heading = PAYMENT_SECTION_HEADING_RE.exec(doc || "");
+  if (!heading || heading.index == null) return "";
+  const start = heading.index;
+  const afterHeading = start + heading[0].length;
+  const rest = (doc || "").slice(afterHeading);
+  const nxt = NEXT_TOP_LEVEL_SECTION_RE.exec(rest);
+  const end = afterHeading + (nxt && nxt.index != null ? nxt.index : rest.length);
+  return (doc || "").slice(start, end);
+}
+
+function paymentClauseIsUnresolved(text: string): boolean {
+  return statementsOf(text).some(
+    (sent) => UNRESOLVED_PAYMENT_RE.test(sent) && /\b(?:payment|invoice|due|net|timing)\b/i.test(sent),
+  );
+}
+
+const WORD_DAYS: Record<string, number> = {
+  seven: 7,
+  ten: 10,
+  fourteen: 14,
+  fifteen: 15,
+  thirty: 30,
+  sixty: 60,
+  ninety: 90,
+};
+
+export type PaymentFacts = {
+  cadence: string | null;
+  invoiceDate: string | null;
+  deadlineDays: number | null;
+  cadenceConflict: boolean;
+};
+
+function statementsOf(text: string): string[] {
+  const out: string[] = [];
+  for (const block of (text || "").split(/[\n;]+/)) {
+    for (const sent of block.split(/(?<=[.!?])\s+/)) {
+      const piece = sent.trim();
+      if (piece) out.push(piece);
+    }
+  }
+  return out;
+}
+
+function cadencesIn(text: string): string[] {
+  const found: string[] = [];
+  if (CADENCE_ONCE_RE.test(text) || CADENCE_ON_DATE_RE.test(text)) found.push("once");
+  if (CADENCE_MONTHLY_RE.test(text) || (/\b(?:invoice|invoic)/i.test(text) && /\bmonthly\b/i.test(text))) {
+    found.push("monthly");
+  }
+  if (CADENCE_WEEKLY_RE.test(text) || (/\b(?:invoice|invoic)/i.test(text) && /\bweekly\b/i.test(text))) {
+    found.push("weekly");
+  }
+  const upon = text.match(CADENCE_UPON_RE);
+  if (upon?.[1]) found.push(`upon_${upon[1].toLowerCase()}`);
+  return [...new Set(found)];
+}
+
+function deadlineIn(text: string): number | null {
+  const net = text.match(NET_DEADLINE_RE);
+  if (net?.[1]) {
+    const raw = net[1].toLowerCase();
+    if (/^\d+$/.test(raw)) return Number(raw);
+    if (WORD_DAYS[raw] != null) return WORD_DAYS[raw];
+  }
+  if (/\b(?:due|payable)\s+(?:within|in|net)\b/i.test(text)) {
+    const days = text.match(/\b(\d{1,3}|thirty|sixty|fifteen|ninety|ten|seven|fourteen)\s*days?\b/i);
+    if (days?.[1]) {
+      const raw = days[1].toLowerCase();
+      if (/^\d+$/.test(raw)) return Number(raw);
+      if (WORD_DAYS[raw] != null) return WORD_DAYS[raw];
+    }
+  }
+  return null;
+}
+
+function factsFromStatement(sent: string): PaymentFacts {
+  if (paymentClauseIsUnresolved(sent)) {
+    return { cadence: null, invoiceDate: null, deadlineDays: null, cadenceConflict: false };
+  }
+  const cadences = cadencesIn(sent);
+  const date = sent.match(CADENCE_ON_DATE_RE)?.[1]?.trim() || null;
+  const conflict = cadences.length > 1;
+  const cadence = conflict || cadences.length === 0 ? null : cadences[0]!;
+  return {
+    cadence,
+    invoiceDate: cadence === "once" ? date : null,
+    deadlineDays: deadlineIn(sent),
+    cadenceConflict: conflict,
+  };
+}
+
+/** Latest confirmed answers overlay earlier TBD or conflicting cadence. */
+export function extractPaymentFacts(intake: string, userGapAnswers = ""): PaymentFacts {
+  let facts: PaymentFacts = { cadence: null, invoiceDate: null, deadlineDays: null, cadenceConflict: false };
+  const sources: Array<[string, boolean]> = [
+    [intake || "", false],
+    [userGapAnswers || "", true],
+  ];
+  for (const [source, answersOverlay] of sources) {
+    for (const sent of statementsOf(source)) {
+      if (paymentClauseIsUnresolved(sent)) {
+        if (answersOverlay) {
+          facts = { cadence: null, invoiceDate: null, deadlineDays: null, cadenceConflict: false };
+        }
+        continue;
+      }
+      const overlay = factsFromStatement(sent);
+      if (overlay.cadenceConflict) {
+        facts = { ...facts, cadence: null, invoiceDate: null, cadenceConflict: true };
+      } else if (overlay.cadence) {
+        facts = {
+          ...facts,
+          cadence: overlay.cadence,
+          cadenceConflict: false,
+          invoiceDate: overlay.cadence === "once" ? overlay.invoiceDate : null,
+        };
+      }
+      if (overlay.deadlineDays != null) facts = { ...facts, deadlineDays: overlay.deadlineDays };
+    }
+  }
+  return facts;
+}
+
+function paymentQuestionsForMaterials(intake: string, userGapAnswers = ""): Array<{
+  id: "payment_timing" | "payment_due" | "invoice_cadence";
+  question: string;
+  label: string;
+}> {
+  if (!FEE_AMOUNT_RE.test(`${intake}\n${userGapAnswers}`)) return [];
+  if (
+    intakeHasNamedMilestoneRecipients(`${intake}\n${userGapAnswers}`) &&
+    /\bupon\s+\w/i.test(`${intake}\n${userGapAnswers}`)
+  ) {
+    return [];
+  }
+  const facts = extractPaymentFacts(intake, userGapAnswers);
+  const cadence = Boolean(facts.cadence) && !facts.cadenceConflict;
+  const deadline = facts.deadlineDays != null;
+  if (cadence && deadline) return [];
+  if (!cadence && !deadline && !facts.cadenceConflict) {
+    return [{ id: "payment_timing", question: UNCONFIRMED_PAYMENT_TIMING_QUESTION, label: "Payment timing" }];
+  }
+  const out: Array<{ id: "payment_timing" | "payment_due" | "invoice_cadence"; question: string; label: string }> =
+    [];
+  if (!cadence) {
+    out.push({
+      id: "invoice_cadence",
+      question: UNCONFIRMED_INVOICE_CADENCE_QUESTION,
+      label: "Invoice cadence",
+    });
+  }
+  if (!deadline) {
+    out.push({ id: "payment_due", question: UNCONFIRMED_PAYMENT_DUE_QUESTION, label: "Payment due date" });
+  }
+  return out;
+}
+
 function detectCommercialFamilyHint(intake: string, body: string): CommercialFamilyHint {
-  const low = `${intake}\n${body}`.toLowerCase();
+  const low = stripRelationshipDisclaimerPhrases(`${intake}\n${body}`).toLowerCase();
   if (/\b(?:saas|software as a service|msa|master\s+services)\b/.test(low)) return "saas_msa";
   if (/\b(?:referral|commission|channel\s+partner)\b/.test(low)) return "referral";
   if (/\b(?:license|licen[cs]ing|sublicen)\b/.test(low)) return "licensing";
@@ -40,10 +239,12 @@ function pushItem(
 function familyQuestions(
   family: CommercialFamilyHint,
   body: string,
-  intake: string,
+  intakeRaw: string,
+  userGapAnswers = "",
 ): MaterialMissingItem[] {
   const items: MaterialMissingItem[] = [];
   const seen = new Set<string>();
+  const intake = [intakeRaw, userGapAnswers].join("\n").trim();
   const low = body.toLowerCase();
   const intakeLow = intake.toLowerCase();
 
@@ -52,7 +253,7 @@ function familyQuestions(
   if (consultingDev) {
     const vaguePayment =
       !/\b(?:hourly|fixed fee|retainer|milestone|per hour|project fee)\b/i.test(low) ||
-      VAGUE_COMMERCIAL_RE.test(intakeLow) ||
+      (VAGUE_COMMERCIAL_RE.test(intakeLow) && !FEE_AMOUNT_RE.test(intakeLow)) ||
       /\b(?:fee structure|payment structure)\b/i.test(intakeLow);
     if (vaguePayment) {
       pushItem(
@@ -118,7 +319,28 @@ function familyQuestions(
   const needsPayment =
     !/\b(?:invoice|due within|net\s+\d+|payment|fee|compensation)\b/i.test(low) ||
     VAGUE_COMMERCIAL_RE.test(intakeLow);
-  if (needsPayment && !seen.has("payment_structure")) {
+  const feePresent = FEE_AMOUNT_RE.test(`${intakeRaw}\n${userGapAnswers}`);
+  const paymentAsks = paymentQuestionsForMaterials(intakeRaw, userGapAnswers);
+  if (paymentAsks.length && !seen.has("payment_structure") && !seen.has("payment_timing")) {
+    for (const ask of paymentAsks) {
+      pushItem(
+        items,
+        seen,
+        {
+          id: ask.id,
+          severity: "material",
+          label: ask.label,
+          question: ask.question,
+          whyItMatters:
+            "A fee amount without an invoicing schedule or due date is not an agreed payment term.",
+          suggestedAnswerFormat: "e.g. one invoice on October 1, 2026, due Net 30",
+          affectsSections: ["Payment", "Fees", "Invoicing"],
+          canProceedWithoutAnswer: true,
+        },
+        family,
+      );
+    }
+  } else if (needsPayment && !feePresent && !seen.has("payment_structure") && !paymentAsks.length) {
     pushItem(
       items,
       seen,
@@ -209,7 +431,7 @@ function familyQuestions(
     family === "independent_contractor_agreement" ||
     /\bmilestone|deliverable|statement of work\b/i.test(intakeLow)
   ) {
-    if (!/\bmilestone[\s\S]{0,120}\b(?:date|due|amount|\$)/i.test(low) && /\bmilestone|deliverable\b/i.test(intakeLow)) {
+    if (!/\bmilestone[\s\S]{0,120}\b(?:date|due|amount|\$)/i.test(low) && /\bmilestone\b/i.test(intakeLow)) {
       pushItem(
         items,
         seen,
@@ -451,7 +673,10 @@ function familyQuestions(
         family,
       );
     }
-    if (!/\b(?:net\s+\d+|due within|invoice.*due|payment timing)\b/i.test(low) || VAGUE_COMMERCIAL_RE.test(body)) {
+    if (
+      !feePresent &&
+      (!/\b(?:net\s+\d+|due within|invoice.*due|payment timing)\b/i.test(low) || VAGUE_COMMERCIAL_RE.test(body))
+    ) {
       pushItem(
         items,
         seen,
@@ -547,19 +772,67 @@ export function buildMaterialMissingItems(args: {
   body: string;
   structuralIssues?: readonly { code: string; message: string }[];
   serverMissing?: readonly string[];
+  userGapAnswers?: string | null;
+  parsedParties?: readonly BindableParty[] | null;
+  additionalTerms?: string | null;
+  unresolvedSubjects?: readonly UnresolvedIdentitySubject[] | null;
 }): MaterialMissingItem[] {
-  const intake = (args.intakeRaw || "").trim();
+  const intake = [args.intakeRaw || "", args.userGapAnswers || ""].join("\n").trim();
   const body = (args.body || "").trim();
   const family = detectCommercialFamilyHint(intake, body);
-  const items = familyQuestions(family, body, intake);
+  const items = familyQuestions(family, body, args.intakeRaw || "", args.userGapAnswers || "");
   const seen = new Set(items.map((i) => i.id));
+  const dateItem = dateMeaningMaterialItem({
+    intakeRaw: args.intakeRaw,
+    userGapAnswers: args.userGapAnswers,
+    body,
+  });
+  if (dateItem) {
+    pushItem(items, seen, dateItem, family);
+  }
+  const completionItem = completionCriteriaMaterialItem({
+    intakeRaw: args.intakeRaw,
+    userGapAnswers: args.userGapAnswers,
+    body,
+  });
+  if (completionItem) {
+    pushItem(items, seen, completionItem, family);
+  }
+  const payerItem = milestonePayerMaterialItem({
+    intakeRaw: args.intakeRaw,
+    userGapAnswers: args.userGapAnswers,
+    body,
+  });
+  if (payerItem) {
+    pushItem(items, seen, payerItem, family);
+  }
+  const identityItem = identityClarificationMaterialItem({
+    intakeRaw: args.intakeRaw,
+    userGapAnswers: args.userGapAnswers,
+    parsedParties: args.parsedParties,
+    additionalTerms: args.additionalTerms,
+    unresolvedSubjects: args.unresolvedSubjects,
+    body,
+  });
+  if (identityItem) {
+    pushItem(items, seen, identityItem, family);
+  }
 
   for (const bodyItem of scanBodyMaterialPlaceholders(body, family)) {
     pushItem(items, seen, bodyItem, family);
   }
 
+  const paymentFacts = extractPaymentFacts(args.intakeRaw || "", args.userGapAnswers || "");
+  const paymentResolved =
+    Boolean(paymentFacts.cadence) && paymentFacts.deadlineDays != null && !paymentFacts.cadenceConflict;
   const semanticGaps = detectSemanticContractGaps({ body, intakeRaw: intake, agreementFamily: family });
   for (const semItem of semanticGapsToMaterialItems(semanticGaps, family)) {
+    if (
+      paymentResolved &&
+      (semItem.id === "payment_timing" || semItem.id === "payment_due" || semItem.id === "invoice_cadence")
+    ) {
+      continue;
+    }
     pushItem(items, seen, semItem, family);
   }
 
@@ -586,6 +859,21 @@ export function buildMaterialMissingItems(args: {
   for (const m of args.serverMissing || []) {
     const t = String(m || "").trim();
     if (t.length < 4) continue;
+    if (
+      t === UNCONFIRMED_PAYMENT_TIMING_QUESTION ||
+      t === UNCONFIRMED_INVOICE_CADENCE_QUESTION ||
+      t === UNCONFIRMED_PAYMENT_DUE_QUESTION ||
+      isDateMeaningQuestion(t) ||
+      isCompletionCriteriaQuestion(t) ||
+      isMilestonePayerQuestion(t) ||
+      (isIdentityClarificationQuestion(t) &&
+        (identityClarificationResolved(args.userGapAnswers, t, {
+          knownEntities: (args.parsedParties || []).map((party) => party.name),
+        }) ||
+          items.some((item) => item.id === "identity_signing_or_party" || item.question === t)))
+    ) {
+      continue;
+    }
     const id = `server_${t.slice(0, 40).replace(/\W+/g, "_")}`;
     pushItem(
       items,

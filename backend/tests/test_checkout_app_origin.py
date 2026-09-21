@@ -8,6 +8,7 @@ from backend.billing.checkout_app_origin import (
     STAGING_CANONICAL_ORIGIN,
     build_checkout_cancel_url,
     build_checkout_success_url,
+    build_portal_return_url,
     resolve_checkout_app_origin,
 )
 
@@ -96,6 +97,22 @@ def test_success_url_rejects_external_return_path():
     )
     assert url.startswith(f"{STAGING_CANONICAL_ORIGIN}/app/create?")
     assert "evil.example" not in url
+
+
+def test_portal_return_strips_payment_success_and_rejects_external():
+    safe = build_portal_return_url(
+        return_to="/app/send/ag-1?phase=send&premiumCompletion=1&checkout_session_id=cs_x",
+        origin=STAGING_CANONICAL_ORIGIN,
+    )
+    assert safe.startswith(f"{STAGING_CANONICAL_ORIGIN}/app/send/ag-1")
+    assert "phase=send" in safe
+    assert "premiumCompletion" not in safe
+    assert "checkout_session_id" not in safe
+    hostile = build_portal_return_url(
+        return_to="https://evil.example/phish",
+        origin=STAGING_CANONICAL_ORIGIN,
+    )
+    assert hostile == f"{STAGING_CANONICAL_ORIGIN}/app/billing"
 
 
 def test_cancel_url_stays_on_canonical_checkout_path():

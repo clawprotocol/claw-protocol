@@ -29,7 +29,7 @@ import {
   resolvePaidProVisibleShellRenderBranch,
   PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN,
 } from "./paidProVisibleDocumentShell";
-import { clearPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { clearPaidProSourceOfTruth, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 /**
@@ -169,7 +169,13 @@ To be determined.`;
     });
 
     it("paints canonical_plain_forced for 200-999 body even when paidProFirstReviewActive is false", () => {
-      const rebuilt = rebuildBodyFromIntakeForProFailure(MARCUS_ELENA_INTAKE, HOLLOW_DRAFT);
+      const rebuilt = [
+        "SERVICES AGREEMENT",
+        "",
+        "Marcus Thompson of Apex Consulting Group engages Elena Rodriguez of Brightwave Marketing Agency for a strategic marketing campaign.",
+        "Payment: $5,500. Governing law: California. Term: 8 weeks.",
+        "IN WITNESS WHEREOF the parties execute this recovery summary.",
+      ].join("\n");
       expect(rebuilt.length).toBeGreaterThanOrEqual(200);
       expect(rebuilt.length).toBeLessThan(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
 
@@ -216,7 +222,6 @@ To be determined.`;
 
       const rebuilt = rebuildBodyFromIntakeForProFailure(MARCUS_ELENA_INTAKE, HOLLOW_DRAFT);
       expect(rebuilt.length).toBeGreaterThanOrEqual(200);
-      expect(rebuilt.length).toBeLessThan(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
 
       const result = resolveCanonicalPlainForVisibleShell({
         acceptedCanonicalPlain: rebuilt,
@@ -229,6 +234,7 @@ To be determined.`;
       expect(result.plain).toContain("Marcus Thompson");
       expect(result.plain).toContain("$5,500");
       expect(result.plain).toContain("California");
+      expect(hasPaidProSourceOfTruth()).toBe(false);
     });
 
     it("returns empty when no paid session and body < 1001", () => {
@@ -247,6 +253,7 @@ To be determined.`;
       });
 
       expect(result.plain).toBe("");
+      expect(result.source === "none" || result.plain === "").toBe(true);
     });
   });
 

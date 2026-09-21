@@ -13,6 +13,25 @@ import { isPartyMetadataLabelValue } from "./intakeSectionLabels";
 import { parseAllStructuredPartyContactBlocks } from "./labeledPartyBlockParse";
 import { looksLikeStackedPartyLegalEntityLine } from "./starterPartyIdentityIsolation";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+import { US_STATE_NAMES_ENGLISH } from "./partyFormat";
+
+const US_STATE_TOKEN_RE = new RegExp(
+  `^(?:${US_STATE_NAMES_ENGLISH.map((name) => name.replace(/\s+/g, "\\s+")).join("|")})\\.?$`,
+  "i",
+);
+
+function personNameImmediatelyBeforeEmail(beforeEmail: string): string | undefined {
+  const sentenceTail = beforeEmail.split(/(?<=[.!?])\s+/).pop() || beforeEmail;
+  const captured = sentenceTail.match(
+    /([A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+)+)\s*[,;:]?\s*$/,
+  )?.[1];
+  if (!captured) return undefined;
+  const words = captured.split(/\s+/);
+  while (words.length >= 2 && US_STATE_TOKEN_RE.test(words[0] || "")) {
+    words.shift();
+  }
+  return words.length >= 2 ? words.join(" ") : undefined;
+}
 
 const CONTACT_EMAIL_ANYWHERE_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
 
@@ -54,7 +73,7 @@ export function extractIntakeContacts(intakeRaw: string | null | undefined): Int
   for (const line of raw.split(/\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const emailM = trimmed.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\s*$/);
+    const emailM = trimmed.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
     if (!emailM) continue;
     const email = emailM[1].trim();
     const low = email.toLowerCase();
@@ -65,8 +84,12 @@ export function extractIntakeContacts(intakeRaw: string | null | undefined): Int
       .replace(/^\s*[*•\-]\s*/, "")
       .replace(/^(?:signer\s+)?email\s*:\s*/i, "")
       .trim();
+    const personNearEmail = personNameImmediatelyBeforeEmail(beforeEmail);
+    const personLooksHuman =
+      Boolean(personNearEmail) &&
+      !/\b(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Ltd\.?|LP|LLP)\b/i.test(personNearEmail || "");
     const segments = beforeEmail.split(/\s*[—–-]\s*/).map((s) => s.replace(/\s+/g, " ").trim());
-    const name = segments[0] || "";
+    const name = personLooksHuman ? personNearEmail || "" : segments[0] || "";
     const title = segments[1] || "";
     const companyHint = segments[2] || segments[1]?.replace(/^.*\bat\s+/i, "").trim() || "";
     if (isPartyMetadataLabelValue(name)) {

@@ -64,7 +64,7 @@ def test_get_receipt_after_complete_sign(
     client = TestClient(app)
     fin = client.post(
         "/v1/documents",
-        json={"content_base64": base64.b64encode(b"bundle-doc").decode("ascii")},
+        json={"content_base64": base64.b64encode(b"%PDF-1.4 bundle-doc").decode("ascii")},
     )
     doc_id = fin.json()["document_id"]
     h = fin.json()["content_sha256"]
@@ -98,7 +98,7 @@ def test_bundle_zip_contents_and_hashes(
 ) -> None:
     _configure_artifacts(monkeypatch, tmp_path)
     client = TestClient(app)
-    raw = b"exact bytes for bundle"
+    raw = b"%PDF-1.4 exact bytes for bundle"
     fin = client.post(
         "/v1/documents",
         json={"content_base64": base64.b64encode(raw).decode("ascii")},
@@ -175,7 +175,7 @@ def test_bundle_document_hash_mismatch_after_tamper(
     client = TestClient(app)
     fin = client.post(
         "/v1/documents",
-        json={"content_base64": base64.b64encode(b"clean").decode("ascii")},
+        json={"content_base64": base64.b64encode(b"%PDF-1.4 clean").decode("ascii")},
     )
     doc_id = fin.json()["document_id"]
     h = fin.json()["content_sha256"]

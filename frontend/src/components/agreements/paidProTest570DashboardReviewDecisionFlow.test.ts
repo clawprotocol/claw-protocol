@@ -121,14 +121,43 @@ describe("TEST570 dashboard paid-create review decision precedes signer setup", 
     );
   });
 
-  it("AgreementBuilderIntake routes the delivery-track decision ahead of signer setup", () => {
+  it("Prepare signature links mounts signer setup only after the delivery decision", () => {
     expect(intakeSrc).toContain("firstReviewDeliveryTrackDecisionActive");
     expect(intakeSrc).toContain("deliveryTrackDecisionActive: firstReviewDeliveryTrackDecisionActive");
-    // Prepare signature links mounts inline signer setup (arms the latch) rather than auto-finalizing.
-    const prepareStart = intakeSrc.indexOf("const handlePaidProPrepareSignaturesFromFirstReview");
-    const prepareBlock = intakeSrc.slice(prepareStart, prepareStart + 4200);
-    expect(prepareBlock).toContain("setPaidProInlineSignerSetupLatched(true)");
-    expect(prepareBlock).toContain("!paidProSignerMetadataFinalized");
+    const mountArgs = {
+      hasAcceptedPaidProAuthority: true,
+      premiumPaidDocumentSurface: true,
+      premiumRecipientUxActive: false,
+      createUiStageIsDraft: true,
+      signaturePreparationRequested: false,
+    } as const;
+    expect(
+      shouldShowPaidProForcedFirstReviewTrackChooser({
+        forcedFirstReviewActive: true,
+        inlineSignerSetupMounted: false,
+        signerDetailsReady: true,
+        signerMetadataFinalized: false,
+        signaturePreparationRequested: false,
+        deliveryTrackDecisionActive: true,
+      }),
+    ).toBe(true);
+    expect(resolvePaidProInlineSignerSetupMounted({ ...mountArgs, signerSetupLatched: false })).toBe(
+      false,
+    );
+    // Clicking Prepare signature links is the delivery decision → latch mounts signer setup.
+    expect(resolvePaidProInlineSignerSetupMounted({ ...mountArgs, signerSetupLatched: true })).toBe(
+      true,
+    );
+    expect(
+      shouldShowPaidProForcedFirstReviewTrackChooser({
+        forcedFirstReviewActive: true,
+        inlineSignerSetupMounted: true,
+        signerDetailsReady: true,
+        signerMetadataFinalized: false,
+        signaturePreparationRequested: false,
+        deliveryTrackDecisionActive: false,
+      }),
+    ).toBe(false);
   });
 });
 

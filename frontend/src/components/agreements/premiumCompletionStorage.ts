@@ -184,28 +184,32 @@ export type PremiumCompletionSnapshot = {
   premiumFinalizationInputSignature?: string | null;
 };
 
+let memoryPremiumCompletionSnapshot: PremiumCompletionSnapshot | null = null;
+
 export function persistPremiumCompletionSnapshot(snap: Omit<PremiumCompletionSnapshot, "savedAt">): void {
+  const payload: PremiumCompletionSnapshot = { ...snap, savedAt: Date.now() };
+  memoryPremiumCompletionSnapshot = payload;
   try {
     sessionStorage.removeItem(REVEAL_DISMISSED_KEY);
     sessionStorage.setItem(RECIPIENTS_SURFACE_KEY, "0");
-    const payload: PremiumCompletionSnapshot = { ...snap, savedAt: Date.now() };
     sessionStorage.setItem(KEY, JSON.stringify(payload));
   } catch {
-    /* ignore */
+    /* sessionStorage unavailable (node tests / locked storage) — memory snapshot remains */
   }
 }
 
 export function readPremiumCompletionSnapshot(): PremiumCompletionSnapshot | null {
   try {
     const raw = sessionStorage.getItem(KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as PremiumCompletionSnapshot;
+    if (raw) return JSON.parse(raw) as PremiumCompletionSnapshot;
   } catch {
-    return null;
+    /* fall through to memory */
   }
+  return memoryPremiumCompletionSnapshot;
 }
 
 export function clearPremiumCompletionSnapshot(): void {
+  memoryPremiumCompletionSnapshot = null;
   clearAcceptedPremiumCanonicalCorpus();
   try {
     sessionStorage.removeItem(KEY);

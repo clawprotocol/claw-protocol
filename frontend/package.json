@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build",
     "test": "vitest run",
     "test:paid-pro-pipeline-long": "vitest run --config vitest.paidProPipelineLong.runner.config.ts",
+    "test:phase1-access-contract": "vitest run --config vitest.phase1AccessContract.runner.config.ts",
+    "test:phase2-paid-journey": "vitest run --config vitest.phase2PaidJourney.runner.config.ts",
     "test:e2e": "playwright test",
     "lint": "eslint .",
     "preview": "vite preview"

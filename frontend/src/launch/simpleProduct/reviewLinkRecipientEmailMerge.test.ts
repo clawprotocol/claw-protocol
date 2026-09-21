@@ -83,6 +83,53 @@ describe("mergeReviewLinkRecipientEmailsOntoHydratedDraft", () => {
     expect(out.parties[0].email).toContain("example.com");
     expect(out.parties[1].email).toContain("example.org");
   });
+
+  it("does not copy Ironvale's signer onto Alex when primed slots are misaligned", () => {
+    const fetched = {
+      id: "ag-alex",
+      parties: [
+        { id: "p1", name: "Harbor Peak Analytics LLC", role: "Consultant", signerName: "Pat Harbor", email: "pat.harbor@harbor.test" },
+        { id: "p2", name: "Ironvale Manufacturing Inc.", role: "Client", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+        { id: "p3", name: "Alex Rivera", role: "Advisor", email: "alex.rivera@advisor.test" },
+      ],
+    } as AgreementDraft;
+    const primed = {
+      id: "ag-alex",
+      parties: [
+        { name: "Harbor Peak Analytics LLC", role: "Consultant", signerName: "Pat Harbor", email: "pat.harbor@harbor.test" },
+        { name: "Ironvale Manufacturing Inc.", role: "Client", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+        { name: "Ironvale Manufacturing Inc.", role: "party", signerName: "Sam Ironvale", email: "sam.ironvale@ironvale.test" },
+      ],
+    } as AgreementDraft;
+    const out = mergeReviewLinkRecipientEmailsOntoHydratedDraft(fetched, primed);
+    expect(out.parties.map((party) => party.name)).toEqual([
+      "Harbor Peak Analytics LLC",
+      "Ironvale Manufacturing Inc.",
+      "Alex Rivera",
+    ]);
+    expect(out.parties[2]?.role).toBe("Advisor");
+    expect(out.parties[2]?.signerName).toBeFalsy();
+    expect(out.parties[2]?.email).toBe("alex.rivera@advisor.test");
+  });
+
+  it("replaces a legal-entity signerName copy with the intake human signer", () => {
+    const fetched = {
+      id: "ag-3",
+      parties: [
+        { id: "p1", name: "Stonebridge Wellness LLC", role: "licensor", signerName: "Stonebridge Wellness LLC" },
+        { id: "p2", name: "NovaPath Learning Inc.", role: "reviewer", signerName: "NovaPath Learning Inc." },
+      ],
+    } as AgreementDraft;
+    const primed = {
+      id: "ag-3",
+      parties: [
+        { name: "Stonebridge Wellness LLC", role: "licensor", signerName: "Sandra Wells" },
+        { name: "NovaPath Learning Inc.", role: "reviewer", signerName: "Caleb Price" },
+      ],
+    } as AgreementDraft;
+    const out = mergeReviewLinkRecipientEmailsOntoHydratedDraft(fetched, primed);
+    expect(out.parties.map((party) => party.signerName)).toEqual(["Sandra Wells", "Caleb Price"]);
+  });
 });
 
 describe("rowReadyForReviewLinkInvite", () => {
@@ -278,6 +325,53 @@ describe("mergeLiveDraftWithRecipientSetupForReviewLinks", () => {
       "a@ok.test",
       "b@ok.test",
       "c@ok.test",
+    ]);
+  });
+
+  it("binds Silver Mesa four-party live setup emails onto stable party ids", () => {
+    const live = {
+      id: "ag-silver-mesa",
+      parties: [
+        { id: "p-ironclad", name: "Ironclad Systems Group LLC", role: "Sponsor", email: "" },
+        { id: "p-harborline", name: "Harborline Data Solutions Inc.", role: "Vendor", email: "" },
+        { id: "p-northwind", name: "Northwind Automation Partners LLC", role: "Integrator", email: "" },
+        { id: "p-silver", name: "Silver Mesa Analytics LP", role: "Analyst", email: "" },
+      ],
+    } as AgreementDraft;
+    const out = mergeLiveDraftWithRecipientSetupForReviewLinks(live, {
+      recipient1Email: "ethan.cole@ironcladsg.com",
+      recipient2Email: "maya.bennett@harborlinedata.com",
+      recipientPartyEmails: [
+        "ethan.cole@ironcladsg.com",
+        "maya.bennett@harborlinedata.com",
+        "lucas.reed@northwindap.io",
+        "olivia.hart@silvermesaanalytics.com",
+      ],
+      recipient1Name: "Ironclad Systems Group LLC",
+      recipient2Name: "Harborline Data Solutions Inc.",
+      recipientPartyLegalNames: ["Northwind Automation Partners LLC", "Silver Mesa Analytics LP"],
+    });
+    expect(out?.parties.map((party) => ({ id: party.id, name: party.name, email: party.email }))).toEqual([
+      {
+        id: "p-ironclad",
+        name: "Ironclad Systems Group LLC",
+        email: "ethan.cole@ironcladsg.com",
+      },
+      {
+        id: "p-harborline",
+        name: "Harborline Data Solutions Inc.",
+        email: "maya.bennett@harborlinedata.com",
+      },
+      {
+        id: "p-northwind",
+        name: "Northwind Automation Partners LLC",
+        email: "lucas.reed@northwindap.io",
+      },
+      {
+        id: "p-silver",
+        name: "Silver Mesa Analytics LP",
+        email: "olivia.hart@silvermesaanalytics.com",
+      },
     ]);
   });
 });

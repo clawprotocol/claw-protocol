@@ -14,13 +14,20 @@ export const NO_GUARANTEE_ENFORCEABILITY =
 export const RECORDS_DOWNLOAD_KEEP_COPY_SHORT = "Download and keep a copy for your records.";
 /** Near Sign agreement — primary intent/adoption (agreement HTML ceremony). */
 export const ESIGN_INTENT_SIGN_AGREEMENT_ACTION =
-  "By selecting Sign, you adopt this as your electronic signature and agree to the agreement above.";
+  "By selecting Agree and sign, you adopt this as your electronic signature and agree to the agreement above.";
 /** Near Sign document — sender PDF self-sign. */
 export const ESIGN_INTENT_SIGN_DOCUMENT_ACTION =
   "By selecting Sign document, you adopt this as your electronic signature and agree to the document above.";
 /** Near Finish signing — recipient PDF field completion. */
 export const ESIGN_INTENT_FINISH_SIGNING_ACTION =
-  "By selecting Finish signing, you adopt this as your electronic signature and agree to the document above.";
+  "By selecting Agree and sign, you adopt this as your electronic signature and agree to the document above.";
+/** Versioned affirmative e-sign consent shown on both commercial recipient surfaces. */
+export const ESIGN_CONSENT_INTENT_VERSION = "lawdog_esign_consent.v1";
+export const ESIGN_CONSENT_ACTION = "agree_and_sign";
+export const ESIGN_CONSENT_INTENT_STATEMENT =
+  "I agree to use an electronic signature. By selecting Agree and sign, I adopt the completed assigned signature fields as my electronic signature and affirm my intent to be bound.";
+export const ESIGN_CONSENT_CHECKBOX_LABEL =
+  "I agree to electronically sign and adopt the completed signature fields as my electronic signature.";
 /** Short electronic-completion cue where a full intent line is not repeated. */
 export const ELECTRONIC_RECORDS_SIGN_CUE = "You are completing this electronically.";
 /** Monthly self-serve: auto-renew each period until canceled. */

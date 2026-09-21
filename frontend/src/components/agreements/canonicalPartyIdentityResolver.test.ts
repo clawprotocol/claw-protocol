@@ -6,6 +6,7 @@ import {
   definedOpeningLine,
   intakeHasFullLegalEntityParties,
   intakeSpecifiesSimpleFixedFee,
+  locateDefinedOpeningRecitalBoundary,
   repairCanonicalPartyIdentityInCorpus,
   repairFullAgreementPartyIdentity,
   replaceTruncatedPartyRefsWithRoleLabels,
@@ -132,6 +133,22 @@ describe("canonicalPartyIdentityResolver", () => {
     expect(text).toMatch(/Client is engaging Service Provider/i);
     expect(text).toMatch(/Client will pay Service Provider/i);
     expect(text).not.toMatch(/\bRed Mesa will pay Harbor Peak\b/i);
+  });
+
+  it("does not swallow an approved notices sentence into the defined opening", () => {
+    const oak = "Oak Street Holdings LLC";
+    const pine = "Pine Creek Manufacturing Inc.";
+    const draft = [
+      `This Agreement is between ${oak} ("Client") and ${pine} ("Supplier").`,
+      "Send notices to legal@new-company.com within five days.",
+    ].join("\n");
+    const { text } = repairFullAgreementPartyIdentity({
+      text: draft,
+      intakeRaw: `Delaware supply agreement between ${oak} and ${pine}.\nlegal@old-company.com`,
+      partyNames: [oak, pine],
+    });
+    expect(text).toContain("Send notices to legal@new-company.com within five days.");
+    expect(text).not.toContain("legal@old-company.com");
   });
 
   it("does not replace paid Pro mutual consulting by-and-between recital with definedOpeningLine", () => {
@@ -289,5 +306,255 @@ describe("hirer versus hired company preamble slots", () => {
     expect(opening).toMatch(/Jordan Hale/);
     expect(opening).toMatch(/Pine Street Media LLC/);
     expect(opening).not.toMatch(/Pine Street Media LLC[\s\S]+Pine Street Media \(/);
+  });
+});
+
+const OAK = "Oak Street Holdings LLC";
+const PINE = "Pine Creek Manufacturing Inc.";
+const OAK_PINE_OPENING = `This Agreement is between ${OAK} ("Client") and ${PINE} ("Supplier").`;
+const OAK_PINE_INTAKE = `Delaware supply agreement between ${OAK} and ${PINE}.`;
+const OPERATIVE_CLAUSES = [
+  "Client shall pay $5,000 upon delivery.",
+  "Supplier shall ship conforming goods FOB Wilmington.",
+  "All deliverables remain owned by Client.",
+  "Either party may terminate on thirty days written notice.",
+] as const;
+
+describe("defined-opening recital boundary", () => {
+  function assertClauseOnce(text: string, clause: string) {
+    expect(text).toContain(clause);
+    expect(text.split(clause).length - 1).toBe(1);
+  }
+
+  it("bounds the Oak/Pine opening before a following operative sentence", () => {
+    const clause = OPERATIVE_CLAUSES[0];
+    const head = `${OAK_PINE_OPENING}\n${clause}`;
+    const span = locateDefinedOpeningRecitalBoundary(head);
+    expect(span).not.toBeNull();
+    expect(head.slice(span!.start, span!.end)).toBe(OAK_PINE_OPENING);
+    expect(head.slice(span!.end)).toContain(clause);
+  });
+
+  it.each([...OPERATIVE_CLAUSES])(
+    "repairFullAgreementPartyIdentity keeps %s after a single newline",
+    (clause) => {
+      const draft = `${OAK_PINE_OPENING}\n${clause}`;
+      const { text } = repairFullAgreementPartyIdentity({
+        text: draft,
+        intakeRaw: OAK_PINE_INTAKE,
+        partyNames: [OAK, PINE],
+      });
+      assertClauseOnce(text, clause);
+    },
+  );
+
+  it("preserves the same obligation in same-paragraph, single-newline, and blank-line layouts", () => {
+    const clause = OPERATIVE_CLAUSES[1];
+    const layouts = [
+      `${OAK_PINE_OPENING} ${clause}`,
+      `${OAK_PINE_OPENING}\n${clause}`,
+      `${OAK_PINE_OPENING}\n\n${clause}`,
+    ];
+    for (const draft of layouts) {
+      const { text } = repairFullAgreementPartyIdentity({
+        text: draft,
+        intakeRaw: OAK_PINE_INTAKE,
+        partyNames: [OAK, PINE],
+      });
+      assertClauseOnce(text, clause);
+    }
+  });
+
+  it("keeps the first operative clause and later numbered sections in a longer agreement", () => {
+    const clause = OPERATIVE_CLAUSES[2];
+    const draft = [
+      OAK_PINE_OPENING,
+      clause,
+      "",
+      "1. Scope",
+      "Manufacturing will occur in Delaware under U.S. law.",
+      "",
+      "2. Fees",
+      "Invoices are due net thirty days.",
+    ].join("\n");
+    const { text } = repairFullAgreementPartyIdentity({
+      text: draft,
+      intakeRaw: OAK_PINE_INTAKE,
+      partyNames: [OAK, PINE],
+    });
+    assertClauseOnce(text, clause);
+    expect(text).toContain("1. Scope");
+    expect(text).toContain("Manufacturing will occur in Delaware under U.S. law.");
+    expect(text).toContain("2. Fees");
+    expect(text).toContain("Invoices are due net thirty days.");
+  });
+
+  it("keeps abbreviations, roles, addresses, dates, and collective definitions in a wrapped recital", () => {
+    const recital = [
+      `This Agreement is between ${OAK}, a Delaware limited liability company ("Client"), with a principal place of business at 1 Oak Street, Wilmington, DE 19801, dated March 3, 2026,`,
+      `and ${PINE}, a Delaware corporation ("Supplier"), with a principal place of business at 9 Pine Creek Rd, Wilmington, DE 19802`,
+      `(each a "Party" and collectively the "Parties").`,
+    ].join("\n");
+    const span = locateDefinedOpeningRecitalBoundary(recital);
+    expect(span).not.toBeNull();
+    const bounded = recital.slice(span!.start, span!.end);
+    expect(bounded).toContain("Inc.");
+    expect(bounded).toContain('("Client")');
+    expect(bounded).toContain('("Supplier")');
+    expect(bounded).toContain("1 Oak Street, Wilmington, DE 19801");
+    expect(bounded).toContain("March 3, 2026");
+    expect(bounded).toContain('collectively the "Parties"');
+    const { text, repairs } = repairFullAgreementPartyIdentity({
+      text: recital,
+      intakeRaw: OAK_PINE_INTAKE,
+      partyNames: [OAK, PINE],
+    });
+    expect(repairs).not.toContain("party_identity:defined_opening");
+    expect(text).toMatch(/Inc\.?/);
+    expect(text).toContain('("Client")');
+    expect(text).toContain('("Supplier")');
+    expect(text).toContain("March 3, 2026");
+    expect(text).toContain('collectively the "Parties"');
+    expect(text).toContain("Wilmington, DE 19801");
+    expect(text).toContain("Wilmington, DE 19802");
+  });
+
+  it("does not rewrite three- or four-party recitals via defined opening replacement", () => {
+    const three = [
+      'This Agreement is among Stonebridge Wellness LLC ("Licensor"), NovaPath Learning Inc. ("Platform"), and ClearSpring Distribution LLC ("Distributor").',
+      OPERATIVE_CLAUSES[0],
+    ].join("\n");
+    const four = [
+      'This Agreement is among Ironclad Systems Group LLC ("Sponsor"), Harborline Data Solutions Inc. ("Vendor"), Northwind Automation Partners LLC ("Integrator"), and Silver Mesa Analytics LP ("Analyst").',
+      OPERATIVE_CLAUSES[3],
+    ].join("\n");
+    const threeOut = repairFullAgreementPartyIdentity({
+      text: three,
+      intakeRaw:
+        "Oklahoma license among Stonebridge Wellness LLC, NovaPath Learning Inc., and ClearSpring Distribution LLC.",
+      partyNames: [
+        "Stonebridge Wellness LLC",
+        "NovaPath Learning Inc.",
+        "ClearSpring Distribution LLC",
+      ],
+    });
+    expect(threeOut.repairs).not.toContain("party_identity:defined_opening");
+    expect(threeOut.text).toContain("Stonebridge Wellness LLC");
+    expect(threeOut.text).toContain("NovaPath Learning Inc.");
+    expect(threeOut.text).toContain("ClearSpring Distribution LLC");
+    expect(threeOut.text).not.toMatch(/This Agreement is between /i);
+    assertClauseOnce(threeOut.text, OPERATIVE_CLAUSES[0]);
+
+    const fourOut = repairFullAgreementPartyIdentity({
+      text: four,
+      intakeRaw:
+        "Joint rollout among Ironclad Systems Group LLC, Harborline Data Solutions Inc., Northwind Automation Partners LLC, and Silver Mesa Analytics LP.",
+      partyNames: [
+        "Ironclad Systems Group LLC",
+        "Harborline Data Solutions Inc.",
+        "Northwind Automation Partners LLC",
+        "Silver Mesa Analytics LP",
+      ],
+    });
+    expect(fourOut.repairs).not.toContain("party_identity:defined_opening");
+    expect(fourOut.text).toContain("Ironclad Systems Group LLC");
+    expect(fourOut.text).toContain("Harborline Data Solutions Inc.");
+    expect(fourOut.text).toContain("Northwind Automation Partners LLC");
+    expect(fourOut.text).toContain("Silver Mesa Analytics LP");
+    expect(fourOut.text).not.toMatch(/This Agreement is between /i);
+    assertClauseOnce(fourOut.text, OPERATIVE_CLAUSES[3]);
+  });
+});
+
+describe("party short-form contact preservation", () => {
+  const oak = "Oak Street Holdings LLC";
+  const pine = "Pine Creek Manufacturing Inc.";
+  const oakAddr = "1 Oak Street, Wilmington, DE 19801";
+  const pineAddr = "9 Pine Creek Rd, Wilmington, DE 19802";
+  const wrapped = [
+    `This Agreement is between ${oak}, a Delaware limited liability company ("Client"), with a principal place of business at ${oakAddr},`,
+    `and ${pine}, a Delaware corporation ("Supplier"), with a principal place of business at ${pineAddr}`,
+    `(each a "Party" and collectively the "Parties").`,
+    "Client representative: Avery Oak.",
+    "Supplier representative: Casey Pine.",
+    "Oak Street shall provide access credentials.",
+  ].join("\n");
+  const intake = `Delaware supply agreement between ${oak} and ${pine}.`;
+
+  function expectContacts(text: string) {
+    expect(text).toContain("Client representative: Avery Oak.");
+    expect(text).not.toContain("Avery Oak Street");
+    expect(text).toContain("Supplier representative: Casey Pine.");
+    expect(text).not.toContain("Casey Pine Creek");
+    expect(text).toContain(oakAddr);
+    expect(text.split(oakAddr).length - 1).toBe(1);
+    expect(text).not.toContain("1 Client");
+    expect(text).toContain(pineAddr);
+    expect(text.split(pineAddr).length - 1).toBe(1);
+    expect(text).not.toContain("9 Service Provider");
+  }
+
+  it("replaceTruncatedPartyRefsWithRoleLabels does not rewrite streets or surnames", () => {
+    const records = resolveCanonicalPartyIdentitiesFromIntake(intake, [oak, pine])!;
+    const { text } = replaceTruncatedPartyRefsWithRoleLabels(wrapped, records);
+    expectContacts(text);
+    expect(text).toMatch(/Client shall provide access credentials/);
+    expect(text).not.toMatch(/^Oak Street shall provide access credentials\./m);
+  });
+
+  it("repairFullAgreementPartyIdentity keeps the same contact lines", () => {
+    const { text } = repairFullAgreementPartyIdentity({
+      text: wrapped,
+      intakeRaw: intake,
+      partyNames: [oak, pine],
+    });
+    expectContacts(text);
+    expect(text).toMatch(/Client shall provide access credentials/);
+  });
+
+  it("retains three- and four-party overlapping contact details", () => {
+    const threeBody = [
+      'This Agreement is among Stonebridge Wellness LLC ("Licensor"), NovaPath Learning Inc. ("Platform"), and ClearSpring Distribution LLC ("Distributor").',
+      "Licensor address: 10 Stonebridge Way, Tulsa, OK 74103.",
+      "Licensor representative: Jordan Stonebridge.",
+      "Platform address: 22 NovaPath Ave, Norman, OK 73072.",
+      "Platform representative: Sam NovaPath.",
+    ].join("\n");
+    const three = repairFullAgreementPartyIdentity({
+      text: threeBody,
+      intakeRaw:
+        "Oklahoma license among Stonebridge Wellness LLC, NovaPath Learning Inc., and ClearSpring Distribution LLC.",
+      partyNames: [
+        "Stonebridge Wellness LLC",
+        "NovaPath Learning Inc.",
+        "ClearSpring Distribution LLC",
+      ],
+    });
+    expect(three.text).toContain("Licensor address: 10 Stonebridge Way, Tulsa, OK 74103.");
+    expect(three.text).toContain("Licensor representative: Jordan Stonebridge.");
+    expect(three.text).not.toContain("Jordan Stonebridge Wellness");
+    expect(three.text).toContain("Platform address: 22 NovaPath Ave, Norman, OK 73072.");
+    expect(three.text).toContain("Platform representative: Sam NovaPath.");
+    expect(three.text).not.toContain("Sam NovaPath Learning");
+
+    const fourBody = [
+      "This Agreement is among Ironclad Systems Group LLC, Harborline Data Solutions Inc., Northwind Automation Partners LLC, and Silver Mesa Analytics LP.",
+      "Sponsor representative: Pat Ironclad.",
+      "Sponsor address: 3 Ironclad Way, Austin, TX 78701.",
+    ].join("\n");
+    const four = repairFullAgreementPartyIdentity({
+      text: fourBody,
+      intakeRaw:
+        "Joint rollout among Ironclad Systems Group LLC, Harborline Data Solutions Inc., Northwind Automation Partners LLC, and Silver Mesa Analytics LP.",
+      partyNames: [
+        "Ironclad Systems Group LLC",
+        "Harborline Data Solutions Inc.",
+        "Northwind Automation Partners LLC",
+        "Silver Mesa Analytics LP",
+      ],
+    });
+    expect(four.text).toContain("Sponsor representative: Pat Ironclad.");
+    expect(four.text).not.toContain("Pat Ironclad Systems");
+    expect(four.text).toContain("Sponsor address: 3 Ironclad Way, Austin, TX 78701.");
   });
 });

@@ -33,6 +33,11 @@ import { hasAcceptedPaidCreateFlowFreezeLatch } from "./authoritativeCreateFlowR
 import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import { getAuthoritativeAgreementDocument } from "./authoritativeAgreementDocument";
+import {
+  isDashboardResumeSurfaceActive,
+  selectDashboardResumePaint,
+} from "./paidProDashboardResumeAuthoritySelection";
+import { selectVerifiedPaidReviewPaper } from "./paidProVerifiedReviewPaper";
 
 /** Minimum frozen SoT length to force visible document shell (inclusive). */
 export const PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN = 1000;
@@ -50,6 +55,10 @@ function authoritativeAgreementDocumentCorpusLen(): number {
 
 /** Read-only canonical review corpus length for render routing (no SoT mutation). */
 export function resolveCanonicalReviewCorpusLenForRender(): number {
+  const verified = selectVerifiedPaidReviewPaper();
+  if (verified && verified.plain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN) {
+    return verified.plain.length;
+  }
   const authority = resolvePaidProReviewSessionAuthorityPaintPlain();
   if (authority && authority.plain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN) {
     return authority.plain.length;
@@ -69,6 +78,7 @@ export function resolveCanonicalReviewCorpusLenForRender(): number {
 }
 
 export function hasCanonicalReviewCorpusForRender(): boolean {
+  if (selectVerifiedPaidReviewPaper()) return true;
   if (hasPaidProReviewSessionAuthority() || hasPaidProSourceOfTruth() || hasFrozenCanonicalAgreementCorpus()) {
     return true;
   }
@@ -223,21 +233,35 @@ export function PaidProDocumentBodyForcedRoute({
   // Router may already force with pipeline/canonical sotLen while hasPaidProSourceOfTruth()
   // is still false — must still hand that plain to PaidProVisibleDocumentShell.
   // Post-finalize hydrated signing corpus wins over a longer pre-signer SoT (blank Name/Title).
-  const postFinalizePlain = isPaidProPostFinalizeHydratedCorpusLocked()
-    ? resolvePaidProPostFinalizeReviewPlain().trim()
-    : "";
+  const resumeActive = isDashboardResumeSurfaceActive({
+    agreementId: displayContext?.agreementId,
+  });
+  const resumePaint = resumeActive
+    ? selectDashboardResumePaint({ agreementId: displayContext?.agreementId })
+    : null;
+  const postFinalizePlain =
+    !resumeActive && isPaidProPostFinalizeHydratedCorpusLocked()
+      ? resolvePaidProPostFinalizeReviewPlain().trim()
+      : "";
+  const verifiedPlain =
+    selectVerifiedPaidReviewPaper({
+      agreementId: displayContext?.agreementId,
+    })?.plain.trim() || "";
   const authorityPlain = resolvePaidProReviewSessionAuthorityPaintPlain()?.plain.trim() || "";
   const sotPlain = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
   const pipelinePlain = readAcceptedPipelineReviewCorpusPlain().trim();
   const parentPlain = (displayContext?.acceptedCanonicalPlain || "").trim();
   const authoritativeDocPlain = getAuthoritativeAgreementDocument()?.fullCorpusText?.trim() || "";
-  const acceptedCanonicalPlain =
-    postFinalizePlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
+  const acceptedCanonicalPlain = resumeActive
+    ? resumePaint?.plain || ""
+    : postFinalizePlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
       ? postFinalizePlain
-      : [authorityPlain, sotPlain, pipelinePlain, authoritativeDocPlain, parentPlain].reduce(
-          (best, t) => (t.length > best.length ? t : best),
-          "",
-        );
+      : verifiedPlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
+        ? verifiedPlain
+        : [authorityPlain, sotPlain, pipelinePlain, authoritativeDocPlain, parentPlain].reduce(
+            (best, t) => (t.length > best.length ? t : best),
+            "",
+          );
   const shellDisplayContext: PaidProFirstReviewVisibleDisplayArgs = {
     ...(displayContext ?? {}),
     paidProActive: true,

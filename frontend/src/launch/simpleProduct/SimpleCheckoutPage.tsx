@@ -74,6 +74,7 @@ import { ensureGenesisReferralHandoffForCheckout } from "../genesisReferral/ensu
 import { getOrgId } from "../orgContext";
 import {
   createBillingCheckoutSession,
+  checkoutStartErrorCode,
   isStripeCheckoutApiConfigured,
 } from "../billingCheckoutApi";
 import { syncDemoSubscriptionEntitlementIfApplicable } from "../billingCheckoutDemoSync";
@@ -246,6 +247,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   );
 
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [checkoutRecoveryKind, setCheckoutRecoveryKind] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const finishedRef = useRef(false);
   const inFlightRef = useRef(false);
@@ -315,11 +317,15 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
     return () => window.cancelAnimationFrame(id);
   }, [agreementId, search]);
 
-  function fail(message: string): void {
+  function fail(message: string, kind?: string | null): void {
     setPaymentError(message);
+    setCheckoutRecoveryKind(kind ?? null);
     setProcessing(false);
     inFlightRef.current = false;
   }
+
+  const recoveryBlocksPay =
+    checkoutRecoveryKind === "purchase_unresolved" || checkoutRecoveryKind === "payment_processing";
 
   const applyConfirmedSettlement = useCallback(
     async (
@@ -424,7 +430,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   );
 
   async function startStripeCheckout(): Promise<void> {
-    if (finishedRef.current || processing || amountUsd == null) return;
+    if (finishedRef.current || processing || amountUsd == null || recoveryBlocksPay) return;
     // $9 single-agreement unlock is not a Pro subscription — refuse Stripe subscription mode.
     if (isSingleAgreementCheckout) {
       fail(
@@ -435,6 +441,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
     inFlightRef.current = true;
     setProcessing(true);
     setPaymentError(null);
+    setCheckoutRecoveryKind(null);
     try {
       const affiliateCode = getAffiliateCodeForAttribution();
       if (affiliateCode) {
@@ -463,13 +470,32 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       });
       window.location.assign(session.checkout_url);
     } catch (err) {
-      fail(err instanceof Error ? err.message : "Could not start Stripe checkout.");
+      const message = err instanceof Error ? err.message : "Could not start Stripe checkout.";
+      const code = checkoutStartErrorCode(err);
+      if (code === "already_subscribed" || /already has an active subscription|already_subscribed/i.test(message)) {
+        inFlightRef.current = false;
+        setProcessing(false);
+        navigate(returnTo);
+        return;
+      }
+      if (code === "purchase_unresolved" || /purchase_unresolved|could not confirm the previous checkout/i.test(message)) {
+        fail("We could not confirm the previous checkout. Do not pay again.", "purchase_unresolved");
+        return;
+      }
+      if (code === "payment_processing" || /payment_processing|being processed|do not pay again/i.test(message)) {
+        fail("Your payment is being processed. Do not pay again.", "payment_processing");
+        return;
+      }
+      fail(message);
     }
   }
 
   async function onCardPay(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
     if (finishedRef.current || processing || amountUsd == null) return;
+    if (checkoutRecoveryKind === "purchase_unresolved" || checkoutRecoveryKind === "payment_processing") {
+      return;
+    }
 
     const form = e.currentTarget;
     const isCreateFlowForm = form.querySelector("#cf-cc-name") !== null;
@@ -757,7 +783,12 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
           }
         >
         {paymentError ? (
-          <div className="rounded-lg border border-amber-800/45 bg-amber-950/25 px-4 py-3 text-sm text-amber-100" role="alert">
+          <div
+            className="rounded-lg border border-amber-800/45 bg-amber-950/25 px-4 py-3 text-sm text-amber-100"
+            role="alert"
+            data-testid="checkout-recovery-alert"
+            data-checkout-recovery={checkoutRecoveryKind || "error"}
+          >
             {paymentError}
           </div>
         ) : null}
@@ -903,7 +934,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
               </div>
               <button
                 type="submit"
-                disabled={processing || finishedRef.current}
+                disabled={processing || finishedRef.current || recoveryBlocksPay}
                 className="vs01-btn vs01-btn--primary mt-6 min-h-[3rem] w-full cursor-pointer px-6 py-3.5 text-base font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-[3.25rem]"
               >
                 {processing ? (
@@ -1077,7 +1108,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
                   </div>
                   <button
                     type="submit"
-                    disabled={processing || finishedRef.current}
+                    disabled={processing || finishedRef.current || recoveryBlocksPay}
                     className="vs01-btn vs01-btn--primary mt-2 min-h-[2.75rem] w-full cursor-pointer px-6 py-3.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {processing ? (

@@ -17,6 +17,7 @@ import { isDeterministicQuadPartyProFallbackSurface } from "./agreementDocumentS
 import { tracePaidProAcceptancePipelineStage } from "./paidProAcceptancePipelineTrace";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 import { detectPaidProMalformedServicesOpening } from "./paidProOpeningRecitalGuard";
+import { overlayCorpusDeclaredRoleLabels } from "./paidProAcceptedCorpusPartyRoles";
 import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
 import { applyMutualConsultingProfessionalQualityFloor } from "./paidProMutualConsultingQualityFloor";
 import { applyPaidProDomainScopeGuard } from "./paidProDomainScopeGuard";
@@ -63,6 +64,7 @@ import { extractLineSeparatedLegalEntityParties } from "./partySlotIdentityNorma
 import { insertBeforeExecutionTail } from "./paidProMutualConsultingQualityFloorInsert";
 import { gateOperativeClauseFamilyAppend } from "./documentCompositionAuthority";
 import { applyPaidProExecutiveDraftPolish } from "./paidProExecutiveDraftPolish";
+import { preservePartyEconomicRelationshipsInPaymentSection } from "./paidProPartyEconomicRelationships";
 
 function intakeJurisdictionFromSources(
   intakeText: string,
@@ -532,12 +534,14 @@ function preparePaidProServerDocumentForAcceptanceCore(
     draft: draft ?? null,
     intakeText,
   });
-  const records =
+  const records = overlayCorpusDeclaredRoleLabels(
     manifestRecords.length >= 3
       ? manifestRecords
       : resolved.length >= 2
         ? resolved
-        : manifestRecords;
+        : manifestRecords,
+    out,
+  );
   const expectedParties = Math.max(
     records.length,
     draftPartyNames.length,
@@ -733,6 +737,12 @@ function preparePaidProServerDocumentForAcceptanceCore(
       out = finalOrphan.text;
       repairs.push(...finalOrphan.repairs.map((r) => `${r}:final`));
     }
+  }
+
+  const related = preservePartyEconomicRelationshipsInPaymentSection(out, intakeText);
+  if (related !== out) {
+    out = related;
+    repairs.push("prepare:party_economic_relationships_preserved");
   }
 
   const result = { text: out.trim(), repairs: [...new Set(repairs)] };

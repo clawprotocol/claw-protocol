@@ -130,7 +130,7 @@ const NON_PARTY_OCCUPATIONAL_NAME_RE =
 const NON_PARTY_METADATA_NAME_RE =
   /^(?:role|attn|attention|email|by|name|title|address|contact)$/i;
 
-function isNonCommercialPartyName(name: string | null | undefined): boolean {
+export function isNonCommercialPartyName(name: string | null | undefined): boolean {
   const t = (name || "").replace(/\s+/g, " ").trim();
   if (!t) return true;
   if (NON_PARTY_METADATA_NAME_RE.test(t)) return true;

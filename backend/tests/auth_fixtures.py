@@ -209,13 +209,14 @@ def persist_and_accept_review_snapshot(
     from backend.services.accepted_review_snapshot import sha256_hex_text
 
     h = headers or {}
+    corpus_plain = (corpus or "").strip()
     create = client.post(
         f"/api/agreements/{aid}/canonical-review-snapshot",
         headers=h,
         json={
-            "corpus_plain": corpus,
+            "corpus_plain": corpus_plain,
             "generation_session_id": generation_session_id,
-            "claimed_digest": sha256_hex_text(corpus),
+            "claimed_digest": sha256_hex_text(corpus_plain),
         },
     )
     assert create.status_code == 200, create.text
@@ -232,3 +233,133 @@ def persist_and_accept_review_snapshot(
     )
     assert accept.status_code == 200, accept.text
     return accept.json()["accepted"]
+
+
+FIXTURE_REVIEW_CORPUS = (
+    "LawDog fixture commercial review corpus. " * 40
+    + "Accepted snapshot authority for party-bound signing tests.\n"
+)
+
+
+def load_agreement_draft_for_tests(client, aid: str, headers: Dict[str, str]) -> Dict[str, Any]:
+    got = client.get(f"/api/agreements/{aid}", headers=headers)
+    assert got.status_code == 200, got.text
+    return got.json()["draft"]
+
+
+def persisted_party_id(
+    draft: Dict[str, Any],
+    *,
+    name: str = "",
+    role: str = "",
+) -> str:
+    want_name = (name or "").strip().lower()
+    want_role = (role or "").strip().lower()
+    for raw in draft.get("parties") or []:
+        if not isinstance(raw, dict):
+            continue
+        pid = str(raw.get("id") or "").strip()
+        if not pid:
+            continue
+        if want_name and str(raw.get("name") or "").strip().lower() != want_name:
+            continue
+        if want_role and str(raw.get("role") or "").strip().lower() != want_role:
+            continue
+        return pid
+    raise AssertionError(f"persisted party not found name={name!r} role={role!r}")
+
+
+def persisted_signer_party_ids(draft: Dict[str, Any]) -> List[str]:
+    out: List[str] = []
+    for raw in draft.get("parties") or []:
+        if not isinstance(raw, dict):
+            continue
+        if str(raw.get("role") or "").strip().lower() != "signer":
+            continue
+        pid = str(raw.get("id") or "").strip()
+        if pid:
+            out.append(pid)
+    return out
+
+
+def mint_party_bound_recipient_token(
+    client,
+    aid: str,
+    headers: Dict[str, str],
+    *,
+    mode: str,
+    recipient_party_id: str,
+    role: str = "signer",
+    inviter_display_name: str = "Owner",
+) -> str:
+    minted = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=headers,
+        json={
+            "mode": mode,
+            "role": role,
+            "recipient_party_id": recipient_party_id,
+            "inviter_display_name": inviter_display_name,
+        },
+    )
+    assert minted.status_code == 200, minted.text
+    token = str(minted.json().get("token") or "").strip()
+    assert token
+    return token
+
+
+def persist_accept_party_bound_approvals_and_lock(
+    client,
+    aid: str,
+    headers: Dict[str, str],
+    *,
+    locked_version_id: str,
+    corpus: Optional[str] = None,
+    signer_party_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Seed accepted snapshot, party-bound approvals, and owner signing lock."""
+    draft = load_agreement_draft_for_tests(client, aid, headers)
+    signers = list(signer_party_ids or persisted_signer_party_ids(draft))
+    assert signers, "fixture requires persisted signer party ids"
+    accepted = persist_and_accept_review_snapshot(
+        client,
+        aid,
+        corpus or FIXTURE_REVIEW_CORPUS,
+        headers=headers,
+    )
+    snap_id = str(accepted.get("snapshot_id") or "").strip()
+    digest = str(accepted.get("corpus_sha256") or "").strip()
+    assert snap_id and digest
+    for pid in signers:
+        token = mint_party_bound_recipient_token(
+            client,
+            aid,
+            headers,
+            mode="review",
+            recipient_party_id=pid,
+        )
+        approved = client.post(
+            f"/api/agreements/{aid}/recipient-approve",
+            headers={"X-Claw-Recipient-Access-Token": token},
+            json={
+                "participant_id": pid,
+                "snapshot_id": snap_id,
+                "expected_digest": digest,
+            },
+        )
+        assert approved.status_code == 200, approved.text
+    lock = client.put(
+        f"/api/agreements/{aid}/signing-lock",
+        headers=headers,
+        json={
+            "locked_version_id": locked_version_id,
+            "locked_at": "2026-04-01T12:00:00Z",
+            "locked_by": "owner",
+        },
+    )
+    assert lock.status_code == 200, lock.text
+    return {
+        "accepted": accepted,
+        "signer_party_ids": signers,
+        "signing_lock": lock.json().get("signing_lock") or {},
+    }

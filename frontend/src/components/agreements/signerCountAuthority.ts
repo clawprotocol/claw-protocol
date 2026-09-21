@@ -7,9 +7,10 @@
 
 import { findSignatureLineAnchorsFromCorpusText } from "../../vs01/vs01SignatureBlockAnchors";
 import { labeledPartyLegalEntities, quotedRolePartyLegalEntities } from "./labeledPartyBlockParse";
-import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { isAgreementSectionHeadingPartyName, isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import {
   collapsePartySlotCandidates,
+  isInvalidPartySlotLegalEntity,
   resolveAuthoritativeIntakePartyNames,
   resolveAuthoritativePartySlotCount,
   resolveDeclaredExplicitPartyCount,
@@ -30,7 +31,7 @@ import {
   extractBetweenPartyNameListForAuthority,
   isBetweenClausePartyCandidate,
 } from "./partyBetweenParse";
-import { countRealParties } from "./starterPartyLimits";
+import { countRealParties, isNonCommercialPartyName, isPlaceholderPartyName } from "./starterPartyLimits";
 import { readLegalPartyCountFromTypedHandoff } from "./starterToPaidPartyHandoff";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import { resolveDeterministicQuadPartyNames } from "./deterministicQuadPartyProFallback";
@@ -225,6 +226,42 @@ export function resolveIntakeManifestAuthorityCount(intakeText: string | null | 
   return 0;
 }
 
+function confirmedAddedIndividualPartyNames(
+  draftNames: readonly string[],
+  intake: string,
+): string[] {
+  const intakeKeys = new Set(
+    [
+      ...resolveAuthoritativeIntakePartyNames(intake),
+      ...extractBetweenPartyNameListForAuthority(intake),
+      ...labeledPartyLegalEntities(intake),
+    ]
+      .map((name) =>
+        name
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase()
+          .replace(/[.,;:]+$/g, ""),
+      )
+      .filter(Boolean),
+  );
+  const out: string[] = [];
+  for (const raw of draftNames) {
+    const name = String(raw || "").replace(/\s+/g, " ").trim();
+    if (!name || isPlaceholderPartyName(name) || isNonCommercialPartyName(name)) continue;
+    if (isAgreementSectionHeadingPartyName(name) || isInvalidPartySlotLegalEntity(name)) continue;
+    if (isAuthoritativeLegalEntityName(name)) continue;
+    const words = name.split(/\s+/);
+    if (words.length < 2 || words.length > 4 || !words.every((word) => /^[A-Za-z][A-Za-z'.-]*$/.test(word))) {
+      continue;
+    }
+    const key = name.toLowerCase().replace(/[.,;:]+$/g, "");
+    if (intakeKeys.has(key) || out.some((existing) => existing.toLowerCase() === key)) continue;
+    out.push(name);
+  }
+  return out;
+}
+
 function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): SignerCountAuthorityResolution {
   const intake = String(args.intakeText ?? "").trim();
   const namedDumpPartyCount = extractNamedDumpPartyUnits(intake).length;
@@ -410,6 +447,15 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     source = "party_slot_count";
   }
 
+  const addedIndividuals = confirmedAddedIndividualPartyNames(draftNames, intake);
+  if (addedIndividuals.length > 0) {
+    count = Math.min(
+      PAID_PRO_AUTHORITY_MAX_PARTIES,
+      Math.max(count, Math.max(authoritativeIntakeCount, 2) + addedIndividuals.length),
+    );
+    source = "draft_parties";
+  }
+
   let finalCount = Math.max(2, Math.min(count, PAID_PRO_AUTHORITY_MAX_PARTIES));
   const intakeManifestAuthorityCount = resolveIntakeManifestAuthorityCount(intake);
   if (intake && intakeDescribesBrandLicensingDistributionManufacturingStack(intake)) {
@@ -428,7 +474,14 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   // the authority count above N. User-driven expansion beyond the manifest is still honored.
   const userExpandedPartyCount = Math.max(0, args.userExpandedPartyCount ?? 0);
   if (intakeManifestAuthorityCount >= 2 && userExpandedPartyCount <= intakeManifestAuthorityCount) {
-    finalCount = Math.min(finalCount, Math.min(intakeManifestAuthorityCount, PAID_PRO_AUTHORITY_MAX_PARTIES));
+    if (addedIndividuals.length > 0) {
+      finalCount = Math.min(
+        PAID_PRO_AUTHORITY_MAX_PARTIES,
+        Math.max(finalCount, Math.max(authoritativeIntakeCount, 2) + addedIndividuals.length),
+      );
+    } else {
+      finalCount = Math.min(finalCount, Math.min(intakeManifestAuthorityCount, PAID_PRO_AUTHORITY_MAX_PARTIES));
+    }
   }
 
   return {

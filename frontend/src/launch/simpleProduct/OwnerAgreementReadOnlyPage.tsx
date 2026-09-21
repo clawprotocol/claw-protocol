@@ -3,10 +3,14 @@ import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { RecipientControlCenter } from "../../agreement/RecipientControlCenter";
 import { PremiumAgreementReadonlyView } from "../../components/agreements/PremiumAgreementReadonlyView";
 import { computeReviewApprovalStatus } from "../../components/agreements/draftRecipientReviewSignals";
-import { displayCreatorAgreementTitle } from "../creatorDashboardPresentation";
+import { resolveSignedRecordDisplayTitle } from "../ownerSignedAgreementPresentation";
 import { CREATOR_MANAGE_RECIPIENTS_LABEL } from "../creatorDashboardCopy";
 import { useLaunchNav } from "../LaunchNavContext";
-import { loadOwnerAgreementReadOnlyPreview } from "../ownerAgreementReadOnlyView";
+import {
+  bootOwnerAgreementReadOnlyPreviewFromVerifiedPaper,
+  loadOwnerAgreementReadOnlyPreview,
+} from "../ownerAgreementReadOnlyView";
+import { selectVerifiedPaidReviewPaper } from "../../components/agreements/paidProVerifiedReviewPaper";
 import { AppShell } from "../AppShell";
 
 type Props = {
@@ -22,11 +26,15 @@ function recipientsPanelInitiallyOpen(search: string): boolean {
 export function OwnerAgreementReadOnlyPage(props: Props) {
   const { agreementId } = props;
   const { navigate, search } = useLaunchNav();
-  const [loading, setLoading] = useState(true);
+  const verifiedBoot = useMemo(
+    () => bootOwnerAgreementReadOnlyPreviewFromVerifiedPaper(agreementId),
+    [agreementId],
+  );
+  const [loading, setLoading] = useState(!verifiedBoot);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [title, setTitle] = useState("Agreement");
-  const [previewHtml, setPreviewHtml] = useState("");
-  const [usesPremiumDocument, setUsesPremiumDocument] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState(verifiedBoot?.html ?? "");
+  const [usesPremiumDocument, setUsesPremiumDocument] = useState(Boolean(verifiedBoot?.usesPremiumDocument));
   const [progressLine, setProgressLine] = useState<string | null>(null);
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [manageRecipientsOpen, setManageRecipientsOpen] = useState(() =>
@@ -40,7 +48,9 @@ export function OwnerAgreementReadOnlyPage(props: Props) {
   }, [draft]);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!selectVerifiedPaidReviewPaper({ agreementId })) {
+      setLoading(true);
+    }
     setLoadError(null);
     const loaded = await loadOwnerAgreementReadOnlyPreview(agreementId);
     if (!loaded) {
@@ -51,7 +61,12 @@ export function OwnerAgreementReadOnlyPage(props: Props) {
       return;
     }
     setDraft(loaded.draft);
-    setTitle(displayCreatorAgreementTitle(loaded.draft.title ?? ""));
+    setTitle(
+      resolveSignedRecordDisplayTitle({
+        draftTitle: loaded.draft.title,
+        corpusText: loaded.corpusText,
+      }).title,
+    );
     const agg = computeReviewApprovalStatus(loaded.draft);
     if (agg.requiredReviewerCount > 0) {
       setProgressLine(`${agg.approvedReviewerCount} of ${agg.requiredReviewerCount} approved`);

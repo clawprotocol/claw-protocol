@@ -34,6 +34,7 @@ import {
   feedbackAfterReviewLinksCreated,
   feedbackAfterSigningLinksCreated,
 } from "./journeyActionFeedback";
+import { resolveUserActionFeedback } from "./userActionFeedback";
 import { PAID_PRO_DELIVERY_TRACK_REVIEW_DESCRIPTION, PAID_PRO_DELIVERY_TRACK_SIGNATURE_DESCRIPTION } from "./paidProDeliveryTrackGtmCopy";
 import type { LivePreviewModel } from "./liveDraftHeuristics";
 import type { PremiumFinalizeAudit } from "./premiumFinalizeAuditTypes";
@@ -386,6 +387,13 @@ describe("core user journey closure — readiness and feedback", () => {
     expect(
       feedbackAfterLinkFailure({ kind: "signing", saved: true, fieldRemedy: "Correct Party 2’s email" }),
     ).toMatch(/Signing links were not created/);
+    const alreadyReady = resolveUserActionFeedback({
+      actor: "owner",
+      action: "create_review_links",
+      outcome: "already_complete",
+    });
+    expect(alreadyReady.title).toBe(CUSTOMER_JOURNEY_STATE.reviewLinksAlreadyReady);
+    expect(alreadyReady.body).toBe(feedbackAfterReviewLinksAlreadyReady());
   });
 
   it("14–15. reload resume and in-flight retry guards remain wired", () => {

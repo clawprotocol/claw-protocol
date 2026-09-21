@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fingerprintAgreementBody } from "./guidedSigningPacketVersion";
-import { buildGuidedVs01SigningHandoff } from "./guidedVs01SigningHandoff";
+import { buildGuidedVs01SigningHandoff, assertGuidedProVs01BridgeCorpusReady } from "./guidedVs01SigningHandoff";
 import { stripPhantomGuidedSectionMarkers } from "./guidedFinalReviewToSigning";
 import {
   corpusHasVisibleSignatureExecutionLines,
@@ -104,5 +104,35 @@ By: ______________________`;
     expect(cleaned.text).not.toMatch(/^\s*4\.2\.\s*$/m);
     expect(cleaned.text).not.toMatch(/^\s*\*\*7\.\*\*\s*$/m);
     expect(cleaned.repairs.length).toBeGreaterThan(0);
+  });
+
+  it("keeps By: structure checks for accepted_review provenance; length alone is not signing-ready", () => {
+    const corpus = `${"Joint AI software rollout. Ironclad Systems Group LLC is the Sponsor. Harborline Data Solutions Inc. is the Vendor. Northwind Automation Partners LLC is the Integrator. Silver Mesa Analytics LP is the Analyst. Notices: notices@silvermesaanalytics.com. Fee $187,500. Term 24 months. Texas law. Austin ZIP 78701. ".repeat(12)}`;
+    expect(corpus).not.toMatch(/\bBy\s*:/i);
+    expect(
+      assertGuidedProVs01BridgeCorpusReady(
+        buildGuidedVs01SigningHandoff({
+          corpusText: corpus,
+          source: "accepted_review",
+        }),
+      ).ok,
+    ).toBe(false);
+    expect(
+      assertGuidedProVs01BridgeCorpusReady(
+        buildGuidedVs01SigningHandoff({
+          corpusText: corpus,
+          source: "finalized_signer_applied_guided_corpus",
+        }),
+      ).ok,
+    ).toBe(false);
+    const withByLines = frozenCorpus(20);
+    expect(
+      assertGuidedProVs01BridgeCorpusReady(
+        buildGuidedVs01SigningHandoff({
+          corpusText: withByLines,
+          source: "accepted_review",
+        }),
+      ).ok,
+    ).toBe(true);
   });
 });

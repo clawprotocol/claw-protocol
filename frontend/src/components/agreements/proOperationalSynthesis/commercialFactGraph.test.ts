@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { TEST487_PRODUCTION_INTAKE } from "../paidProTest487ProductionValidationFixtures";
 import {
   buildCommercialFactGraph,
   commercialFactGraphToGuidanceLines,
@@ -10,6 +11,11 @@ const JV_INTAKE =
   "Joint venture LLC between Stone Ridge Developer LLC and Atlas Capital Fund II for a 180-unit workforce housing rehab in Columbus Ohio. Atlas provides pref equity $18M; Stone Ridge manages construction and leasing. Waterfall: 8% preferred return to Atlas, then 50/50 profit split. Capital calls require 10 business days notice with cure for missed calls. Deadlock on major decisions resolved by mutual buy-sell mechanism. Books audited annually. Mutual confidentiality on underwriting model.";
 
 describe("commercialFactGraph joint venture economics", () => {
+  it("does not treat an independent-contractor disclaimer as a joint venture", () => {
+    expect(isJointVentureEconomicsIntake(TEST487_PRODUCTION_INTAKE)).toBe(false);
+    expect(buildCommercialFactGraph(TEST487_PRODUCTION_INTAKE).agreementKind).not.toBe("joint_venture_economics");
+  });
+
   it("detects JV / profit-share economics intake", () => {
     expect(isJointVentureEconomicsIntake(JV_INTAKE)).toBe(true);
     const anchors = extractJointVentureEconomicsAnchors(JV_INTAKE);

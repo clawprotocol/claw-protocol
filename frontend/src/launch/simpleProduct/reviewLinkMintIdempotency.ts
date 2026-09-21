@@ -1,5 +1,6 @@
 import type { AgreementParty } from "../../agreement/agreementTypes";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
+import { getCachedAccessToken, refreshCachedAccessToken } from "../../auth/authAccessTokenCache";
 import { resolveApiBase } from "../../lib/clawApi";
 import type { ReviewerLinkRow } from "./reviewerLinkRowModel";
 
@@ -15,22 +16,71 @@ export function stableReviewRecipientPartyId(raw: string | null | undefined): st
   return id;
 }
 
+/**
+ * Unique legal-name key for id recovery. Strips trailing punctuation and a leading
+ * ordinal; never uses prefix/contains matching.
+ */
+export function normalizeReviewPartyNameKey(name: string | undefined | null): string {
+  return String(name || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.,;:]+$/g, "")
+    .replace(/^\d+\s+/, "")
+    .toLowerCase();
+}
+
+export function uniqueStableIdsByReviewPartyNameKey(
+  authority: readonly AgreementParty[],
+): Map<string, string> {
+  const idsByKey = new Map<string, string[]>();
+  for (const a of authority) {
+    const id = stableReviewRecipientPartyId(a.id);
+    const key = normalizeReviewPartyNameKey(a.name);
+    if (!id || !key) continue;
+    const list = idsByKey.get(key) ?? [];
+    if (!list.includes(id)) list.push(id);
+    idsByKey.set(key, list);
+  }
+  const unique = new Map<string, string>();
+  for (const [key, ids] of idsByKey) {
+    if (ids.length === 1) unique.set(key, ids[0]!);
+  }
+  return unique;
+}
+
 export function hydrateReviewPartyIdsFromAuthority(
   parties: readonly AgreementParty[],
   authority: readonly AgreementParty[],
 ): AgreementParty[] {
-  const byName = new Map<string, string>();
-  for (const a of authority) {
-    const id = stableReviewRecipientPartyId(a.id);
-    const name = String(a.name ?? "").trim().toLowerCase();
-    if (id && name && !byName.has(name)) byName.set(name, id);
-  }
+  const byUniqueKey = uniqueStableIdsByReviewPartyNameKey(authority);
   return parties.map((p) => {
     const existing = stableReviewRecipientPartyId(p.id);
     if (existing) return { ...p, id: existing };
-    const recovered = byName.get(String(p.name ?? "").trim().toLowerCase()) ?? "";
+    const recovered = byUniqueKey.get(normalizeReviewPartyNameKey(p.name)) ?? "";
     return recovered ? { ...p, id: recovered } : { ...p };
   });
+}
+
+export type ReviewPartyIdentityLogRow = {
+  index: number;
+  name: string;
+  nameKey: string;
+  hasStableId: boolean;
+  idPrefix: string;
+};
+
+export function reviewPartyIdentityLogRow(
+  party: AgreementParty | undefined,
+  index: number,
+): ReviewPartyIdentityLogRow {
+  const id = stableReviewRecipientPartyId(party?.id);
+  return {
+    index,
+    name: String(party?.name ?? "").trim(),
+    nameKey: normalizeReviewPartyNameKey(party?.name),
+    hasStableId: Boolean(id),
+    idPrefix: id ? id.slice(0, 8) : "",
+  };
 }
 
 export function activeReviewInvitePartyIdsFromRegistry(raw: unknown): Set<string> {
@@ -85,14 +135,35 @@ export type ReviewLinkMintAuthority = {
   activeInvitePartyIds: Set<string>;
 };
 
+function shortAgreementId(id: string): string {
+  const t = id.trim();
+  if (t.length <= 12) return t;
+  return `${t.slice(0, 8)}…`;
+}
+
 export async function fetchReviewLinkMintAuthority(agreementId: string): Promise<ReviewLinkMintAuthority> {
   const id = agreementId.trim();
   if (!id) return { parties: [], activeInvitePartyIds: new Set() };
   try {
+    const token = (await refreshCachedAccessToken()) || getCachedAccessToken();
     const res = await fetch(`${resolveApiBase().replace(/\/$/, "")}/api/agreements/${encodeURIComponent(id)}`, {
-      headers: clawAgreementHeaders({ Accept: "application/json" }) as Record<string, string>,
+      headers: {
+        ...(clawAgreementHeaders({ Accept: "application/json" }) as Record<string, string>),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     });
-    if (!res.ok) return { parties: [], activeInvitePartyIds: new Set() };
+    if (!res.ok) {
+      // eslint-disable-next-line no-console
+      console.info("[review-link-mint-authority]", {
+        agreementIdShort: shortAgreementId(id),
+        httpOk: false,
+        httpStatus: res.status,
+        partyCount: 0,
+        parties: [],
+        source: "http_error",
+      });
+      return { parties: [], activeInvitePartyIds: new Set() };
+    }
     const j = (await res.json()) as { draft?: Record<string, unknown> };
     const draft = j.draft && typeof j.draft === "object" ? j.draft : {};
     const parties: AgreementParty[] = [];
@@ -111,11 +182,29 @@ export async function fetchReviewLinkMintAuthority(agreementId: string): Promise
         });
       }
     }
+    // eslint-disable-next-line no-console
+    console.info("[review-link-mint-authority]", {
+      agreementIdShort: shortAgreementId(id),
+      httpOk: true,
+      httpStatus: res.status,
+      partyCount: parties.length,
+      parties: parties.map((p, index) => reviewPartyIdentityLogRow(p, index)),
+      source: "get_ok",
+    });
     return {
       parties,
       activeInvitePartyIds: activeReviewInvitePartyIdsFromRegistry(draft.recipient_delivery_v1),
     };
   } catch {
+    // eslint-disable-next-line no-console
+    console.info("[review-link-mint-authority]", {
+      agreementIdShort: shortAgreementId(id),
+      httpOk: false,
+      httpStatus: 0,
+      partyCount: 0,
+      parties: [],
+      source: "network_error",
+    });
     return { parties: [], activeInvitePartyIds: new Set() };
   }
 }

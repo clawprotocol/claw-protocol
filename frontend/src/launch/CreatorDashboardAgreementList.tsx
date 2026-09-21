@@ -224,6 +224,14 @@ export function CreatorDashboardAgreementList(props: Props) {
                   <h3 className="truncate text-base font-semibold tracking-tight text-white">
                     {displayCreatorAgreementTitle(row.title)}
                   </h3>
+                  {row.document_kind === "uploaded_final_pdf" || row.uploaded_final_pdf ? (
+                    <p
+                      className="mt-1 text-xs text-slate-400"
+                      data-testid={`creator-dashboard-uploaded-final-pdf-${row.id}`}
+                    >
+                      Uploaded final PDF signed through LawDog — not a LawDog-drafted agreement.
+                    </p>
+                  ) : null}
                   {statusPill ? (
                     <span
                       className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${
@@ -254,7 +262,9 @@ export function CreatorDashboardAgreementList(props: Props) {
                     Agreement content unavailable — metadata only.
                   </p>
                 ) : null}
-                {row.accepted_review_snapshot?.snapshot_id &&
+                {row.document_kind !== "uploaded_final_pdf" &&
+                !row.uploaded_final_pdf &&
+                row.accepted_review_snapshot?.snapshot_id &&
                 row.accepted_review_snapshot?.corpus_sha256 ? (
                   <p
                     className="mt-2 font-mono text-[11px] leading-relaxed text-slate-500"

@@ -12,6 +12,7 @@ describe("starterRoleLabelGuard", () => {
     expect(isSignerTitleLikeRole("CEO")).toBe(true);
     expect(isSignerTitleLikeRole("President")).toBe(true);
     expect(isSignerTitleLikeRole("Managing Partner")).toBe(true);
+    expect(isSignerTitleLikeRole("Managing Member")).toBe(true);
     expect(isSignerTitleLikeRole("Client")).toBe(false);
     expect(isSignerTitleLikeRole("Service Provider")).toBe(false);
     expect(isSignerTitleLikeRole("party")).toBe(false);

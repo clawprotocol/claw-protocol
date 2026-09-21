@@ -451,7 +451,7 @@ Date: _________________________
     expect(handleBlock).toContain("REVIEW_FIRST_SIMPLE_PRO_SOURCE");
     expect(handleBlock).not.toContain("setPremiumSendConfirmOpen(true)");
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const handoffBlock = intake.slice(handoffIdx, handoffIdx + 15000);
+    const handoffBlock = intake.slice(handoffIdx, handoffIdx + 17000);
     expect(handoffBlock).toContain("logReviewFirstHandoffStart");
     expect(handoffBlock).toContain("writeReviewFirstHandoffSource");
     expect(handoffBlock).toContain("clearReviewFirstHandoffSource");
@@ -487,6 +487,13 @@ Date: _________________________
     expect(handoffBlock).toContain("mergeDraftPartiesFromCanonicalIdentities");
     expect(handoffBlock).toContain("enterGuidedSignatureTrackRoute");
     expect(handoffBlock).not.toContain("void onGenerate()");
+    expect(handoffBlock).not.toContain("openConfirmModal");
+    expect(handoffBlock).not.toContain("setPremiumSendConfirmOpen(true)");
+    expect(intake).toContain("enterGuidedSignatureTrackRouteRef.current?.()");
+    const confirmIdx = intake.indexOf("const handleGuidedSigningConfirmationContinue = React.useCallback");
+    const confirmBlock = intake.slice(confirmIdx, confirmIdx + 700);
+    expect(confirmBlock).toContain("completeGuidedSigningHandoff(intent)");
+    expect(confirmBlock).not.toContain("openConfirmModal");
     const signingIdx = intake.indexOf("const continueGuidedFinalReviewToSigning = React.useCallback");
     const signingEnd = intake.indexOf("const handleProSendForReview = React.useCallback", signingIdx);
     const signingBlock = intake.slice(

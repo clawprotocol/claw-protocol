@@ -342,6 +342,25 @@ export function longestPlainForAgreementPersist(
   return canonicalizeHandoffCorpus(candidates.reduce((a, b) => (b.length > a.length ? b : a)), merged);
 }
 
+/**
+ * Create-record persist: accepted premium/server paper may be stored.
+ * Before that, explicit customer purpose outranks a longer generated preview.
+ */
+export function plainForCreateRecordPersist(
+  merged: ParsedDraftShape,
+  agreementEditorPlain: string | null | undefined,
+): string {
+  const premium = [
+    String(merged.premium_full_document_text ?? "").trim(),
+    String(merged.premium_server_full_document_text ?? "").trim(),
+    String(merged.premium_server_repair_document_text ?? "").trim(),
+  ].filter((text) => text.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN);
+  if (premium.length > 0 || hasMaterialPremiumPipelineCorpus(merged)) {
+    return longestPlainForAgreementPersist(merged, agreementEditorPlain);
+  }
+  return String(merged.purpose ?? "").trim();
+}
+
 export type BuildSendRouteReadonlyHtmlOpts = {
   /**
    * Centered label above the body. Default: draft disclaimer for free/starter.

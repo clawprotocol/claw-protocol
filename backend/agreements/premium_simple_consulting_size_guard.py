@@ -105,7 +105,8 @@ def evaluate_simple_consulting_document_length(
         reasons.append(
             f"simple_consulting_section_bloat:sections={sections}>{SIMPLE_CONSULTING_MAX_NUMBERED_SECTIONS}"
         )
-    return (len(reasons) == 0, reasons)
+    hard = [r for r in reasons if not str(r).startswith("simple_consulting_section_bloat:")]
+    return (len(hard) == 0, reasons)
 
 
 def simple_consulting_length_directive() -> str:

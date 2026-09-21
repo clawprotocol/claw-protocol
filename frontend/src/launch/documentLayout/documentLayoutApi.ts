@@ -1,5 +1,5 @@
-import { apiUrl, errorMessageFromResponse, readJson } from "../../lib/clawApi";
-import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
+import { errorMessageFromResponse, readJson } from "../../lib/clawApi";
+import { ownerApiFetch } from "../../lib/ownerApiClient";
 
 export type LayoutBboxNormalized = {
   x: number;
@@ -104,15 +104,18 @@ export type ReviewAction = {
 };
 
 export async function fetchLayoutAnalysis(analysisId: string): Promise<LayoutAnalysisResponse> {
-  const res = await fetch(apiUrl(`/v1/document-layout/analysis/${encodeURIComponent(analysisId)}`));
+  const res = await ownerApiFetch(`/v1/document-layout/analysis/${encodeURIComponent(analysisId)}`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  });
   if (!res.ok) throw new Error(await errorMessageFromResponse(res, "Could not load layout analysis."));
   return readJson<LayoutAnalysisResponse>(res);
 }
 
 export async function postFieldReviewOpen(analysisId: string): Promise<void> {
-  const res = await fetch(
-    apiUrl(`/v1/document-layout/analysis/${encodeURIComponent(analysisId)}/field-review/open`),
-    { method: "POST", headers: clawAgreementHeaders() },
+  const res = await ownerApiFetch(
+    `/v1/document-layout/analysis/${encodeURIComponent(analysisId)}/field-review/open`,
+    { method: "POST" },
   );
   if (!res.ok) throw new Error(await errorMessageFromResponse(res, "Could not open field review."));
 }
@@ -121,11 +124,20 @@ export async function putReviewManifest(
   analysisId: string,
   actions: ReviewAction[],
 ): Promise<LayoutAnalysisResponse> {
-  const res = await fetch(apiUrl(`/v1/document-layout/analysis/${encodeURIComponent(analysisId)}/review-manifest`), {
+  const res = await ownerApiFetch(`/v1/document-layout/analysis/${encodeURIComponent(analysisId)}/review-manifest`, {
     method: "PUT",
-    headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ actions }),
   });
   if (!res.ok) throw new Error(await errorMessageFromResponse(res, "Could not save review."));
   return readJson<LayoutAnalysisResponse>(res);
+}
+
+export async function fetchOwnerDocumentContent(documentId: string): Promise<Blob> {
+  const res = await ownerApiFetch(`/v1/documents/${encodeURIComponent(documentId)}/content`, {
+    method: "GET",
+    headers: { Accept: "application/pdf, image/*, application/octet-stream, */*" },
+  });
+  if (!res.ok) throw new Error(await errorMessageFromResponse(res, "Could not load document preview."));
+  return res.blob();
 }

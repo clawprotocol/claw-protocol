@@ -119,7 +119,11 @@ function intakeCategorySupport(blob: string, category: DomainScopeCategory): boo
     case "software":
       return /\b(?:software|SaaS|application|app|source\s+code)\b/i.test(text);
     case "implementation_support":
-      return intakeAllowsGenericImplementationLanguage(text) || /\bimplementation\s+(?:support|assistance)\b/i.test(text);
+      return (
+        intakeAllowsGenericImplementationLanguage(text) ||
+        /\bimplementation\s+(?:support|assistance)\b/i.test(text) ||
+        /\bAI\s+workflow\s+implementation\b/i.test(text)
+      );
     case "demo":
       return /\b(?:demo|demonstration|walkthrough)\b/i.test(text);
     case "acceptance_review":
@@ -150,8 +154,41 @@ export function intakeExplicitlyRequestsDomainScope(blob: string): boolean {
 }
 
 export function intakeSupportsDomainCategory(blob: string, category: DomainScopeCategory): boolean {
-  if (intakeExplicitlyRequestsDomainScope(blob)) return true;
   return intakeCategorySupport(blob, category);
+}
+
+export function explicitCustomerScopePhrases(intake: string): string[] {
+  const text = (intake || "").trim();
+  if (!text) return [];
+  const out: string[] = [];
+  const labeled = text.match(/\b(?:scope|purpose|services?)\s*(?:is|:|-)\s*([^.!\n]+)/i);
+  if (labeled?.[1]) {
+    const phrase = labeled[1].replace(/\s+/g, " ").trim();
+    if (phrase.length >= 8) out.push(phrase);
+  }
+  for (const match of text.matchAll(/\bAI\s+workflow(?:\s+(?:implementation|setup|services?))?/gi)) {
+    if (match[0]) out.push(match[0].replace(/\s+/g, " ").trim());
+  }
+  return [...new Set(out)];
+}
+
+function sectionKeepsCustomerScope(sectionBody: string, intake: string): boolean {
+  const body = (sectionBody || "").toLowerCase();
+  if (!body.trim()) return false;
+  return explicitCustomerScopePhrases(intake).some((phrase) => phrase.length >= 8 && body.includes(phrase.toLowerCase()));
+}
+
+function unsupportedObligationIds(corpus: string, intake: string): string[] {
+  const text = corpus || "";
+  const intakeText = (intake || "").trim();
+  const ids: string[] = [];
+  for (const rule of UNSUPPORTED_OBLIGATION_RULES) {
+    if (rule.intakeSupports(intakeText)) continue;
+    rule.pattern.lastIndex = 0;
+    if (rule.pattern.test(text)) ids.push(rule.id);
+    rule.pattern.lastIndex = 0;
+  }
+  return ids;
 }
 
 export function detectUnsupportedDomainContamination(
@@ -159,7 +196,7 @@ export function detectUnsupportedDomainContamination(
   intake: string,
 ): { contaminated: boolean; ruleIds: string[] } {
   const text = (corpus || "").trim();
-  if (!text || intakeExplicitlyRequestsDomainScope(intake)) {
+  if (!text) {
     return { contaminated: false, ruleIds: [] };
   }
   const ruleIds: string[] = [];
@@ -168,11 +205,72 @@ export function detectUnsupportedDomainContamination(
     const supported = rule.categories.every((cat) => intakeSupportsDomainCategory(intake, cat));
     if (!supported) ruleIds.push(rule.id);
   }
-  return { contaminated: ruleIds.length > 0, ruleIds };
+  ruleIds.push(...unsupportedObligationIds(text, intake));
+  return { contaminated: ruleIds.length > 0, ruleIds: [...new Set(ruleIds)] };
 }
 
 function isNumberedSectionHeading(line: string): boolean {
-  return /^\d+(?:\.\d+)*\.?\s+[A-Z]/.test(line.trim());
+  const trimmed = line.trim();
+  // Wrapped invoice years ("2026. Payment is due net 60.") are not section headings.
+  if (/^(?:19|20)\d{2}\.\s+/.test(trimmed)) return false;
+  return /^\d{1,2}(?:\.\d+)*\.?\s+[A-Z]/.test(trimmed);
+}
+
+type UnsupportedObligationRule = {
+  id: string;
+  pattern: RegExp;
+  intakeSupports: (intake: string) => boolean;
+};
+
+const UNSUPPORTED_OBLIGATION_RULES: UnsupportedObligationRule[] = [
+  {
+    id: "crm_campaigns",
+    pattern: /\bCRM\s+campaigns?\b/gi,
+    intakeSupports: (intake) => /\bCRM\b|\bcampaigns?\b/i.test(intake),
+  },
+  {
+    id: "sales_outreach",
+    pattern: /\bsales\s+outreach\b/gi,
+    intakeSupports: (intake) => /\bsales\s+outreach\b/i.test(intake),
+  },
+  {
+    id: "configuration_support",
+    pattern: /\bconfiguration\s+(?:planning|support|assistance|steps)\b/gi,
+    intakeSupports: (intake) => /\bconfiguration\b/i.test(intake),
+  },
+];
+
+function tidyObligationList(text: string): string {
+  let out = text;
+  out = out.replace(/\band\s+also\s+manage\s*(?:,\s*)*(?:and\s+)?/gi, "");
+  out = out.replace(/\s*(?:,\s*){2,}/g, ", ");
+  out = out.replace(/\s*,\s*and\s*(?=[,.]|$)/gi, "");
+  out = out.replace(/\s+and\s+(?=[,.]|$)/gi, "");
+  out = out.replace(/\s*,\s*([.])/g, "$1");
+  out = out.replace(/\s{2,}/g, " ");
+  out = out.replace(/\s+([.,;:])/g, "$1");
+  out = out.replace(/([.!?]){2,}/g, "$1");
+  return out.replace(/\s+\n/g, "\n").trim();
+}
+
+/** Remove unsupported commercial obligations without substituting another obligation. */
+export function stripUnsupportedCommercialObligations(
+  text: string,
+  intake: string,
+): { text: string; removed: string[] } {
+  const intakeText = (intake || "").trim();
+  let out = text;
+  const removed: string[] = [];
+  for (const rule of UNSUPPORTED_OBLIGATION_RULES) {
+    if (rule.intakeSupports(intakeText)) continue;
+    rule.pattern.lastIndex = 0;
+    if (!rule.pattern.test(out)) continue;
+    rule.pattern.lastIndex = 0;
+    out = out.replace(rule.pattern, "");
+    removed.push(rule.id);
+  }
+  if (removed.length === 0) return { text, removed };
+  return { text: tidyObligationList(out), removed };
 }
 
 function stripDomainSections(text: string, intake: string): { text: string; removed: string[] } {
@@ -216,8 +314,7 @@ function neutralizeContaminatedScopeSections(
   intake: string,
   opts?: { providerLabel?: string; clientLabel?: string },
 ): { text: string; repairs: string[] } {
-  if (intakeExplicitlyRequestsDomainScope(intake)) return { text, repairs: [] };
-  const provider = (opts?.providerLabel || "Service Provider").trim() || "Service Provider";
+  const provider = (opts?.providerLabel || "").trim();
   const client = (opts?.clientLabel || "Client").trim() || "Client";
   const lines = text.split("\n");
   const out: string[] = [];
@@ -240,8 +337,17 @@ function neutralizeContaminatedScopeSections(
       }
       const sectionBody = sectionLines.join("\n");
       const hits = detectUnsupportedDomainContamination(sectionBody, intake);
-      if (hits.contaminated) {
-        out.push(neutralScopeBody(provider, client));
+      if (hits.contaminated && sectionKeepsCustomerScope(sectionBody, intake)) {
+        const inline = neutralizeRecitalAndInlinePhrases(sectionBody, intake);
+        if (inline.text !== sectionBody) {
+          out.push(inline.text);
+          repairs.push("stripped_unsupported_scope_additions");
+          repairs.push(...inline.repairs);
+        } else {
+          out.push(...sectionLines);
+        }
+      } else if (hits.contaminated) {
+        out.push(neutralScopeBody(provider || "Service Provider", client));
         repairs.push("neutralized_scope_section");
       } else {
         out.push(...sectionLines);
@@ -258,12 +364,17 @@ function neutralizeContaminatedScopeSections(
 }
 
 function neutralizeRecitalAndInlinePhrases(text: string, intake: string): { text: string; repairs: string[] } {
-  if (intakeExplicitlyRequestsDomainScope(intake)) return { text, repairs: [] };
-  const hits = detectUnsupportedDomainContamination(text, intake);
-  if (!hits.contaminated) return { text, repairs: [] };
+  const obligations = stripUnsupportedCommercialObligations(text, intake);
+  let out = obligations.text;
+  const repairs: string[] = obligations.removed.map((id) => `obligation:${id}`);
+  // Explicit AI workflow setup still has to drop unsupported obligations.
+  // Only skip rewriting authorized workflow language into generic consulting.
+  if (intakeExplicitlyRequestsDomainScope(intake)) {
+    return { text: out, repairs: out === text ? [] : repairs };
+  }
+  const hits = detectUnsupportedDomainContamination(out, intake);
+  if (!hits.contaminated && repairs.length === 0) return { text, repairs: [] };
 
-  let out = text;
-  const repairs: string[] = [];
   const replacements: Array<[RegExp, string]> = [
     [/\bAI workflow setup services?\b/gi, "professional consulting services"],
     [/\bperform AI workflow setup services\b/gi, "perform professional consulting services"],
@@ -272,8 +383,7 @@ function neutralizeRecitalAndInlinePhrases(text: string, intake: string): { text
     [/\bconfigured (?:AI )?workflow\b/gi, "agreed services"],
     [/\bworkflow mapping, configuration planning, implementation support\b/gi, "professional consulting services"],
     [/\bworkflow mapping\b/gi, "scope analysis"],
-    [/\bconfiguration planning\b/gi, "planning"],
-    [/\bimplementation support\b/gi, "professional services"],
+    [/\bimplementation support\b/gi, "implementation"],
     [/\bpractical demonstration or (?:acceptance )?review\b/gi, "delivery review"],
     [/\bacceptance demonstration\b/gi, "delivery confirmation"],
     [/\bautomation logic or prompts\b/gi, "agreed deliverables"],
@@ -316,10 +426,6 @@ export function sanitizePaidProDomainScopeContamination(
     intakeDescribesBrandLicensingDistributionManufacturingStack(intakeText) ||
     intakeHasMultiPartySpecializedCommercialRoles(intakeText)
   ) {
-    return { text, repairs: [] };
-  }
-
-  if (intakeExplicitlyRequestsDomainScope(intakeText)) {
     return { text, repairs: [] };
   }
 

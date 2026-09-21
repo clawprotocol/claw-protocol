@@ -5,6 +5,7 @@ import {
   deriveAgreementProgressTimeline,
   deriveDashboardWhatsNextPresentation,
   deriveWhatsNextHeadline,
+  resolveDashboardDeliveryTrack,
 } from "./dashboardWhatsNextPresentation";
 import { deriveCreatorDashboardStatusPillFromGate } from "./creatorDashboardPresentation";
 import { resolveCreatorDashboardReviewGate } from "./creatorDashboardReviewGate";
@@ -133,6 +134,38 @@ describe("dashboardWhatsNextPresentation", () => {
     expect(presentation.headline).toBe("Review requested from Iron Vale Systems Inc");
     expect(presentation.progressLine).toBe("0 of 1 approved");
     expect(presentation.nextStepLabel).toBe("Wait for reviewer approval");
+  });
+
+  it("direct-to-signature agreements skip review steps on the dashboard", () => {
+    const r = row({
+      review_sent_at: null,
+      has_server_signing_lock: true,
+      locked_version_id: "v1",
+    });
+    const gate = resolveCreatorDashboardReviewGate(r, []);
+    expect(resolveDashboardDeliveryTrack(r)).toBe("signature");
+    const timeline = deriveAgreementProgressTimeline(r, gate);
+    expect(timeline.map((s) => s.id)).toEqual([
+      "draft_created",
+      "signature_links_prepared",
+      "signed",
+    ]);
+    expect(timeline.find((s) => s.id === "signature_links_prepared")?.state).toBe("complete");
+    expect(timeline.find((s) => s.id === "signed")?.state).toBe("current");
+    const presentation = deriveDashboardWhatsNextPresentation(r, gate);
+    expect(presentation.deliveryTrack).toBe("signature");
+    expect(presentation.headline).toMatch(/Waiting for signatures/i);
+    expect(presentation.timeline.some((s) => s.id === "review_sent")).toBe(false);
+  });
+
+  it("drafts do not mark review as current before a track is chosen", () => {
+    const r = row({ review_sent_at: null, version_ledger_count: 1 });
+    const gate = resolveCreatorDashboardReviewGate(r, []);
+    expect(resolveDashboardDeliveryTrack(r)).toBe("draft");
+    const timeline = deriveAgreementProgressTimeline(r, gate);
+    expect(timeline.find((s) => s.id === "draft_created")?.state).toBe("complete");
+    expect(timeline.find((s) => s.id === "review_sent")?.state).toBe("upcoming");
+    expect(timeline.find((s) => s.id === "signature_links_prepared")?.state).toBe("upcoming");
   });
 
   it("ready for signing headline and next step", () => {

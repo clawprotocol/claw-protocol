@@ -17,6 +17,7 @@ import { tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
 import { extractBetweenPartyNameList, extractBetweenPartyPair } from "./partyBetweenParse";
 import { buildLiveDraftPreview } from "./liveDraftHeuristics";
 import { stripSignerInstructionClausesFromIntake } from "./intakeSignerInstructionParse";
+import { isLikelyHumanSignerName } from "./intakeSignerMetadataAuthority";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 
 export type IntakeBlockingField =
@@ -30,7 +31,9 @@ export type IntakeBlockingField =
 
 export type IntakeFieldConfidenceTier = 1 | 2 | 3;
 
-const PLACEHOLDER_PARTY_RE = /^party\s+[a-z]\b/i;
+const PLACEHOLDER_PARTY_RE = /^party\s+(?:[a-d]|[1-4])\b/i;
+const ROLE_ONLY_PARTY_NAME_RE =
+  /^(?:the\s+)?(?:client|customer|service\s+provider|provider|vendor|contractor|consultant|supplier|buyer|seller|licensor|licensee|landlord|tenant|borrower|lender|company|business)$/i;
 
 /**
  * High-confidence title from imperative intake ("Draft a Professional Services Agreement…").
@@ -79,19 +82,67 @@ export function partiesInferenceTier(intakeText: string, parsed: ParsedDraftShap
   const intake = stripSignerInstructionClausesFromIntake(intakeText || "");
   const structured = parseIntakeToStructuredAgreement(intake);
   if (extractBetweenPartyPair(intake)) return 1;
-  const between = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
+  const between = extractBetweenPartyNameList(intake).filter(isIdentifiedContractingPartyName);
   if (between.length >= 2) return 1;
-  if (!structured.partiesUncertain && structured.parties.length >= 2) return 1;
-  if (tryInferNamedPartiesFromIntake(intake)?.length) return 1;
-  if ((parsed.parties || []).length >= 2 && !partiesLookLikePlaceholders(parsed.parties)) return 1;
+  if (
+    !structured.partiesUncertain &&
+    structured.parties.filter(isIdentifiedContractingPartyName).length >= 2
+  ) {
+    return 1;
+  }
+  const inferred = tryInferNamedPartiesFromIntake(intake) || [];
+  if (inferred.filter((p) => isIdentifiedContractingPartyName(String(p?.name || ""))).length >= 2) {
+    return 1;
+  }
+  if (identifiedContractingPartyCount(parsed.parties) >= 2) return 1;
   if (hasAtLeastTwoParties(intake, buildLiveDraftPreview(intake))) return 2;
   return 3;
+}
+
+function isRoleOrPlaceholderPartyName(name: string): boolean {
+  const t = String(name || "").replace(/\s+/g, " ").trim();
+  if (!t) return true;
+  return PLACEHOLDER_PARTY_RE.test(t) || ROLE_ONLY_PARTY_NAME_RE.test(t);
+}
+
+function isIdentifiedContractingPartyName(name: string): boolean {
+  const t = String(name || "").replace(/\s+/g, " ").trim();
+  if (!t || isRoleOrPlaceholderPartyName(t)) return false;
+  if (isAuthoritativeLegalEntityName(t) || isLikelyHumanSignerName(t)) return true;
+  return t.length >= 2 && /[A-Za-z]/.test(t) && !/^(?:the\s+)?parties?$/i.test(t);
+}
+
+function identifiedContractingPartyCount(parties: ParsedDraftShape["parties"]): number {
+  return (parties || []).filter((p) => isIdentifiedContractingPartyName(String(p?.name || ""))).length;
 }
 
 function partiesLookLikePlaceholders(parties: ParsedDraftShape["parties"]): boolean {
   const names = (parties || []).map((p) => String(p?.name || "").trim()).filter(Boolean);
   if (names.length < 2) return true;
-  return names.every((n) => PLACEHOLDER_PARTY_RE.test(n));
+  return names.every((n) => isRoleOrPlaceholderPartyName(n));
+}
+
+/** Two real legal or human names — role labels such as Client / Party A do not count. */
+export function hasIdentifiedContractingParties(
+  parsed: ParsedDraftShape,
+  intakeText: string,
+): boolean {
+  const intake = stripSignerInstructionClausesFromIntake(intakeText || "");
+  if (extractBetweenPartyPair(intake)) return true;
+  const between = extractBetweenPartyNameList(intake).filter(isIdentifiedContractingPartyName);
+  if (between.length >= 2) return true;
+  const structured = parseIntakeToStructuredAgreement(intake);
+  if (
+    !structured.partiesUncertain &&
+    structured.parties.filter(isIdentifiedContractingPartyName).length >= 2
+  ) {
+    return true;
+  }
+  const inferred = tryInferNamedPartiesFromIntake(intake) || [];
+  if (inferred.filter((p) => isIdentifiedContractingPartyName(String(p?.name || ""))).length >= 2) {
+    return true;
+  }
+  return identifiedContractingPartyCount(parsed.parties) >= 2;
 }
 
 export function purposeInferenceTier(intakeText: string, parsed: ParsedDraftShape): IntakeFieldConfidenceTier {
@@ -179,7 +230,7 @@ function isFieldMissing(field: IntakeBlockingField, parsed: ParsedDraftShape): b
     case "jurisdiction":
       return !(parsed.jurisdiction || "").trim() || (parsed.jurisdiction || "").trim().toLowerCase() === "tbd";
     case "parties":
-      return (parsed.parties || []).length < 2;
+      return identifiedContractingPartyCount(parsed.parties) < 2;
     case "purpose":
       return !(parsed.purpose || "").trim();
     case "payment_terms":
@@ -232,9 +283,12 @@ export function computeBlockingIntakeGaps(
   intakeText: string,
 ): IntakeBlockingField[] {
   const blocking: IntakeBlockingField[] = ["parties", "purpose"];
-  return blocking.filter(
-    (field) => fieldInferenceTier(field, intakeText, parsed) >= 3 && isFieldMissing(field, parsed),
-  );
+  return blocking.filter((field) => {
+    if (field === "parties") {
+      return !hasIdentifiedContractingParties(parsed, intakeText);
+    }
+    return fieldInferenceTier(field, intakeText, parsed) >= 3 && isFieldMissing(field, parsed);
+  });
 }
 
 /** Non-blocking recommended gaps — at most three, never a generation failure. */
@@ -261,11 +315,13 @@ export function applyPreGenerationIntakeDefaults(
   if (draftTitle) {
     next.title = draftTitle;
   }
-  const partyTier = partiesInferenceTier(intake, next);
   const partiesBeforeDefaults = [...(next.parties || [])];
   next = applySimpleFlowSmartDefaults(next, intake);
-  if (partyTier >= 3 && partiesLookLikePlaceholders(next.parties)) {
-    next = { ...next, parties: partiesBeforeDefaults.length >= 2 ? partiesBeforeDefaults : [] };
+  if (
+    !hasIdentifiedContractingParties({ ...next, parties: partiesBeforeDefaults }, intake) &&
+    partiesLookLikePlaceholders(next.parties)
+  ) {
+    next = { ...next, parties: [] };
   }
   return next;
 }

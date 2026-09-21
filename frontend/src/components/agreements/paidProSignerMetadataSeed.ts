@@ -10,6 +10,10 @@ import {
   readCanonicalPartyMetadata,
 } from "./canonicalPartyMetadataAuthority";
 import { alignIntakeSignerMetadataToLegalEntities } from "./structuredIntakePartyContactParse";
+import {
+  isLikelyHumanSignerName,
+  scrubLegalEntityCopiedSignerNames,
+} from "./intakeSignerMetadataAuthority";
 import { splitAuthorizedSignerLabeledValue } from "./labeledPartyBlockParse";
 import { mergeCanonicalPartyAddresses } from "./canonicalPartyStructuredAddress";
 import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntitiesForMetadata";
@@ -91,13 +95,16 @@ function buildUiPartiesFromSeedArgs(
       partyLegalName: legalEntities[i] || slot?.partyLegalName || "",
       signerName:
         (args.uiSignerNames?.[i] ?? "").trim() ||
-        uni?.signerName ||
-        slot?.signerName ||
+        (slot?.signerName &&
+        (scrubLegalEntityCopiedSignerNames([slot.signerName], [legalEntities[i] || ""])[0] || "")
+          ? slot.signerName
+          : "") ||
+        (uni?.signerName && isLikelyHumanSignerName(uni.signerName) ? uni.signerName : "") ||
         "",
       signerTitle:
         (args.uiSignerTitles?.[i] ?? "").trim() ||
-        uni?.signerTitle ||
         slot?.signerTitle ||
+        uni?.signerTitle ||
         "",
       signerEmail:
         (args.uiSignerEmails?.[i] ?? "").trim() ||
@@ -203,9 +210,16 @@ export function runPaidProSignerMetadataAuthoritySeed(
 
   const resolvedNames = resolved.map((r) => r.signerName);
   const resolvedTitles = resolved.map((r) => r.signerTitle);
-  const namesHydrated = hydrateStringArrayNonDestructive(names, resolvedNames, partyCount);
+  const namesHydrated = hydrateStringArrayNonDestructive(
+    scrubLegalEntityCopiedSignerNames(names, canonicalLegalEntities),
+    resolvedNames.map((name) => (isLikelyHumanSignerName(name) ? name : "")),
+    partyCount,
+  );
   const titlesHydrated = hydrateStringArrayNonDestructive(titles, resolvedTitles, partyCount);
-  const intakeNames = intakeAligned.map((s) => s.signerName);
+  const intakeNames = scrubLegalEntityCopiedSignerNames(
+    intakeAligned.map((s) => s.signerName),
+    canonicalLegalEntities,
+  );
   const intakeTitles = intakeAligned.map((s) => s.signerTitle);
   const finalNames = hydrateStringArrayNonDestructive(namesHydrated.values, intakeNames, partyCount);
   const finalTitles = hydrateStringArrayNonDestructive(titlesHydrated.values, intakeTitles, partyCount);
@@ -251,7 +265,22 @@ export function runPaidProSignerMetadataAuthoritySeed(
   if (draft) {
     const merged = mergeSignerMetadataIntoDraftParties(draft, resolved);
     draftChanged = merged !== draft;
-    draft = merged as ParsedDraftShape;
+    const parties = [...((merged as ParsedDraftShape).parties ?? [])];
+    let emailChanged = false;
+    for (let i = 0; i < partyCount; i++) {
+      const em = (cleanedEmails[i] ?? "").trim();
+      if (!em) continue;
+      const prev = parties[i] ?? { name: canonicalLegalEntities[i] || "", role: "party" };
+      const existing = String((prev as { email?: string }).email ?? "").trim();
+      if (existing) {
+        if (!parties[i]) parties[i] = prev;
+        continue;
+      }
+      parties[i] = { ...prev, email: em };
+      emailChanged = true;
+    }
+    draft = (emailChanged ? { ...merged, parties } : merged) as ParsedDraftShape;
+    draftChanged = draftChanged || emailChanged;
   }
 
   const hasSignerSignal = bundle.parties.some(
@@ -271,7 +300,7 @@ export function runPaidProSignerMetadataAuthoritySeed(
   logCanonicalPartyMetadataDiagnostics(canonicalStage, readCanonicalPartyMetadata() ?? bundle);
 
   return {
-    names: finalNames.values,
+    names: scrubLegalEntityCopiedSignerNames(finalNames.values, canonicalLegalEntities),
     titles: finalTitles.values,
     emails: cleanedEmails,
     addresses: finalAddresses,
@@ -280,6 +309,33 @@ export function runPaidProSignerMetadataAuthoritySeed(
     draft,
     draftChanged,
   };
+}
+
+/** Attach seeded intake emails and signer fields onto parties for server persist. */
+export function partiesForServerPersistFromSeed<
+  T extends { name?: string; role?: string; email?: string; signerName?: string; signerTitle?: string },
+>(
+  parties: readonly T[],
+  seed: PaidProSignerMetadataSeedResult,
+): Array<T & { email?: string; signerName?: string; signerTitle?: string }> {
+  const source = (seed.draft?.parties ?? parties) as T[];
+  return source.map((party, index) => {
+    const email = String(party.email || seed.emails[index] || "").trim();
+    const entityName = String(party.name || "").trim();
+    const rawSigner = String(party.signerName || "").trim();
+    const humanFromParty =
+      (scrubLegalEntityCopiedSignerNames([rawSigner], [entityName])[0] || "").trim();
+    const seedName = String(seed.names[index] || "").trim();
+    const signerName =
+      (isLikelyHumanSignerName(humanFromParty) ? humanFromParty : "") || seedName;
+    const signerTitle = String(party.signerTitle || seed.titles[index] || "").trim();
+    return {
+      ...party,
+      ...(email ? { email } : {}),
+      ...(signerName ? { signerName } : {}),
+      ...(signerTitle ? { signerTitle } : {}),
+    };
+  });
 }
 
 /** Read current handoff emails/addresses for non-destructive seed merge. */

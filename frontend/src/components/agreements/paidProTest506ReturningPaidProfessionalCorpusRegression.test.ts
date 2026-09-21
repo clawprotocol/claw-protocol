@@ -73,6 +73,8 @@ function seedReturningPaidAcceptance(body = TEST506_ACCEPTED_PAID_BODY): void {
   commitAcceptedPaidProCorpusHandoffSync({
     corpusPlain: body,
     pipelineSource: "server_full_draft",
+    agreementId: "ag_test506_returning_paid",
+    organizationId: "org_test506_returning_paid",
   });
   establishPaidProSourceOfTruth({
     text: body,
@@ -283,6 +285,7 @@ describe("TEST506 — paid SoT UI suppression, signer parsing, professional corp
   });
 
   it("G — first-time post-checkout and returning paid create share canonical review entry", () => {
+    seedReturningPaidAcceptance();
     const draft = test506Draft("", TEST506_ACCEPTED_PAID_BODY);
     for (const source of ["post_checkout_apply_success", "returning_paid_create"] as const) {
       const finalized = planFinalizeCanonicalPaidProPipelineSuccess({

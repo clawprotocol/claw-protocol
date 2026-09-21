@@ -1,3 +1,4 @@
+import type { AgreementOwnerDeliveryTrack } from "../../agreement/agreementTypes";
 import { detectAgreementFamily, isHireToDoWorkNotEmployment, type AgreementFamily } from "./agreementFamilyRouter";
 import { formatPaymentTermsLine, type IntakePaymentField } from "./intakeCurrencyParse";
 import { buildLiveDraftPreview } from "./liveDraftHeuristics";
@@ -35,8 +36,9 @@ export type { AgreementFamily } from "./agreementFamilyRouter";
 export type ParsedDraftShape = {
   title: string;
   jurisdiction: string;
-  parties: { id?: string; name: string; role: string; email?: string }[];
+  parties: { id?: string; name: string; role: string; email?: string; signerName?: string; signerTitle?: string; signer_name?: string }[];
   purpose: string;
+  owner_delivery_track?: AgreementOwnerDeliveryTrack | null;
   payment_terms: string;
   duration: string | null;
   due_date: string | null;
@@ -70,6 +72,13 @@ export type ParsedDraftShape = {
   uploaded_source_document_text?: string | null;
   /** Premium parse extract: grounded bullets; merged into additional_terms for review. Omitted from POST /draft. */
   material_asks?: string[];
+  /** Unresolved identity subjects kept off the confirmed party list. */
+  unresolvedIdentitySubjects?: {
+    name: string;
+    source: "customer_mentioned" | "extraction_only";
+    email?: string;
+    roleHint?: string;
+  }[];
   /** Operating-agreement shell: company display name when known. */
   llc_company_name?: string | null;
   management_structure?: string | null;

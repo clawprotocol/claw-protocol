@@ -16,3 +16,6 @@ export const TEST505_AUTHORIZED_SIGNER_BULLET_2 =
 
 export const TEST505_SIGNER_NAMES = ["Sarah Mitchell", "Michael Torres"] as const;
 export const TEST505_SIGNER_TITLES = ["CEO", "President"] as const;
+
+export const TEST505_AGREEMENT_ID = "ag_test505_returning_paid";
+export const TEST505_ORGANIZATION_ID = "org_test505_returning_paid";

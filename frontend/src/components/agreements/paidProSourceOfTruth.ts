@@ -68,6 +68,7 @@ export {
   getPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
   hashPaidProCorpus,
+  authorizedPaidProRevisionId,
   hasPaidProSourceOfTruth,
   type PaidProDocumentSurface,
   type PaidProSourceOfTruth,
@@ -109,7 +110,6 @@ import {
   resolvePaidProFinalHydratedCorpusForSurface,
   type PaidProFinalHydratedCorpusSource,
 } from "./paidProFinalHydratedCorpus";
-import { clearAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
 import { paidProSurfaceCorpusMatchesAuthority } from "./paidProAgreementAuthorityChain";
 import {
   applyPaidProReviewRenderSanitizer,
@@ -491,6 +491,7 @@ export function establishPaidProSourceOfTruth(args: {
     generationOutcome: args.generationOutcome,
     reviewSessionId,
     surface: "establish_paid_pro_source_of_truth",
+    preserveApprovedRevision: Boolean(args.allowShorterOverwrite),
   });
   logProCorpusSourceMap({
     stage: "server_full_draft_received",
@@ -641,7 +642,7 @@ export function establishPaidProSourceOfTruth(args: {
     allowUserApprovedShortCorpus: Boolean(args.allowShorterOverwrite),
   });
 
-  if (establishmentDecision.blocked) {
+  if (establishmentDecision.blocked && !args.allowShorterOverwrite) {
     const noticeRetry = applyPaidProNoticeContactAuthority(safeForCommit, {
       draft: args.draft ?? null,
       intakeText: args.intakeText ?? null,
@@ -725,9 +726,12 @@ export function establishPaidProSourceOfTruth(args: {
   });
   // Latched server_full_draft preserve path: freeze/display must not rewrite latched
   // authoritative bytes after acceptance latch (Test245 authority stability).
-  const acceptedCorpusText = prep.repairs.includes("freeze_prep_preserved_latched_server_full_draft")
-    ? prep.text
-    : driftGuard.displayText;
+  // User-approved revision (proposal accept) likewise keeps the approved notice bytes.
+  const acceptedCorpusText =
+    prep.repairs.includes("freeze_prep_preserved_latched_server_full_draft") ||
+    prep.repairs.includes("freeze_prep_preserved_approved_revision")
+      ? prep.text
+      : driftGuard.displayText;
   const acceptedCorpusHash = hashPaidProCorpus(acceptedCorpusText);
   if (preEstablishFreezeHash && preEstablishFreezeHash !== acceptedCorpusHash) {
     logCanonicalEstablishReconcile({
@@ -805,10 +809,6 @@ export function establishPaidProSourceOfTruth(args: {
   clearPaidProSignerStagingDisplayCorpus();
   clearPaidProReviewRenderFusedRepairCache();
   clearPaidProVisibleRenderMemo();
-  if (args.allowShorterOverwrite) {
-    clearPaidProPinnedSignerAppliedCorpus();
-    clearAuthoritativeSigningSnapshot();
-  }
   establishAuthoritativeAgreementDocument({
     fullCorpusText: acceptedCorpusText,
     canonicalPartyManifest: frozen?.signerManifest ?? parties,

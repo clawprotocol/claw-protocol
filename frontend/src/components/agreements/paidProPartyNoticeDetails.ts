@@ -750,7 +750,7 @@ const NOTICE_ADDRESS_EXECUTION_LINE_RE =
   /^(?:By|Name|Title|Date|CLIENT|SERVICE\s+PROVIDER)\s*:/i;
 
 const NOTICE_ADDRESS_INSTRUCTIONAL_LINE_RE =
-  /\b(?:each party should\b|signature block\b|in witness whereof\b|parties (?:shall )?execute\b)/i;
+  /\b(?:each party should\b|signature block\b|in witness whereof\b|parties (?:shall )?execute\b|this agreement is governed by\b|law governs\b|provider fees\b|revenue sharing among\b)/i;
 
 /** True when a line must stop multiline notice-address capture (execution, headings, prose). */
 export function isNoticeAddressCaptureBoundaryLine(line: string | null | undefined): boolean {
@@ -1548,11 +1548,8 @@ export function removeRedundantNoticesSubheading(text: string): { text: string; 
 function resolveNoticesHeadingInsertIndex(head: string): number {
   const governingIdx = head.search(/(?:^|\n)\s*\d+\.\s+GOVERNING LAW\b/im);
   const firstIfTo = head.search(/(?:^|\n)If to\s+/i);
-  if (governingIdx >= 0) {
-    if (firstIfTo >= 0 && firstIfTo < governingIdx) return firstIfTo;
-    return governingIdx;
-  }
   if (firstIfTo >= 0) return firstIfTo;
+  if (governingIdx >= 0) return governingIdx;
   return head.length;
 }
 
@@ -1615,6 +1612,15 @@ export function relocateMisplacedNoticesSectionBeforeGoverningLaw(corpus: string
   if (noticesHeadingIdx < 0) return { text: corpus, repairs: [] };
   const governingIdx = head.search(/(?:^|\n)\s*\d+\.\s+GOVERNING LAW\b/im);
   if (governingIdx < 0 || noticesHeadingIdx < governingIdx) return { text: corpus, repairs: [] };
+  const noticesNum = Number(head.slice(noticesHeadingIdx).match(/\d+/)?.[0]);
+  const governingNum = Number(head.slice(governingIdx).match(/\d+/)?.[0]);
+  if (
+    Number.isFinite(noticesNum) &&
+    Number.isFinite(governingNum) &&
+    noticesNum >= governingNum
+  ) {
+    return { text: corpus, repairs: [] };
+  }
   const prefix = head.slice(0, governingIdx).trimEnd();
   const suffix = head.slice(governingIdx, noticesHeadingIdx).trimEnd();
   const noticesBlock = head.slice(noticesHeadingIdx).trimStart();
@@ -1925,7 +1931,14 @@ export function resolveOperativeNoticesFamilyEnd(text: string, noticesStart: num
 function noticeStanzaHeadingLegalEntity(stanza: string): string {
   const header = stanza.trim().split("\n")[0]?.trim() ?? "";
   const match = header.match(/^If to\s+(.+?)\s*:\s*$/i);
-  return match?.[1]?.trim() ?? "";
+  const raw = match?.[1]?.trim() ?? "";
+  if (!raw) return "";
+  const stripped = stripTrailingPartyMetadataLabel(raw).trim();
+  return stripped && !hasPartyMetadataLabelContamination(stripped) ? stripped : "";
+}
+
+function isContaminatedIfToNoticeStanza(stanza: string): boolean {
+  return noticeStanzaHasRoleLabelCorruption(stanza);
 }
 
 function findExistingNoticeStanzaForParty(
@@ -2037,7 +2050,7 @@ export function ensureOperativeNoticeStanzaEntityLinesAtFreeze(
   const existingStanzas = [
     ...blocks.slice(1).map((s) => s.trim()).filter(Boolean),
     ...misplacedMiddleStanzas,
-  ];
+  ].filter((s) => !isContaminatedIfToNoticeStanza(s));
   const repairs: string[] = [];
   const canonicalNames = authorityParties.map((party) =>
     resolveNoticeStanzaLegalEntity(party, authorityParties, roleContext),
@@ -2186,7 +2199,7 @@ export function repairIncompleteIfToNoticeStanzas(
       .split(/\n(?=If to\s+)/i)
       .slice(1)
       .map((s) => s.trim())
-      .filter(Boolean);
+      .filter((s) => Boolean(s) && !isContaminatedIfToNoticeStanza(s));
     if (existingStanzasEarly.length > authorityParties.length) {
       const trimmedEarly = trimOperativeNoticeStanzasToPartyCount(text, authorityParties.length);
       if (trimmedEarly.repairs.length > 0) {
@@ -2357,7 +2370,7 @@ export function repairIncompleteIfToNoticeStanzas(
   const existingStanzas = [
     ...blocks.slice(1).map((s) => s.trim()).filter(Boolean),
     ...misplacedMiddleStanzas,
-  ];
+  ].filter((s) => !isContaminatedIfToNoticeStanza(s));
   let tailAfterStanzas = "";
   if (blocks.length > 1) {
     const lastBlock = blocks[blocks.length - 1] ?? "";
@@ -2475,12 +2488,15 @@ export function trimOperativeNoticeStanzasToPartyCount(
     const after = text.slice(end);
     const blocks = region.split(/\n(?=If to\s+)/i);
     const intro = blocks[0] ?? "";
-    const stanzas = blocks.slice(1).filter((s) => s.trim());
-    if (stanzas.length <= partyCount) return { text, repairs: [] };
+    const stanzas = blocks.slice(1).filter((s) => s.trim() && !isContaminatedIfToNoticeStanza(s));
+    if (stanzas.length <= partyCount) {
+      const rawCount = blocks.slice(1).filter((s) => s.trim()).length;
+      if (rawCount <= partyCount) return { text, repairs: [] };
+    }
     const kept: string[] = [];
     const seen = new Set<string>();
     for (const stanza of stanzas) {
-      const entity = stanza.match(/^If to\s+(.+?):/i)?.[1]?.trim().toLowerCase() ?? "";
+      const entity = noticeStanzaHeadingLegalEntity(stanza).toLowerCase();
       if (entity && seen.has(entity)) continue;
       if (entity) seen.add(entity);
       kept.push(stanza);
@@ -2500,8 +2516,9 @@ export function trimOperativeNoticeStanzasToPartyCount(
     return trimRegionIfToStanzas(corpus);
   }
   const blocks = layout.noticesFamily.split(/\n(?=If to\s+)/i);
-  const stanzaBlocks = blocks.slice(1).filter((s) => s.trim());
-  if (stanzaBlocks.length <= partyCount) {
+  const rawStanzaBlocks = blocks.slice(1).filter((s) => s.trim());
+  const stanzaBlocks = rawStanzaBlocks.filter((s) => !isContaminatedIfToNoticeStanza(s));
+  if (stanzaBlocks.length <= partyCount && rawStanzaBlocks.length <= partyCount) {
     const regionTrim = trimRegionIfToStanzas(corpus);
     return regionTrim.repairs.length > 0 ? regionTrim : { text: corpus, repairs: [] };
   }
@@ -2509,7 +2526,7 @@ export function trimOperativeNoticeStanzasToPartyCount(
   const kept: string[] = [];
   const seen = new Set<string>();
   for (const stanza of stanzaBlocks) {
-    const entity = stanza.match(/^If to\s+(.+?):/i)?.[1]?.trim().toLowerCase() ?? "";
+    const entity = noticeStanzaHeadingLegalEntity(stanza).toLowerCase();
     if (entity && seen.has(entity)) continue;
     if (entity) seen.add(entity);
     kept.push(stanza);
@@ -2711,13 +2728,17 @@ export function ensureOperativeIfToNoticeDelivery(
     : hasBareEntityOnlyNoticeStanzas(corpus);
   const operativeStanzaCount = countOperativeIfToStanzasInRegion(noticesRegion);
   const stanzaCountMismatch = operativeStanzaCount < authorityParties.length;
+  const hasMetadataLabelContamination = stanzaBlocks.some((stanza) =>
+    isContaminatedIfToNoticeStanza(stanza),
+  );
   if (
     !missing &&
     !stanzaCountMismatch &&
     !hasPlaceholderTokens &&
     !hasExecutionPollution &&
     !hasInlineMalformedNotices &&
-    !hasBareNoticeStanzas
+    !hasBareNoticeStanzas &&
+    !hasMetadataLabelContamination
   ) {
     const addressRepair = repairNoticeStanzaAddressBoundariesInCorpus(corpus);
     const baseText = addressRepair.repairs.length > 0 ? addressRepair.text : corpus;

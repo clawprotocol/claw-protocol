@@ -23,6 +23,15 @@ export type VerifyCheckoutSessionResponse = {
   };
 };
 
+export type BillingCheckoutStartError = Error & { code?: string };
+
+export function checkoutStartErrorCode(error: unknown): string {
+  if (error && typeof error === "object" && "code" in error) {
+    return String((error as { code?: unknown }).code || "").trim();
+  }
+  return "";
+}
+
 export function isStripeCheckoutApiConfigured(): boolean {
   try {
     return String(import.meta.env.VITE_CLAW_FEATURE_STRIPE_CHECKOUT || "").trim() === "1";
@@ -62,9 +71,49 @@ export async function createBillingCheckoutSession(args: {
     }),
   });
   if (!res.ok) {
-    throw new Error(await errorMessageFromResponse(res, "Could not start checkout."));
+    throw await checkoutStartFailure(res, "Could not start checkout.");
   }
-  return (await readJson<CheckoutSessionResponse>(res)) as CheckoutSessionResponse;
+  const body = (await readJson<CheckoutSessionResponse>(res)) as CheckoutSessionResponse;
+  if (!body.checkout_url) {
+    const err = new Error("Your payment is being processed. Do not pay again.") as BillingCheckoutStartError;
+    err.code = "payment_processing";
+    throw err;
+  }
+  return body;
+}
+
+async function checkoutStartFailure(res: Response, fallback: string): Promise<BillingCheckoutStartError> {
+  const text = (await res.text()).trim();
+  let message = fallback;
+  let code = "";
+  try {
+    const parsed = JSON.parse(text) as { detail?: unknown; message?: unknown };
+    if (typeof parsed.detail === "object" && parsed.detail !== null) {
+      const detail = parsed.detail as { code?: unknown; message?: unknown };
+      if (typeof detail.code === "string") code = detail.code.trim();
+      if (typeof detail.message === "string" && detail.message.trim()) message = detail.message.trim();
+    } else if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+      message = parsed.detail.trim();
+    } else if (typeof parsed.message === "string" && parsed.message.trim()) {
+      message = parsed.message.trim();
+    }
+  } catch {
+    if (text) message = text.length > 280 ? `${text.slice(0, 277)}…` : text;
+  }
+  const err = new Error(message) as BillingCheckoutStartError;
+  const lower = `${code} ${message}`.toLowerCase();
+  if (code) {
+    err.code = code;
+  } else if (/purchase_unresolved|could not confirm the previous checkout/.test(lower)) {
+    err.code = "purchase_unresolved";
+  } else if (/payment_processing|being processed/.test(lower)) {
+    err.code = "payment_processing";
+  } else if (/already_subscribed|already has an active subscription/.test(lower)) {
+    err.code = "already_subscribed";
+  } else if (/stripe_checkout_not_configured/.test(lower)) {
+    err.code = "stripe_checkout_not_configured";
+  }
+  return err;
 }
 
 export async function verifyBillingCheckoutSession(sessionId: string): Promise<VerifyCheckoutSessionResponse> {

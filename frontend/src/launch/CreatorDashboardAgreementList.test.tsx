@@ -309,4 +309,37 @@ describe("CreatorDashboardAgreementList", () => {
     fireEvent.click(screen.getByTestId("creator-dashboard-action-ag_ready"));
     expect(onPrepare).toHaveBeenCalledWith("ag_ready");
   });
+
+  it("labels uploaded final PDFs and never shows padded snapshot metadata as paper", () => {
+    render(
+      <CreatorDashboardAgreementList
+        rows={[
+          indexRow({
+            title: "Uploaded final PDF — e-sign preparation",
+            document_kind: "uploaded_final_pdf",
+            uploaded_final_pdf: {
+              kind: "uploaded_final_pdf",
+              document_id: "doc_1",
+              content_sha256: "abc",
+              label: "Uploaded final PDF signed through LawDog",
+            },
+            accepted_review_snapshot: {
+              snapshot_id: "crs-fake",
+              corpus_sha256: "deadbeef",
+              corpus_length: 640,
+              status: "accepted",
+            },
+          }),
+        ]}
+        reviewRowsByAgreementId={{}}
+        onNavigate={vi.fn()}
+        onPrepareSignatureLinks={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("creator-dashboard-uploaded-final-pdf-ag_ready").textContent).toMatch(
+      /Uploaded final PDF signed through LawDog/,
+    );
+    expect(screen.queryByTestId("creator-dashboard-accepted-snapshot-ag_ready")).toBeNull();
+    expect(screen.queryByText(/LAWDOG_QUICK_PDF_ENVELOPE_V1/)).toBeNull();
+  });
 });

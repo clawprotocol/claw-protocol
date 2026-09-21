@@ -35,6 +35,11 @@ import {
 } from "./premiumIntakeAskCoverage";
 import { elevatePremiumPaymentTermsFromIntake } from "./premiumPaymentTermsElevate";
 import { draftHasPlaceholderParties } from "./reviewPlaceholderGuard";
+import {
+  applyExplicitIntakeRolesToParties,
+  bindRepresentativesToLegalParties,
+} from "./legalPartyRepresentativeBind";
+import { looksLikeEmail } from "./recipientEmailValidation";
 import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
 import { buildCheckoutPreflightAgreementPreviewText } from "./paidProCheckoutPreviewPreflightCache";
 import {
@@ -115,6 +120,7 @@ import {
   normalizePremiumFullDraftResponsePayload,
   promoteSubstantiveDegradedJsonParseWireToServerFull,
   resolvePremiumFullDraftAuthoritativeBody,
+  isSubstantiveDegradedJsonParseServerAuthority,
   tryUnwrapPremiumJsonEnvelopeDocument,
 } from "./premiumFullDraftResponseNormalization";
 import { logDevPostPremiumFullDraftPipelineReturn } from "./premiumFullDraftPostResponseTrace";
@@ -1048,6 +1054,23 @@ function meetsPremiumSubstanceFloor(draft: ParsedDraftShape, rawIntake: string):
 export function extractCleanPremiumParties(intakeText: string, draft: ParsedDraftShape): { name: string; role: string }[] {
   const rawIntake = intakeText.trim();
   const fam = draft.agreement_family ?? null;
+  const rawParties = draft.parties || [];
+  const hasRepresentativeRows = rawParties.some(
+    (party) =>
+      looksLikeEmail(nz(party.name)) ||
+      looksLikeEmail(nz(party.email)) ||
+      /\b(?:signer|signatory|email)\b/i.test(nz(party.role)),
+  );
+  if (hasRepresentativeRows) {
+    const bound = bindRepresentativesToLegalParties(rawParties, rawIntake);
+    const authoritative = applyExplicitIntakeRolesToParties(bound.parties, rawIntake);
+    if (authoritative.length >= 2 && !draftHasPlaceholderParties({ ...draft, parties: authoritative })) {
+      return authoritative.map((p, idx) => ({
+        name: coercePartyNameForRecipientAutoFill(nz(p.name), idx <= 1 ? (idx as 0 | 1) : 1, fam),
+        role: nz(p.role) || "party",
+      }));
+    }
+  }
   if ((draft.parties?.length ?? 0) >= 2 && !draftHasPlaceholderParties(draft)) {
     return (draft.parties || []).map((p, idx) => ({
       name: coercePartyNameForRecipientAutoFill(nz(p.name), idx <= 1 ? (idx as 0 | 1) : 1, fam),
@@ -1474,7 +1497,7 @@ async function runPremiumCompletionInner(
   });
   merged = applyHardFamilyLocks(merged, rawIntake);
   merged = alignTitleWithCanonical(merged, rawIntake);
-  merged = normalizeParsedDraftLegalConcepts(merged, rawIntake);
+  merged = normalizeParsedDraftLegalConcepts(merged, rawIntake, { applyStarterTerminationDefault: false });
   merged = { ...merged, parties: extractCleanPremiumParties(rawIntake, merged) };
   merged = { ...merged, title: inferPremiumTitle(merged, rawIntake) };
   if (import.meta.env.DEV) {
@@ -1492,7 +1515,7 @@ async function runPremiumCompletionInner(
   merged = synthesizePremiumScopeAndOperativeFields(merged, rawIntake);
   merged = injectCoreClausesConservative(merged, rawIntake);
   merged = polishAllTextFields(merged);
-  merged = normalizeParsedDraftLegalConcepts(merged, rawIntake);
+  merged = normalizeParsedDraftLegalConcepts(merged, rawIntake, { applyStarterTerminationDefault: false });
   merged = ensurePremiumDraftMeetsReviewGate(merged, rawIntake);
   merged = elevatePremiumPaymentTermsFromIntake(merged, rawIntake);
   merged = applyJointVentureEconomicsExpansion(merged, rawForSoT || rawIntake);
@@ -1638,7 +1661,9 @@ async function runPremiumCompletionInner(
   let trackB = mergePremiumParsePreferFresh(input.structuredDraft, trackBParse, rawForSoT || rawIntake);
   trackB = runIntakeDefaultsAndRoles(trackB, rawForSoT || rawIntake, input.simpleProductFlow, input.partyRoleLabels);
   trackB = applyHardFamilyLocks(trackB, rawForSoT || rawIntake);
-  trackB = normalizeParsedDraftLegalConcepts(trackB, rawForSoT || rawIntake);
+  trackB = normalizeParsedDraftLegalConcepts(trackB, rawForSoT || rawIntake, {
+    applyStarterTerminationDefault: false,
+  });
   trackB = synthesizePremiumScopeAndOperativeFields(trackB, rawForSoT || rawIntake);
   trackB = injectCoreClausesConservative(trackB, rawForSoT || rawIntake);
   trackB = elevatePremiumPaymentTermsFromIntake(trackB, rawForSoT || rawIntake);
@@ -1820,6 +1845,7 @@ async function runPremiumCompletionInner(
 
   let outMerged: ParsedDraftShape = merged;
   let winningPremiumBodyText = "";
+  let substantiveDegradedServerAuthorityBody = "";
   let lastWireAuthoritativeBodyLen = 0;
   let lastWireServerFullDocumentLen = 0;
   let lastWireGenerationOutcome = "";
@@ -2070,6 +2096,19 @@ async function runPremiumCompletionInner(
       );
       const full = normalizedFull.wire;
       pipelineNormalizedAuthoritativeText = normalizedFull.authoritativeText;
+      const exactWireDocumentText = String(fullResp.result.document_text ?? "").trim();
+      if (
+        isSubstantiveDegradedJsonParseServerAuthority({
+          generationOutcome: fullResp.result.generation_outcome,
+          failureCode: fullResp.result.server_generation_failure_code,
+          documentTextLen: exactWireDocumentText.length,
+          serverFullLen: String(fullResp.result.server_full_document_text ?? "").trim().length,
+          authoritativeBodyLen: normalizedFull.authoritativeText.length,
+        }) &&
+        exactWireDocumentText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+      ) {
+        substantiveDegradedServerAuthorityBody = exactWireDocumentText;
+      }
       if (import.meta.env.DEV && normalizedFull.sourceField) {
         // eslint-disable-next-line no-console
         console.info("[premium-completion] wire_document_normalized", {
@@ -2456,9 +2495,12 @@ async function runPremiumCompletionInner(
         });
         materialMissingItems = buildMaterialMissingItems({
           intakeRaw: preGateIntake,
+          userGapAnswers: gapAns || null,
           body: doc,
           structuralIssues,
           serverMissing: effectiveFull.missing_material_info ?? undefined,
+          parsedParties: merged.parties,
+          additionalTerms: merged.additional_terms || null,
         });
         const postProcessMs = Math.round(
           (typeof performance !== "undefined" ? performance.now() : Date.now()) - postProcessStartedAt,
@@ -2782,6 +2824,35 @@ async function runPremiumCompletionInner(
               failureCode: (effectiveFull.server_generation_failure_code || "").trim() || "json_parse",
             },
           });
+        }
+        if (
+          isSubstantiveDegradedJsonParseServerAuthority({
+            generationOutcome: effectiveFull.generation_outcome,
+            failureCode: effectiveFull.server_generation_failure_code,
+            documentTextLen: originalWireDocumentText.length,
+            serverFullLen: Math.max(
+              originalWireServerFullDocumentText.length,
+              wireServerFullDocumentText.length,
+            ),
+            authoritativeBodyLen: Math.max(
+              doc.length,
+              pipelineNormalizedAuthoritativeText.length,
+              lastWireAuthoritativeBodyLen,
+            ),
+          })
+        ) {
+          const exactServerBody =
+            originalWireDocumentText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+              ? originalWireDocumentText
+              : pipelineNormalizedAuthoritativeText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+                ? pipelineNormalizedAuthoritativeText
+                : doc;
+          if (exactServerBody.trim().length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
+            doc = exactServerBody.trim();
+            winningPremiumBodyText = doc;
+            substantiveDegradedServerAuthorityBody = doc;
+            premiumRenderSource = "server_full_draft_degraded";
+          }
         }
         const structuralRetryEnabled =
           import.meta.env.MODE !== "test" ||
@@ -4061,11 +4132,34 @@ async function runPremiumCompletionInner(
             truncatedKeepSoTResponse &&
             doc.trim().length >= TRUNCATED_KEEP_SOT_MIN_LEN &&
             !premiumBodyHardRejectedForDevContextLeak;
-          if (keepUsableWireDespiteSoftFreezeReject || truncatedKeepBypassFreezeReject) {
+          const substantiveDegradedJsonParseKeep =
+            isSubstantiveDegradedJsonParseServerAuthority({
+              generationOutcome: effectiveFull.generation_outcome,
+              failureCode: effectiveFull.server_generation_failure_code,
+              documentTextLen: originalWireDocumentText.length,
+              serverFullLen: Math.max(
+                originalWireServerFullDocumentText.length,
+                wireServerFullDocumentText.length,
+              ),
+              authoritativeBodyLen: Math.max(doc.length, pipelineNormalizedAuthoritativeText.length),
+            }) && !premiumBodyHardRejectedForDevContextLeak;
+          if (
+            keepUsableWireDespiteSoftFreezeReject ||
+            truncatedKeepBypassFreezeReject ||
+            substantiveDegradedJsonParseKeep
+          ) {
             // Heart of the chronic create illness: OpenAI returned a usable draft; the
             // client family gate must not wipe the corpus into empty Retry Pro draft.
-            winningPremiumBodyText = doc;
-            premiumRenderSource = freezeSource || "server_full_draft";
+            winningPremiumBodyText =
+              substantiveDegradedJsonParseKeep && originalWireDocumentText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+                ? originalWireDocumentText
+                : doc;
+            if (substantiveDegradedJsonParseKeep && winningPremiumBodyText.trim().length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
+              substantiveDegradedServerAuthorityBody = winningPremiumBodyText.trim();
+            }
+            premiumRenderSource = substantiveDegradedJsonParseKeep
+              ? "server_full_draft_degraded"
+              : freezeSource || "server_full_draft";
             rejectedPaidCorpusDueToClientGates = false;
             logPremiumCompletionDebug({
               stage: "pipeline_keep_usable_wire_despite_soft_freeze_reject",
@@ -4310,7 +4404,17 @@ async function runPremiumCompletionInner(
             (premiumRenderSource === "server_full_draft_degraded" ||
               premiumRenderSource === "server_full_draft" ||
               premiumRenderSource === "server_full_draft_retry") &&
-            !truncatedKeepUnconditionalSoTApplied
+            !truncatedKeepUnconditionalSoTApplied &&
+            !isSubstantiveDegradedJsonParseServerAuthority({
+              generationOutcome: effectiveFull.generation_outcome,
+              failureCode: effectiveFull.server_generation_failure_code,
+              documentTextLen: originalWireDocumentText.length,
+              serverFullLen: Math.max(
+                originalWireServerFullDocumentText.length,
+                wireServerFullDocumentText.length,
+              ),
+              authoritativeBodyLen: Math.max(doc.length, winningPremiumBodyText.length),
+            })
           ) {
             // Do not wipe if truncated-keep unconditional SoT was already applied
             winningPremiumBodyText = "";
@@ -4742,7 +4846,9 @@ async function runPremiumCompletionInner(
             (preservedLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
               ? PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE
               : degradedJsonParseWithoutSubstantiveServerFull
-                ? "rejected_paid_corpus"
+                ? preservedLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN
+                  ? "server_full_draft_degraded"
+                  : "rejected_paid_corpus"
                 : "server_full_draft")
           ) as PremiumRenderSource;
           const preservedFamily = resolveAuthoritativePaidProAgreementFamily({
@@ -4792,6 +4898,7 @@ async function runPremiumCompletionInner(
           });
         } else if (
           !brandStructuralRecoveryCommitted &&
+          substantiveDegradedServerAuthorityBody.trim().length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
           (acc.ok ||
             founderDetailsGateMessage ||
             proIntentGateMessage ||
@@ -5088,13 +5195,14 @@ async function runPremiumCompletionInner(
         !networkRecoveryPreview ||
         networkRecoveryPreview.blockReason === "duplicate_notice_stanza")
     ) {
-      const recoverySource = PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE;
-      if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
+      // Labeled recovery display only. Network failure stays retryable and must
+      // not be claimed as completed premium generation or SoT.
+      if (tierAEnabled) tierADiag.premiumPipelineSource = "premium_network_retryable";
       logPremiumCompletionDebug({
-        stage: "premium_network_local_recovery",
+        stage: "premium_network_retryable_labeled_recovery_display",
         recoveryCandidateEligible: Boolean(networkRecoveryPreview?.eligible),
         rejectedReason: networkRecoveryPreview?.blockReason ?? undefined,
-        premiumRenderSource: recoverySource,
+        premiumRenderSource: "premium_network_retryable",
         bodyLen: localRecovery.body.length,
         displayPlainLen: networkRecoveryPreview?.displayPlainLen ?? localRecovery.body.length,
       });
@@ -5107,7 +5215,7 @@ async function runPremiumCompletionInner(
         premiumParties,
         recipientCandidates,
         winningPremiumBodyText: localRecovery.body,
-        premiumRenderSource: recoverySource,
+        premiumRenderSource: "premium_network_retryable",
         premiumReview,
         premiumFinalizeAudit,
         premiumReviewRoute,
@@ -5118,7 +5226,7 @@ async function runPremiumCompletionInner(
         proIntentGateMessage: null,
         serverGenerationDegraded: null,
         premiumNetworkRetryable: true,
-        premiumNetworkLocalRecovery: true,
+        premiumNetworkLocalRecovery: false,
         tierADiagnostic: tierADiag,
       };
     }
@@ -5260,6 +5368,49 @@ async function runPremiumCompletionInner(
     };
   }
   if (premiumRenderSource === "rejected_paid_corpus") {
+    const salvageSubstantiveDegraded = (
+      substantiveDegradedServerAuthorityBody ||
+      winningPremiumBodyText ||
+      pipelineNormalizedAuthoritativeText ||
+      ""
+    ).trim();
+    if (salvageSubstantiveDegraded.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN && substantiveDegradedServerAuthorityBody.trim().length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
+      if (tierAEnabled) tierADiag.premiumPipelineSource = "server_full_draft_degraded";
+      outMerged = stripClientPremiumArtifactBlocksFromDraft({
+        ...outMerged,
+        premium_full_document_text: salvageSubstantiveDegraded,
+        premium_server_full_document_text:
+          String(outMerged.premium_server_full_document_text ?? "").trim() || salvageSubstantiveDegraded,
+      });
+      freezeAcceptedPremiumBodyForSession(
+        input.agreementGenerationId,
+        salvageSubstantiveDegraded,
+        "server_full_draft_degraded",
+        attemptSequence,
+      );
+      markPaidProPipelineValidationPassed({
+        text: salvageSubstantiveDegraded,
+        source: "server_full_draft_degraded",
+      });
+      return {
+        premiumDraft: outMerged,
+        premiumParties,
+        recipientCandidates,
+        winningPremiumBodyText: salvageSubstantiveDegraded,
+        premiumRenderSource: "server_full_draft_degraded",
+        premiumReview,
+        premiumFinalizeAudit,
+        premiumReviewRoute,
+        staleIntakeOrGeneration: false,
+        agreementGenerationId: input.agreementGenerationId,
+        premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+        founderDetailsGateMessage: null,
+        proIntentGateMessage: null,
+        serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
+        premiumDegradedServerRecoverable: true,
+        tierADiagnostic: tierADiag,
+      };
+    }
     const docTrimForSuppress = (winningPremiumBodyText || "").trim();
     const intakeForRecovery = rawForSoT || rawIntake;
     const adoptionFpForReturn =
@@ -5639,9 +5790,18 @@ async function runPremiumCompletionInner(
       lastWireAuthoritativeBodyLen > 0 &&
       lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
       lastWireServerFullDocumentLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
+    const keepSubstantiveDegradedServerAuthority = isSubstantiveDegradedJsonParseServerAuthority({
+      generationOutcome: lastWireGenerationOutcome,
+      failureCode:
+        serverDegradedHttpMetaForRecovery?.code ?? serverGenerationDegraded?.code ?? null,
+      documentTextLen: lastWireAuthoritativeBodyLen,
+      serverFullLen: lastWireServerFullDocumentLen,
+      authoritativeBodyLen: pipelineNormalizedAuthoritativeText.length,
+    });
     if (
       rejectedPaidCorpusDueToClientGates &&
       !premiumBodyHardRejectedForDevContextLeak &&
+      !keepSubstantiveDegradedServerAuthority &&
       (jsonParseClientRejected ||
         (!substantiveServerFullOnWire &&
           (degradedJsonParseNoWireServerFull ||

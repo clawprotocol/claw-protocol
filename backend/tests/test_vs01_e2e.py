@@ -48,12 +48,12 @@ def test_vs01_full_path_finalize_sign_get_receipt_export_bundle(
     _configure_artifacts(monkeypatch, tmp_path)
     client = TestClient(app)
 
-    raw = b"VS01-B13 e2e document payload"
+    raw = b"%PDF-1.4 VS01-B13 e2e document payload"
     fin = client.post(
         "/v1/documents",
         json={
             "content_base64": base64.b64encode(raw).decode("ascii"),
-            "content_type": "application/octet-stream",
+            "content_type": "application/pdf",
         },
     )
     assert fin.status_code == 200, fin.text

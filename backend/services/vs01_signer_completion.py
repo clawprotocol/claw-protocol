@@ -184,7 +184,10 @@ _COMPLETION_ELIGIBLE_PARTY_ROLES = frozenset(
     {"", "signer", "owner", "party", "counterparty", "provider", "client", "service_provider"}
 )
 
-_NON_SIGNING_PARTY_ROLES = frozenset({"viewer", "reviewer", "coordinator", "fyi", "copy", "read_only", "readonly"})
+# Review-email workflow role "reviewer" is not non-signing. Named legal parties
+# stamped reviewer for Resend still sign on the review-first path. Exclude only
+# true non-signing workflow roles; honor explicit requires_signature=False.
+_NON_SIGNING_PARTY_ROLES = frozenset({"viewer", "coordinator", "fyi", "copy", "read_only", "readonly"})
 
 
 def _normalize_party_workflow_role(role: str) -> str:
@@ -237,7 +240,17 @@ def all_signers_signed_from_audit(draft: Dict[str, Any], audit: List[Any]) -> bo
     required_roles = required_vs01_signer_role_ids(draft)
     if required_roles:
         completed_roles = completed_vs01_signer_role_ids(audit)
-        return required_roles <= completed_roles
+        if required_roles <= completed_roles:
+            return True
+        done = signature_completed_participant_ids(audit)
+        required_parties = {
+            portable_party_id_for_signer_role(draft, rid)
+            for rid in required_roles
+        }
+        required_parties.discard("")
+        if required_parties and required_parties <= done:
+            return True
+        return False
 
     signing_parties = [p for p in parties if party_requires_signature(p)]
     if signing_parties:
@@ -404,15 +417,33 @@ def merge_portable_packet_corpus(
     draft: Dict[str, Any],
     portable_packet: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
+    """Merge recipient portable packet. Client cannot declare full execution.
+
+    ``fullyExecutedSnapshot`` on the portable is signing *data* the client may
+    send; it is never promoted to ``fully_executed_snapshot`` here. That field
+    is written only after authoritative ``signed`` / ``fully_executed`` audit
+    exists (``ensure_fully_executed_snapshot_on_draft``).
+    """
     if not isinstance(portable_packet, dict):
         return draft
     stored = draft.get("vs01_signing_packet_v1")
     if not isinstance(stored, dict):
         stored = {"v": 1}
-    next_stored = {**stored, "portable": portable_packet}
-    server_snap = extract_fully_executed_snapshot_from_portable(portable_packet)
-    if server_snap:
-        next_stored["fully_executed_snapshot"] = server_snap
+    portable_for_store = dict(portable_packet)
+    portable_for_store.pop("fullyExecutedSnapshot", None)
+    next_stored = {**stored, "portable": portable_for_store}
+    audit = draft.get("audit_log") or []
+    existing_snap = stored.get("fully_executed_snapshot")
+    keep_existing = (
+        isinstance(existing_snap, dict)
+        and fully_executed_signed_already_recorded(audit)
+        and all_signers_signed_from_audit(draft, audit)
+        and str(existing_snap.get("corpus_plain") or "").strip()
+    )
+    if keep_existing:
+        next_stored["fully_executed_snapshot"] = existing_snap
+    else:
+        next_stored.pop("fully_executed_snapshot", None)
     return {**draft, "vs01_signing_packet_v1": next_stored}
 
 
@@ -427,22 +458,34 @@ def build_signature_completed_event(
     signed_date_display: str,
     locked_version_id: str | None,
     agreement_version_hash: str | None,
+    event_id: str = "",
+    signature_artifact_digest: str = "",
+    consent_artifact_digest: str = "",
+    packet_revision: str = "",
 ) -> Dict[str, Any]:
-    return {
+    value: Dict[str, Any] = {
+        "signer_role_id": signer_role_id,
+        "participant_id": participant_id or None,
+        "participant_display_name": display_name or None,
+        "document_id": document_id or None,
+        "signed_date_iso": signed_date_iso or None,
+        "signed_date_display": signed_date_display or None,
+        "locked_version_id": locked_version_id,
+        "agreement_version_hash": agreement_version_hash,
+        "packet_revision": packet_revision or None,
+        "signature_artifact_digest": signature_artifact_digest or None,
+        "consent_artifact_digest": consent_artifact_digest or None,
+    }
+    event: Dict[str, Any] = {
         "event_type": "signature_completed",
         "at": signed_at,
         "field": "vs01_signing",
-        "value": {
-            "signer_role_id": signer_role_id,
-            "participant_id": participant_id or None,
-            "participant_display_name": display_name or None,
-            "document_id": document_id or None,
-            "signed_date_iso": signed_date_iso or None,
-            "signed_date_display": signed_date_display or None,
-            "locked_version_id": locked_version_id,
-            "agreement_version_hash": agreement_version_hash,
-        },
+        "value": value,
     }
+    if event_id:
+        event["id"] = event_id
+        event["event_id"] = event_id
+    return event
 
 
 def build_fully_executed_signed_event(
@@ -486,6 +529,10 @@ def orchestrate_vs01_signer_complete(
     locked_version_id: str | None,
     agreement_version_hash: str | None,
     portable_packet: Optional[Dict[str, Any]] = None,
+    event_id: str = "",
+    signature_artifact_digest: str = "",
+    consent_artifact_digest: str = "",
+    packet_revision: str = "",
 ) -> Vs01SignerCompleteOutcome:
     """
     Single authoritative completion mutation path.
@@ -509,6 +556,10 @@ def orchestrate_vs01_signer_complete(
                 signed_date_display=signed_date_display,
                 locked_version_id=locked_version_id,
                 agreement_version_hash=agreement_version_hash,
+                event_id=event_id,
+                signature_artifact_digest=signature_artifact_digest,
+                consent_artifact_digest=consent_artifact_digest,
+                packet_revision=packet_revision,
             )
         )
 

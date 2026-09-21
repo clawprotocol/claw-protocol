@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AgreementDraft } from "./agreementTypes";
 import {
   auditHasRecipientApprovalForParticipant,
+  auditHasRecipientApprovalForRevision,
   deriveParticipantRows,
   humanizePartyRoleForTable,
   participantDisplayName,
@@ -53,6 +54,31 @@ describe("auditHasRecipientApprovalForParticipant", () => {
       { event_type: "recipient_approved" as const, at: ts, value: { participant_id: "p-x" } },
     ];
     expect(auditHasRecipientApprovalForParticipant(audit, "")).toBe(false);
+  });
+});
+
+describe("auditHasRecipientApprovalForRevision", () => {
+  const ts = "2026-09-15T00:00:00.000Z";
+  const snap = "crs_c39f2cb710ac4ae899238b61be4a13e2";
+  const digest = "03e26cfda553ef8c920a09db67171286f82a750e9ddfa2171f82bc71a29eeb85";
+
+  it("requires the same participant, snapshot, and digest", () => {
+    const audit = [
+      {
+        event_type: "participant_approved" as const,
+        at: ts,
+        value: { participant_id: "p_lumen", snapshot_id: snap, corpus_sha256: digest },
+      },
+    ];
+    expect(auditHasRecipientApprovalForRevision(audit, { participantId: "p_lumen", snapshotId: snap, digest })).toBe(true);
+    expect(auditHasRecipientApprovalForRevision(audit, { participantId: "p_vanguard", snapshotId: snap, digest })).toBe(false);
+    expect(
+      auditHasRecipientApprovalForRevision(audit, {
+        participantId: "p_lumen",
+        snapshotId: "crs_other",
+        digest,
+      }),
+    ).toBe(false);
   });
 });
 

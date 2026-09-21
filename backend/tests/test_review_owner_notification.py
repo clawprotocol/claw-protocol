@@ -66,6 +66,7 @@ def _env_common(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("EMAIL_FROM", "LawDog <notifications@lawdog.me>")
     monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-owner-notify-secret")
+    monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
 
 
 def _create_two_party_agreement(client: TestClient) -> str:
