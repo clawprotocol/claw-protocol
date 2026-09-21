@@ -97,7 +97,29 @@ export function latchPaidReviewSessionCanonicalSoTHash(args: {
   if (plain.length < 80) return;
   const sessionId = resolveReviewSessionId(args.reviewSessionId);
   const session = readOrCreateSession(sessionId);
+  const nextHash = fingerprintAgreementBody(plain);
+  if (session.latchedCanonicalSoTHash !== nextHash) {
+    session.latchedCanonicalSoTHash = nextHash;
+    session.latchedReviewDisplayHash = null;
+  }
+  sessions.set(sessionId, session);
+}
+
+/**
+ * Explicit user-approved revision of the canonical agreement body (owner
+ * proposal accept or signer-metadata finalize). Advance the session baseline
+ * atomically so the first render of the new corpus becomes the display latch.
+ */
+export function advancePaidReviewSessionCanonicalSoTAfterAuthorizedRevision(args: {
+  reviewSessionId?: string | null;
+  canonicalPlain: string;
+}): void {
+  const plain = (args.canonicalPlain || "").trim();
+  if (plain.length < 80) return;
+  const sessionId = resolveReviewSessionId(args.reviewSessionId);
+  const session = readOrCreateSession(sessionId);
   session.latchedCanonicalSoTHash = fingerprintAgreementBody(plain);
+  session.latchedReviewDisplayHash = null;
   sessions.set(sessionId, session);
 }
 
@@ -110,13 +132,7 @@ export function advancePaidReviewSessionCanonicalSoTAfterSignerFinalize(args: {
   reviewSessionId?: string | null;
   canonicalPlain: string;
 }): void {
-  const plain = (args.canonicalPlain || "").trim();
-  if (plain.length < 80) return;
-  const sessionId = resolveReviewSessionId(args.reviewSessionId);
-  const session = readOrCreateSession(sessionId);
-  session.latchedCanonicalSoTHash = fingerprintAgreementBody(plain);
-  session.latchedReviewDisplayHash = null;
-  sessions.set(sessionId, session);
+  advancePaidReviewSessionCanonicalSoTAfterAuthorizedRevision(args);
 }
 
 export function readPaidReviewSessionCorpusInvariant(

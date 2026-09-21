@@ -20,7 +20,12 @@ import {
 import { resolvePaidProPostFinalizeReviewPlain } from "../components/agreements/paidProPostFinalizeReviewSurface";
 import { resolvePaidProReviewLinkCorpusPlain } from "../components/agreements/paidProReviewLinkCorpusParity";
 import { clearPaidProPinnedSignerAppliedCorpus, setPaidProPinnedSignerAppliedCorpus } from "../components/agreements/paidProFinalHydratedCorpus";
-import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth, hashPaidProCorpus } from "../components/agreements/paidProSourceOfTruth";
+import {
+  clearPaidProSourceOfTruth,
+  establishPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
+  hashPaidProCorpus,
+} from "../components/agreements/paidProSourceOfTruth";
 import { canFinalizeReviewForSigning, computeOwnerDoneReviewApprovalPresentation } from "../components/agreements/draftRecipientReviewSignals";
 import { buildReviewFirstDocumentDisplayHtml } from "./reviewFirstDocumentDisplay";
 import { resolveReviewFirstDisplayCorpus } from "../launch/simpleProduct/reviewFirstDisplayCorpus";
@@ -36,6 +41,12 @@ import {
   commitAcceptedReviewCorpusPromotion,
   resolveAcceptedReviewCorpusFromDraft,
 } from "./reviewCorpusAuthority";
+import {
+  assertPaidReviewSessionReviewCorpusHashParity,
+  readPaidReviewSessionCorpusInvariant,
+  resetPaidReviewSessionCorpusInvariantForTests,
+} from "../components/agreements/paidProReviewSessionCorpusInvariant";
+import { fingerprintPaidReviewSessionCorpusBody } from "../components/agreements/paidProReviewSessionCorpusInvariantState";
 
 const BLUE = "Blue Canyon Analytics LLC";
 const IRON = "Iron Vale Systems Inc.";
@@ -191,6 +202,7 @@ describe("accepted review proposal corpus promotion (TEST321)", () => {
     clearConsumedPaidProSignerMetadataAuthority();
     clearPaidProPinnedSignerAppliedCorpus();
     clearReviewFirstHandoffSource();
+    resetPaidReviewSessionCorpusInvariantForTests();
     sessionStorage.clear();
   });
 
@@ -410,5 +422,49 @@ describe("accepted review proposal corpus promotion (TEST321)", () => {
   it("acceptedProposalCorpusText reads proposal purpose", () => {
     const corrected = buildCorpus(PARTY1_ADDRESS_NEW);
     expect(acceptedProposalCorpusText({ purpose: corrected })).toContain(NEW_CITY);
+  });
+
+  it("owner accept remints the review-session latch so accepted paper is not treated as post-freeze drift", () => {
+    const originalBody = buildCorpus(PARTY1_ADDRESS_OLD);
+    establishPaidProSourceOfTruth({
+      text: originalBody,
+      source: "server_full_draft",
+      intakeText: "consulting agreement",
+    });
+    const frozenPlain = getPaidProSourceOfTruthText();
+    expect(frozenPlain.length).toBeGreaterThan(80);
+    expect(() =>
+      assertPaidReviewSessionReviewCorpusHashParity({
+        reviewPlain: frozenPlain,
+        surface: "paid_pro_review_render_plain",
+      }),
+    ).not.toThrow();
+
+    const corrected = buildCorpus(PARTY1_ADDRESS_NEW);
+    commitAcceptedReviewCorpusPromotion({
+      agreementId: AGREEMENT_ID,
+      corpusText: corrected,
+      draft: appliedDraft(corrected),
+      oldTextMarker: OLD_CITY,
+      acceptedTextMarker: NEW_CITY,
+    });
+
+    expect(getPaidProSourceOfTruthText()).toContain(NEW_CITY);
+    expect(getPaidProSourceOfTruthText()).not.toContain(OLD_CITY);
+    const session = readPaidReviewSessionCorpusInvariant();
+    expect(session?.latchedCanonicalSoTHash).toBe(fingerprintPaidReviewSessionCorpusBody(corrected));
+    expect(session?.latchedReviewDisplayHash).toBeNull();
+    expect(() =>
+      assertPaidReviewSessionReviewCorpusHashParity({
+        reviewPlain: corrected,
+        surface: "paid_pro_review_render_plain",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertPaidReviewSessionReviewCorpusHashParity({
+        reviewPlain: `${corrected}\n\n9. ILLEGAL POST-ACCEPT INSERT`,
+        surface: "paid_pro_review_render_plain",
+      }),
+    ).toThrow(/corpus hash diverged|display hash changed/);
   });
 });

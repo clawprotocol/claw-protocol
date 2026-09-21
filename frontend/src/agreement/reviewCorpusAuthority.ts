@@ -19,6 +19,7 @@ import {
 } from "../components/agreements/paidProSourceOfTruth";
 import { resolveReviewFirstDisplayCorpus } from "../launch/simpleProduct/reviewFirstDisplayCorpus";
 import { prepareCommercialReviewSnapshotAuthority } from "./canonicalReviewSnapshotApi";
+import { advancePaidReviewSessionCanonicalSoTAfterAuthorizedRevision } from "../components/agreements/paidProReviewSessionCorpusInvariantState";
 
 export type ReviewCorpusAuthoritySurface =
   | "reviewer_view"
@@ -318,6 +319,11 @@ export function commitAcceptedReviewCorpusPromotion(args: {
       // Soft: promotion still commits snapshot/pin even if freeze re-establish is blocked.
     }
   }
+  // Owner accept is an explicit authorized revision. Remint the review-session
+  // latch so the accepted paper is not treated as silent post-freeze drift.
+  advancePaidReviewSessionCanonicalSoTAfterAuthorizedRevision({
+    canonicalPlain: text,
+  });
 
   let afterAcceptHash = acceptedProposalHash;
   let reviewSnapshotHash: string | null = snapshotHashBefore;

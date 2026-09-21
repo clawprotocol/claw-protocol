@@ -10,6 +10,7 @@ import {
   checkHarborAppliedMeaning,
   checkHarborFirstDraftMeaning,
   checkSaasCustomerMeaning,
+  checkSilverMesaFourPartyCustomerMeaning,
   checkThreePartyCustomerMeaning,
   consultingPaperReady,
   fourPartyFirstDraftReady,
@@ -465,6 +466,22 @@ describe("release-scope three- and four-party customer-meaning checks", () => {
     const applied = `${VALID_FOUR_PARTY}\nLumen Bioinformatics Inc. pays each listed milestone amount to the named recipient.`;
     expect(checkFourPartyCustomerMeaning(applied, "applied")).toEqual({ ok: true, reasons: [] });
     expect(fourPartyPaperReady(applied)).toBe(true);
+  });
+});
+
+describe("checkSilverMesaFourPartyCustomerMeaning", () => {
+  it("accepts the four-party Silver Mesa stub facts and rejects a fifth party", () => {
+    const valid = [
+      "This Agreement is among Ironclad Systems Group LLC (\"Sponsor\"), Harborline Data Solutions Inc. (\"Vendor\"), Northwind Automation Partners LLC (\"Integrator\"), and Silver Mesa Analytics LP (\"Analyst\").",
+      "Ironclad Systems Group LLC pays the $187,500 contract value over 6 milestone payments.",
+      "The initial term is 24 months.",
+      "This Agreement is governed by the laws of the State of Texas.",
+      "Sponsor address: 3 Ironclad Way, Austin, TX 78701.",
+    ].join("\n");
+    expect(checkSilverMesaFourPartyCustomerMeaning(valid)).toEqual({ ok: true, reasons: [] });
+    expect(checkSilverMesaFourPartyCustomerMeaning(`${valid}\nVertexGrid Technologies LLC joins.`).reasons).toContain(
+      "invented_fifth_party_vertexgrid",
+    );
   });
 });
 

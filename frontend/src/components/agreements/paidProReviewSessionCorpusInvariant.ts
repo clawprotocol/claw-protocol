@@ -8,6 +8,7 @@ export {
   assertPaidReviewSessionPremiumGenerationBeforeCanonicalFreeze,
   isPaidProCanonicalFreezeSource,
   latchPaidReviewSessionCanonicalSoTHash,
+  advancePaidReviewSessionCanonicalSoTAfterAuthorizedRevision,
   markPaidReviewSessionPremiumGeneration,
   readPaidReviewSessionCorpusInvariant,
   resetPaidReviewSessionCorpusInvariantForTests,

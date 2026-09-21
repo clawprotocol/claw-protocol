@@ -42,7 +42,13 @@ for (const scenario of selected) {
   test(`real drafting: ${scenario.id}`, async ({ page, browser }) => {
     test.skip(reopenOnly, "Reopen-only mode does not regenerate samples");
     test.setTimeout(
-      scenario.id === "three_party" || scenario.id === "four_party" || scenario.id === "saas" ? 480_000 : 300_000,
+      scenario.id === "three_party" ||
+        scenario.id === "four_party" ||
+        scenario.id === "four_party_silver_mesa" ||
+        scenario.id === "consulting" ||
+        scenario.id === "saas"
+        ? 480_000
+        : 300_000,
     );
     const modelResponses: object[] = [];
     const pending: Promise<void>[] = [];
@@ -269,18 +275,39 @@ for (const scenario of selected) {
 
       let recipientPath = "not_yet_exercised";
       let receiptId = "";
-      if (scenario.id === "three_party" || scenario.id === "four_party" || scenario.id === "saas") {
-        const sample = releaseScopeSample(scenario.id);
-        const signers = sample.parties.map((party) => ({
-          legalEntity: party.legalEntity.replace(/\.$/, ""),
-          signerName: party.signerName || "",
-          signerEmail: party.email || "",
-        }));
+      if (
+        scenario.id === "three_party" ||
+        scenario.id === "four_party" ||
+        scenario.id === "four_party_silver_mesa" ||
+        scenario.id === "consulting" ||
+        scenario.id === "saas"
+      ) {
+        const signers =
+          scenario.id === "four_party_silver_mesa"
+            ? [
+                { legalEntity: "Ironclad Systems Group LLC", signerName: "Ethan Cole", signerEmail: "ethan.cole@ironcladsg.com" },
+                { legalEntity: "Harborline Data Solutions Inc.", signerName: "Maya Bennett", signerEmail: "maya.bennett@harborlinedata.com" },
+                { legalEntity: "Northwind Automation Partners LLC", signerName: "Lucas Reed", signerEmail: "lucas.reed@northwindap.io" },
+                { legalEntity: "Silver Mesa Analytics LP", signerName: "Olivia Hart", signerEmail: "olivia.hart@silvermesaanalytics.com" },
+              ]
+            : releaseScopeSample(scenario.id).parties.map((party) => ({
+                legalEntity: party.legalEntity.replace(/\.$/, ""),
+                signerName: party.signerName || "",
+                signerEmail: party.email || "",
+              }));
         expect(signers.every((row) => row.signerName), "intake-supplied signer names must remain associated").toBeTruthy();
         for (const signer of signers) {
           await expect(page.locator("body")).toContainText(signer.signerName);
         }
         scriptedActions.push("local_review_sign_final");
+        const proposalMarker =
+          scenario.id === "consulting"
+            ? "PROPOSED-IRONVALE-STEERING-CADENCE-WEEKLY"
+            : scenario.id === "three_party"
+              ? "PROPOSED-CLEARSPRING-MONTHLY-SALES-REPORT"
+              : scenario.id === "four_party_silver_mesa"
+                ? "PROPOSED-SILVER-MESA-WEEKLY-STATUS-MEMO"
+                : undefined;
         const finished = await completeLocalReviewSignAndFinal({
           page,
           browser,
@@ -290,11 +317,30 @@ for (const scenario of selected) {
           partyCue: scenario.partyCue,
           paperReady,
           signers,
+          proposalMarker,
+          recipientViewport:
+            scenario.id === "four_party_silver_mesa" ? { width: 390, height: 844 } : { width: 1280, height: 800 },
         });
         expect(finished.signedCount).toBe(signers.length);
         expect(finished.receiptId.length).toBeGreaterThan(8);
         recipientPath = "local_review_sign_final";
         receiptId = finished.receiptId;
+        writeQualityEvalArtifact(
+          "accepted-revision-provenance.json",
+          JSON.stringify(
+            {
+              first_snapshot_id: persisted.snapshotId,
+              first_digest: persisted.digest,
+              accepted_snapshot_id: finished.snapshotId,
+              accepted_digest: finished.digest,
+              receipt_id: finished.receiptId,
+              signed_count: finished.signedCount,
+            },
+            null,
+            2,
+          ),
+          scenario.id,
+        );
       }
 
       writeQualityEvalArtifact(

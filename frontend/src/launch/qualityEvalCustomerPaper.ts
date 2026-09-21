@@ -352,6 +352,37 @@ export function threePartyPaperReady(article: string): boolean {
   return checkThreePartyCustomerMeaning(article).ok;
 }
 
+export function checkSilverMesaFourPartyCustomerMeaning(article: string): PaperCheck {
+  const text = normalizeArticleWhitespace(article || "");
+  const reasons: string[] = [];
+  const parties = [
+    "Ironclad Systems Group LLC",
+    "Harborline Data Solutions Inc.",
+    "Northwind Automation Partners LLC",
+    "Silver Mesa Analytics LP",
+  ];
+  for (const name of parties) {
+    if (!text.includes(name)) reasons.push(`missing_party_${name}`);
+  }
+  if (text.includes("VertexGrid Technologies LLC")) reasons.push("invented_fifth_party_vertexgrid");
+  if (!/Texas/i.test(text)) reasons.push("missing_texas_governing_law");
+  if (/Massachusetts|Oklahoma|Delaware/i.test(text) && !/Texas/i.test(text)) {
+    reasons.push("substituted_governing_law");
+  }
+  if (!/\$187,500/.test(text)) reasons.push("missing_rollout_fee");
+  if (!/\b24 months\b/i.test(text)) reasons.push("missing_twenty_four_month_term");
+  if (!/3 Ironclad Way, Austin, TX 78701/.test(text)) reasons.push("missing_ironclad_address");
+  if (!/Sponsor/.test(text) || !/Vendor/.test(text) || !/Integrator/.test(text) || !/Analyst/.test(text)) {
+    reasons.push("missing_requested_roles");
+  }
+  if (PLACEHOLDER.test(text)) reasons.push("placeholder_or_forbidden_party");
+  return fail(reasons);
+}
+
+export function silverMesaFourPartyPaperReady(article: string): boolean {
+  return checkSilverMesaFourPartyCustomerMeaning(article).ok;
+}
+
 export function fourPartyPaperReady(article: string): boolean {
   return checkFourPartyCustomerMeaning(article, "applied").ok;
 }

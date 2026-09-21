@@ -38,8 +38,11 @@ import {
   fourPartyFirstDraftReady as fourPartyFirstDraftReadyCheck,
   fourPartyPaperReady as fourPartyPaperReadyCheck,
   saasPaperReady as saasPaperReadyCheck,
+  silverMesaFourPartyPaperReady as silverMesaFourPartyPaperReadyCheck,
+  checkSilverMesaFourPartyCustomerMeaning,
   threePartyPaperReady as threePartyPaperReadyCheck,
 } from "../../src/launch/qualityEvalCustomerPaper";
+import { IRONCLAD_FOUR_PARTY_SILVER_MESA_INTAKE } from "../../src/components/agreements/ironcladJointRolloutFixtures";
 import { UNCONFIRMED_MILESTONE_PAYER_QUESTION } from "../../src/components/agreements/paidProMilestonePayer";
 import { extractTitleFromCorpusPlain } from "../../src/components/agreements/paidProUniversalDisplayTitle";
 import {
@@ -57,7 +60,7 @@ export const QUALITY_EVAL_SAAS_SPARSE_INTAKE = RELEASE_SCOPE_SAAS_SPARSE_INTAKE;
 
 export const QUALITY_EVAL_SAAS_FILLED_INTAKE = RELEASE_SCOPE_SAAS_FILLED_INTAKE;
 
-export type QualityEvalCaseId = ReleaseScopeCaseId;
+export type QualityEvalCaseId = ReleaseScopeCaseId | "four_party_silver_mesa";
 
 export type QualityEvalCase = {
   id: QualityEvalCaseId;
@@ -109,6 +112,20 @@ export const QUALITY_EVAL_MULTIPARTY_CASES: readonly QualityEvalCase[] = [
     partyCue: "Lumen Bioinformatics Inc.",
     track: "review",
   },
+  {
+    id: "four_party_silver_mesa",
+    sparse: IRONCLAD_FOUR_PARTY_SILVER_MESA_INTAKE,
+    filled: IRONCLAD_FOUR_PARTY_SILVER_MESA_INTAKE,
+    parties: [
+      "Ironclad Systems Group LLC",
+      "Harborline Data Solutions Inc.",
+      "Northwind Automation Partners LLC",
+      "Silver Mesa Analytics LP",
+    ],
+    terms: ["$187,500", "Texas"],
+    partyCue: "Silver Mesa Analytics LP",
+    track: "review",
+  },
 ];
 
 export const QUALITY_EVAL_ALL_CASES: readonly QualityEvalCase[] = [
@@ -116,7 +133,18 @@ export const QUALITY_EVAL_ALL_CASES: readonly QualityEvalCase[] = [
   ...QUALITY_EVAL_MULTIPARTY_CASES,
 ];
 
+export const CUSTOMER_MEANING_PATH_CASE_IDS = [
+  "consulting",
+  "three_party",
+  "four_party_silver_mesa",
+] as const;
+
 export function selectQualityEvalCases(caseId: string | undefined): QualityEvalCase[] {
+  if (caseId === "customer_meaning_path") {
+    return QUALITY_EVAL_ALL_CASES.filter((row) =>
+      (CUSTOMER_MEANING_PATH_CASE_IDS as readonly string[]).includes(row.id),
+    );
+  }
   const selected = new Set(selectReleaseScopeCaseIds(caseId));
   return QUALITY_EVAL_ALL_CASES.filter((row) => selected.has(row.id));
 }
@@ -512,6 +540,7 @@ export function paperReadyForCase(id: QualityEvalCaseId, stage: "first" | "appli
   if (id === "consulting") return consultingPaperReady;
   if (id === "saas") return saasPaperReady;
   if (id === "three_party") return threePartyPaperReady;
+  if (id === "four_party_silver_mesa") return silverMesaFourPartyPaperReadyCheck;
   return stage === "first" ? fourPartyFirstDraftReady : fourPartyPaperReady;
 }
 
@@ -547,6 +576,10 @@ export function assertReleaseScopePaper(id: QualityEvalCaseId, article: string, 
   }
   if (id === "three_party") {
     assertThreePartyCustomerMeaning(article);
+    return;
+  }
+  if (id === "four_party_silver_mesa") {
+    assertCheck(checkSilverMesaFourPartyCustomerMeaning(article), "silver_mesa_four_party_customer_meaning");
     return;
   }
   assertCheck(checkFourPartyCustomerMeaning(article, stage === "applied" ? "applied" : "first"), "four_party_customer_meaning");
@@ -1487,6 +1520,24 @@ async function clickOwnerSend(
   return true;
 }
 
+function captureProposalPosts(page: Page): { ok: boolean; proposalId: string; url: string }[] {
+  const events: { ok: boolean; proposalId: string; url: string }[] = [];
+  page.on("response", (response) => {
+    const url = response.url();
+    if (response.request().method() !== "POST" || !url.includes("/recipient-proposal")) return;
+    void response
+      .json()
+      .then((body) => {
+        const proposalId = String((body as { proposal_id?: string; id?: string })?.proposal_id || (body as { id?: string })?.id || "");
+        events.push({ ok: response.ok(), proposalId, url: new URL(url).pathname });
+      })
+      .catch(() => {
+        events.push({ ok: response.ok(), proposalId: "", url: new URL(url).pathname });
+      });
+  });
+  return events;
+}
+
 export async function completeLocalReviewSignAndFinal(args: {
   page: Page;
   browser: Browser;
@@ -1497,9 +1548,16 @@ export async function completeLocalReviewSignAndFinal(args: {
   paperReady: (article: string) => boolean;
   signers: readonly { legalEntity: string; signerName: string; signerEmail?: string }[];
   fillProvidedIfEmpty?: boolean;
-}): Promise<{ receiptId: string; signedCount: number }> {
+  proposalMarker?: string;
+  recipientViewport?: { width: number; height: number };
+}): Promise<{ receiptId: string; signedCount: number; snapshotId: string; digest: string }> {
   acceptNativeDialogs(args.page);
+  let snapshotId = args.snapshotId;
+  let digest = args.digest;
+  const recipientViewport = args.recipientViewport ?? { width: 1280, height: 800 };
   const minted = captureRecipientMints(args.page);
+  let mintedAfterAccept: ReturnType<typeof captureRecipientMints> = [];
+  const allMinted = () => [...minted, ...mintedAfterAccept];
   await waitForOwnerWorkspaceReady(args.page, args.agreementId);
   await expect
     .poll(async () => {
@@ -1549,7 +1607,7 @@ export async function completeLocalReviewSignAndFinal(args: {
     const handoff = await ownerReviewLinkHandoffRows(args.page, args.agreementId).catch(() => []);
     return reviewSigners.every((signer) => {
       const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
-      return Boolean(row?.id && reviewTokenForParticipant(minted, handoff, String(row.id)).length > 12);
+      return Boolean(row?.id && reviewTokenForParticipant(allMinted(), handoff, String(row.id)).length > 12);
     });
   };
   const workflowReady = await expect
@@ -1594,6 +1652,95 @@ export async function completeLocalReviewSignAndFinal(args: {
     }
   }
   const reviewHandoff = await ownerReviewLinkHandoffRows(args.page, args.agreementId);
+  if (args.proposalMarker) {
+    const proposer = reviewSigners[0];
+    const proposerRow = parties.find((candidate) => String(candidate.name || "").includes(proposer.legalEntity))!;
+    const proposerToken =
+      reviewTokenForParticipant(minted, reviewHandoff, String(proposerRow.id)) ||
+      String(recoveredReview.get(String(proposerRow.id)) || "");
+    expect(proposerToken.length, "proposal review token").toBeGreaterThan(12);
+    const ownerBefore = await articleText(args.page, args.partyCue);
+    expect(ownerBefore.includes(args.proposalMarker), "proposal must not already be on owner paper").toBeFalsy();
+    const proposeCtx = await args.browser.newContext({ viewport: recipientViewport });
+    const proposerPage = await proposeCtx.newPage();
+    acceptNativeDialogs(proposerPage);
+    const proposalEvents = captureProposalPosts(proposerPage);
+    await proposerPage.goto(
+      `${ownerOrigin(args.page)}/agreements/${args.agreementId}/review?t=${encodeURIComponent(proposerToken)}`,
+      { waitUntil: "domcontentloaded" },
+    );
+    const beforePaper = await recipientPaperText(proposerPage, args.partyCue);
+    expect(args.paperReady(beforePaper), "proposal starts from accepted paper").toBeTruthy();
+    const propose = proposerPage
+      .getByTestId("recipient-review-propose-updated-draft")
+      .or(proposerPage.getByRole("button", { name: /Suggest revision/i }));
+    await expect(propose.first()).toBeVisible({ timeout: 20_000 });
+    await propose.first().click();
+    const editor = proposerPage.getByTestId("recipient-edit-draft-textarea");
+    await expect(editor).toBeVisible({ timeout: 15_000 });
+    await editor.fill(`${beforePaper}\n\n${args.proposalMarker}`);
+    const compare = proposerPage.getByTestId("recipient-compare-versions-button");
+    if (await compare.isVisible().catch(() => false)) await compare.click();
+    const openSend = proposerPage
+      .getByTestId("recipient-open-send-suggested-edits-modal")
+      .or(proposerPage.getByRole("button", { name: /^Submit proposed update$/i }));
+    await expect(openSend.first()).toBeVisible({ timeout: 20_000 });
+    await openSend.first().click();
+    const confirm = proposerPage.getByTestId("recipient-send-suggested-edits-confirm");
+    await expect(confirm).toBeVisible({ timeout: 15_000 });
+    await confirm.click();
+    await expect
+      .poll(async () => /pending owner review/i.test(await proposerPage.locator("body").innerText()), {
+        timeout: 20_000,
+      })
+      .toBeTruthy();
+    await expect
+      .poll(() => proposalEvents.some((event) => event.ok && event.proposalId && event.url.endsWith("/recipient-proposal")), {
+        timeout: 15_000,
+      })
+      .toBeTruthy();
+    await proposeCtx.close();
+    await seedCorePaidJourneyOwner(args.page);
+    await args.page.goto(`/app/create?agreementId=${args.agreementId}`, { waitUntil: "domcontentloaded" });
+    await waitForOwnerWorkspaceReady(args.page, args.agreementId);
+    const isolatedSnap = await fetchOwnerCanonicalSnapshot(args.page, args.agreementId);
+    expect(isolatedSnap.ok, "owner GET must still return the pre-accept snapshot").toBeTruthy();
+    expect(isolatedSnap.corpus.includes(args.proposalMarker), "pending proposal must not enter owner paper").toBeFalsy();
+    expect(args.paperReady(isolatedSnap.corpus), "owner paper stays ready while proposal is pending").toBeTruthy();
+    expect(isolatedSnap.snapshotId, "pending proposal must not replace accepted snapshot").toBe(snapshotId);
+    await args.page.goto(`/app/review-changes/${encodeURIComponent(args.agreementId)}`, {
+      waitUntil: "domcontentloaded",
+    });
+    const accept = args.page.getByTestId("owner-proposal-review-accept");
+    await expect(accept).toBeVisible({ timeout: 20_000 });
+    await accept.click();
+    await expect(args.page.getByTestId("owner-proposal-accept-success")).toBeVisible({ timeout: 20_000 });
+    const authorViewport = args.page.viewportSize() ?? { width: 1280, height: 800 };
+    const authorCtx = await args.browser.newContext({ viewport: authorViewport });
+    const authorPage = await authorCtx.newPage();
+    acceptNativeDialogs(authorPage);
+    authorPage.on("pageerror", (err) => {
+      throw new Error(`accepted_author_reopen_exception ${err.message}`);
+    });
+    await seedCorePaidJourneyOwner(authorPage);
+    await installQualityEvalPageGuards(authorPage);
+    mintedAfterAccept = captureRecipientMints(authorPage);
+    await authorPage.goto(`/app/create?agreementId=${args.agreementId}`, { waitUntil: "domcontentloaded" });
+    await waitForOwnerWorkspaceReady(authorPage, args.agreementId);
+    args.page = authorPage;
+    let acceptedPaper = "";
+    await expect
+      .poll(async () => {
+        acceptedPaper = await articleText(args.page, args.partyCue);
+        return acceptedPaper.includes(args.proposalMarker) && args.paperReady(acceptedPaper) ? acceptedPaper.length : 0;
+      }, { timeout: 90_000 })
+      .toBeGreaterThan(400);
+    const acceptedSnap = await fetchOwnerCanonicalSnapshot(args.page, args.agreementId);
+    expect(acceptedSnap.ok, "accepted revision must persist a new snapshot").toBeTruthy();
+    expect(acceptedSnap.snapshotId).not.toBe(snapshotId);
+    snapshotId = acceptedSnap.snapshotId;
+    digest = acceptedSnap.digest;
+  }
   const workspaceNotRecipient = new Set<string>();
   for (const signer of reviewSigners) {
     const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity))!;
@@ -1601,7 +1748,7 @@ export async function completeLocalReviewSignAndFinal(args: {
       reviewTokenForParticipant(minted, reviewHandoff, String(row.id)) ||
       String(recoveredReview.get(String(row.id)) || "");
     expect(token.length, `product_review_link_unavailable ${signer.legalEntity}`).toBeGreaterThan(12);
-    const context = await args.browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const context = await args.browser.newContext({ viewport: recipientViewport });
     const recipient = await context.newPage();
     acceptNativeDialogs(recipient);
     const approvePosts = captureRecipientApprovePosts(recipient);
@@ -1614,8 +1761,8 @@ export async function completeLocalReviewSignAndFinal(args: {
     expect(args.paperReady(paper), `${signer.legalEntity} review paper`).toBeTruthy();
     const authority = recipient.getByTestId("recipient-review-authority-meta");
     await expect(authority).toBeVisible({ timeout: 20_000 });
-    expect(await authority.getAttribute("data-snapshot-id")).toBe(args.snapshotId);
-    expect((await authority.getAttribute("data-corpus-sha256") || "").toLowerCase()).toBe(args.digest);
+    expect(await authority.getAttribute("data-snapshot-id")).toBe(snapshotId);
+    expect((await authority.getAttribute("data-corpus-sha256") || "").toLowerCase()).toBe(digest);
     const approve = recipient.getByRole("button", { name: /^Approve draft$/i });
     const fallback = recipient.getByTestId("recipient-review-approve-draft");
     if (await approve.isVisible().catch(() => false)) await approve.click();
@@ -1634,14 +1781,14 @@ export async function completeLocalReviewSignAndFinal(args: {
     const recordedAfterPost = approvalOnIntendedRevision(
       ownerAfterPost.audit,
       String(row.id),
-      args.snapshotId,
-      args.digest,
+      snapshotId,
+      digest,
     );
     if (!posted?.ok) {
       const ambiguous = (posted?.status ?? 0) >= 500 || (posted?.status ?? 0) === 0;
       expect(
         ambiguous && recordedAfterPost,
-        `${signer.legalEntity} recipient-approve rejected method=POST path=${posted?.path} status=${posted?.status} code=${posted?.code || ""} participant=${row.id} agreement=${args.agreementId} snapshot=${args.snapshotId} digest=${args.digest}`,
+        `${signer.legalEntity} recipient-approve rejected method=POST path=${posted?.path} status=${posted?.status} code=${posted?.code || ""} participant=${row.id} agreement=${args.agreementId} snapshot=${snapshotId} digest=${digest}`,
       ).toBeTruthy();
     }
     expect(
@@ -1663,7 +1810,7 @@ export async function completeLocalReviewSignAndFinal(args: {
       await recipient.reload({ waitUntil: "domcontentloaded" });
       const ownerAfterReload = await fetchOwnerDraftAuthority(args.page, args.agreementId);
       expect(
-        approvalOnIntendedRevision(ownerAfterReload.audit, String(row.id), args.snapshotId, args.digest),
+        approvalOnIntendedRevision(ownerAfterReload.audit, String(row.id), snapshotId, digest),
         `${signer.legalEntity} approval did not persist after recipient reload`,
       ).toBeTruthy();
       await expect(persistedApproved.first()).toBeVisible({ timeout: 20_000 });
@@ -1691,7 +1838,7 @@ export async function completeLocalReviewSignAndFinal(args: {
       const authority = await fetchOwnerDraftAuthority(args.page, args.agreementId);
       const approved = requiredReviewApprovals.filter((signer) => {
         const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
-        return row?.id && approvalOnIntendedRevision(authority.audit, String(row.id), args.snapshotId, args.digest);
+        return row?.id && approvalOnIntendedRevision(authority.audit, String(row.id), snapshotId, digest);
       });
       return approved.length;
     }, { timeout: 30_000 })
@@ -1727,33 +1874,33 @@ export async function completeLocalReviewSignAndFinal(args: {
     .poll(() => {
       return args.signers.every((signer) => {
         const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
-        return Boolean(row?.id && mintedTokenForParticipant(minted, "sign", String(row.id)));
+        return Boolean(row?.id && mintedTokenForParticipant(allMinted(), "sign", String(row.id)));
       })
         ? 1
         : 0;
     }, { timeout: 45_000 })
     .toBe(1);
   const freezeGet = await fetchOwnerCanonicalSnapshot(args.page, args.agreementId);
-  expect(freezeGet.digest, "send-for-signature freeze must reuse the reviewed apply digest").toBe(args.digest);
-  expect(freezeGet.snapshotId, "send-for-signature freeze must reuse the reviewed apply snapshot").toBe(
-    args.snapshotId,
+  expect(freezeGet.digest, "send-for-signature freeze must reuse the accepted revision digest").toBe(digest);
+  expect(freezeGet.snapshotId, "send-for-signature freeze must reuse the accepted revision snapshot").toBe(
+    snapshotId,
   );
   const freezeAuthority = await fetchOwnerDraftAuthority(args.page, args.agreementId);
-  expect(freezeAuthority.acceptedDigest, "accepted snapshot digest must stay on the reviewed apply digest").toBe(
-    args.digest,
+  expect(freezeAuthority.acceptedDigest, "accepted snapshot digest must stay on the accepted revision digest").toBe(
+    digest,
   );
-  expect(freezeAuthority.acceptedSnapshotId, "accepted snapshot id must stay on the reviewed apply snapshot").toBe(
-    args.snapshotId,
+  expect(freezeAuthority.acceptedSnapshotId, "accepted snapshot id must stay on the accepted revision snapshot").toBe(
+    snapshotId,
   );
-  expect(freezeAuthority.lockDigest, "signing lock must bind the reviewed apply digest").toBe(args.digest);
-  expect(freezeAuthority.lockSnapshotId, "signing lock must bind the reviewed apply snapshot").toBe(args.snapshotId);
+  expect(freezeAuthority.lockDigest, "signing lock must bind the accepted revision digest").toBe(digest);
+  expect(freezeAuthority.lockSnapshotId, "signing lock must bind the accepted revision snapshot").toBe(snapshotId);
   writeQualityEvalArtifact(
     "freeze-reuse.json",
     JSON.stringify(
       {
         agreement_id: args.agreementId,
-        apply_snapshot_id: args.snapshotId,
-        apply_digest: args.digest,
+        apply_snapshot_id: snapshotId,
+        apply_digest: digest,
         freeze_snapshot_id: freezeGet.snapshotId,
         freeze_digest: freezeGet.digest,
         freeze_length: freezeGet.length,
@@ -1770,10 +1917,9 @@ export async function completeLocalReviewSignAndFinal(args: {
   for (const signer of args.signers) {
     const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity))!;
     const token = String(
-      (mintedTokenForParticipant(minted, "sign", String(row.id))?.body as { token?: string } | undefined)?.token || "",
+      (mintedTokenForParticipant(allMinted(), "sign", String(row.id))?.body as { token?: string } | undefined)?.token || "",
     );
-    const viewport = args.page.viewportSize() ?? { width: 1280, height: 800 };
-    const context = await args.browser.newContext({ viewport });
+    const context = await args.browser.newContext({ viewport: recipientViewport });
     const recipient = await context.newPage();
     acceptNativeDialogs(recipient);
     const signOrigin = ownerOrigin(args.page);
@@ -1850,7 +1996,18 @@ export async function completeLocalReviewSignAndFinal(args: {
   expect(receiptRes.ok(), `proof-status failed ${receiptRes.status()}`).toBeTruthy();
   const receipt = ((await receiptRes.json()) as { finalized_receipt?: { receipt_id?: string; bound?: boolean; accepted_snapshot_id?: string; accepted_snapshot_digest?: string } }).finalized_receipt || {};
   expect(receipt.bound).toBe(true);
-  expect(String(receipt.accepted_snapshot_id || "")).toBe(args.snapshotId);
-  expect(String(receipt.accepted_snapshot_digest || "").toLowerCase()).toBe(args.digest);
-  return { receiptId: String(receipt.receipt_id || ""), signedCount: args.signers.length };
+  expect(String(receipt.accepted_snapshot_id || "")).toBe(snapshotId);
+  expect(String(receipt.accepted_snapshot_digest || "").toLowerCase()).toBe(digest);
+  const downloadPdf = args.page.getByTestId("owner-signed-agreement-download-pdf");
+  await expect(downloadPdf, "completed PDF must be offered on the owner signed page").toBeVisible({ timeout: 20_000 });
+  const downloadPromise = args.page.waitForEvent("download", { timeout: 30_000 });
+  await downloadPdf.click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename().toLowerCase()).toMatch(/pdf/);
+  return {
+    receiptId: String(receipt.receipt_id || ""),
+    signedCount: args.signers.length,
+    snapshotId,
+    digest,
+  };
 }
