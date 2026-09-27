@@ -3,6 +3,7 @@
  * Reuses snapshot-observation helpers. Does not invent empty JSON on failure.
  */
 import { expect, test, type Browser, type Page, type Response } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -45,6 +46,10 @@ import {
 import { IRONCLAD_FOUR_PARTY_SILVER_MESA_INTAKE } from "../../src/components/agreements/ironcladJointRolloutFixtures";
 import { UNCONFIRMED_MILESTONE_PAYER_QUESTION } from "../../src/components/agreements/paidProMilestonePayer";
 import { extractTitleFromCorpusPlain } from "../../src/components/agreements/paidProUniversalDisplayTitle";
+import {
+  ACCEPTED_RESUME_ARTICLE_CANDIDATES,
+  selectVisibleAcceptedResumeArticle,
+} from "../../src/launch/simpleProduct/acceptedResumeArticleLocator";
 import {
   RELEASE_SCOPE_FOUR_PARTY_FILLED_INTAKE,
   RELEASE_SCOPE_FOUR_PARTY_PAYER_ANSWER_TEST_DATA,
@@ -226,12 +231,23 @@ export function configuredLiveApiBase(): string {
 }
 
 export async function installQualityEvalPageGuards(page: Page): Promise<void> {
+  await seedCorePaidJourneyOwner(page);
   const runtime = loadCorePaidJourneyRuntime();
   const api = process.env.CORE_PAID_JOURNEY_LIVE_API!;
   const origin = process.env.CORE_PAID_JOURNEY_LIVE_ORIGIN!;
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
-    if (![api, origin].includes(url.origin)) return route.abort("blockedbyclient");
+    if (["data:", "blob:", "about:", "chrome:", "chrome-extension:"].includes(url.protocol)) {
+      return route.continue();
+    }
+    const apiUrl = new URL(api);
+    const originUrl = new URL(origin);
+    const allowedHosts = new Set([apiUrl.hostname, originUrl.hostname, "127.0.0.1", "localhost"]);
+    const allowedPorts = new Set([apiUrl.port, originUrl.port]);
+    const originAllowed =
+      [api, origin].includes(url.origin) ||
+      (allowedHosts.has(url.hostname) && allowedPorts.has(url.port));
+    if (!originAllowed) return route.abort("blockedbyclient");
     if (url.pathname.startsWith("/__supabase/auth/v1/")) {
       return route.fulfill({
         json: {
@@ -242,7 +258,11 @@ export async function installQualityEvalPageGuards(page: Page): Promise<void> {
         },
       });
     }
-    if (route.request().method() !== "GET" && /billing|checkout|\/send-email|\/email\//.test(url.pathname)) {
+    if (
+      route.request().method() !== "GET" &&
+      /\/billing|\/checkout|\/send-email|\/email\//.test(url.pathname) &&
+      !url.pathname.includes("/workspace/")
+    ) {
       return route.abort("blockedbyclient");
     }
     return route.continue();
@@ -290,20 +310,18 @@ export async function openSavedCreate(page: Page, agreementId: string, partyCue:
 }
 
 export async function articleText(page: Page, partyCue: string): Promise<string> {
-  return page.evaluate((cue) => {
-    const readable = (el: Element | null): string => ((el as HTMLElement | null)?.innerText || "").trim();
-    const nodes = Array.from(
-      document.querySelectorAll(
-        '[data-testid="simple-pro-final-review-document"], [data-testid="paid-pro-visible-document-shell"], article[aria-label="Agreement document preview"]',
-      ),
-    );
-    let best = "";
-    for (const node of nodes) {
-      const text = readable(node);
-      if (text.includes(cue) && text.length > best.length) best = text;
+  const snapshots = [];
+  for (const candidate of ACCEPTED_RESUME_ARTICLE_CANDIDATES) {
+    const loc = page.locator(candidate.selector);
+    const count = await loc.count();
+    for (let i = 0; i < count; i += 1) {
+      const node = loc.nth(i);
+      const visible = await node.isVisible().catch(() => false);
+      const text = visible ? await node.innerText({ timeout: 1_500 }).catch(() => "") : "";
+      snapshots.push({ name: candidate.name, visible, text });
     }
-    return best;
-  }, partyCue);
+  }
+  return selectVisibleAcceptedResumeArticle(snapshots, partyCue)?.text || "";
 }
 
 export async function waitForPaintedArticle(page: Page, scenario: QualityEvalCase): Promise<string> {
@@ -1084,7 +1102,7 @@ type OwnerPartyRow = {
 
 type OwnerAuditEvent = {
   event_type?: string;
-  value?: { participant_id?: string; snapshot_id?: string; corpus_sha256?: string };
+  value?: { participant_id?: string; snapshot_id?: string; corpus_sha256?: string; fully_executed?: boolean };
 };
 
 type OwnerDraftAuthority = {
@@ -1142,6 +1160,45 @@ async function fetchOwnerParties(page: Page, agreementId: string): Promise<Owner
 
 function partySignerName(row: OwnerPartyRow | undefined): string {
   return String(row?.signerName || row?.signer_name || "").trim();
+}
+
+function partyAccessEmail(row: OwnerPartyRow | undefined): string {
+  return String(row?.email || "").trim().toLowerCase();
+}
+
+function assertDurablePartyIdentity(
+  stage: string,
+  parties: readonly OwnerPartyRow[],
+  signers: readonly { legalEntity: string; signerName: string; signerEmail?: string }[],
+  canonicalIds: Map<string, string>,
+  opts?: { requireConfirmed?: boolean },
+): Map<string, string> {
+  const requireConfirmed = opts?.requireConfirmed !== false;
+  for (const signer of signers) {
+    const expectedId = canonicalIds.get(signer.legalEntity);
+    const row = expectedId
+      ? parties.find((candidate) => String(candidate.id || "") === expectedId)
+      : parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
+    expect(row, `${stage} party missing for ${signer.legalEntity}`).toBeTruthy();
+    const partyId = String(row?.id || "").trim();
+    expect(partyId, `${stage} durable party id missing for ${signer.legalEntity}`).toBeTruthy();
+    if (expectedId) {
+      expect(partyId, `${stage} party id changed for ${signer.legalEntity}`).toBe(expectedId);
+    } else {
+      canonicalIds.set(signer.legalEntity, partyId);
+    }
+    if (signer.signerName && (requireConfirmed || partySignerName(row))) {
+      expect(partySignerName(row), `intake_signer_name_lost_${stage} ${signer.legalEntity}`).toMatch(
+        new RegExp(signer.signerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+      );
+    }
+    if (signer.signerEmail && (requireConfirmed || partyAccessEmail(row))) {
+      expect(partyAccessEmail(row), `intake_signer_email_lost_${stage} ${signer.legalEntity}`).toBe(
+        signer.signerEmail.toLowerCase(),
+      );
+    }
+  }
+  return canonicalIds;
 }
 
 function namedLegalPartyCount(parties: readonly OwnerPartyRow[]): number {
@@ -1253,15 +1310,132 @@ function captureRecipientApprovePosts(page: Page): RecipientApprovePostEvent[] {
 }
 
 export async function waitForOwnerWorkspaceReady(page: Page, agreementId: string): Promise<void> {
+  if (page.isClosed()) {
+    throw new Error(`owner_workspace_page_closed agreementId=${agreementId}`);
+  }
   const settling = page.getByTestId("create-auth-workspace-settling");
   try {
-    await expect(settling).toHaveCount(0, { timeout: 60_000 });
+    await expect(page.locator("body")).toContainText(/LawDog|Continue with LawDog/i, { timeout: 20_000 });
+    await expect(settling).toHaveCount(0, { timeout: 45_000 });
   } catch {
     const copy = await page.locator("body").innerText().catch(() => "");
+    const html = (await page.content().catch(() => "")).slice(0, 500);
     throw new Error(
-      `owner_workspace_restore_failed agreementId=${agreementId} still showing create-auth-workspace-settling: ${copy.slice(0, 400)}`,
+      `owner_workspace_restore_failed agreementId=${agreementId} url=${page.url()} closed=${page.isClosed()} text=${copy.slice(0, 400)} html=${html}`,
     );
   }
+}
+
+type HarborStageRecord = {
+  stage: string;
+  startedAt: string;
+  endedAt?: string;
+  elapsedMs?: number;
+  url?: string;
+  visiblePhase?: string;
+  agreementId?: string;
+  snapshotId?: string;
+  digest?: string;
+  http?: { method: string; path: string; status: number };
+  parties?: OwnerPartyRow[];
+  error?: string;
+};
+
+const harborStageLog: HarborStageRecord[] = [];
+
+function flushHarborStages(): void {
+  writeQualityEvalArtifact("harbor-stages.json", JSON.stringify(harborStageLog, null, 2), "harbor");
+}
+
+async function visibleProductPhase(page: Page): Promise<string> {
+  const url = page.url();
+  const text = (await page.locator("body").innerText().catch(() => "")).slice(0, 800);
+  if (/\/app\/review-changes\//.test(url) || /Review suggested changes/i.test(text)) return "owner_proposal_review";
+  if (/\/review\?/.test(url) || /Approve draft/i.test(text)) return "recipient_review";
+  if (/\/sign\?/.test(url)) return "recipient_sign";
+  if (/view-signed/.test(url)) return "owner_signed_record";
+  if (/create-auth-workspace-settling/.test(text) || /Continue with LawDog/i.test(text)) return "auth_or_entitlement";
+  if (/Send for signature|Send for review/i.test(text)) return "author_create_workspace";
+  if (/\/app\/create/.test(url)) return "author_create";
+  return `unknown:${url}`;
+}
+
+async function beginHarborStage(
+  stage: string,
+  extras: Partial<HarborStageRecord> = {},
+): Promise<{ stage: string; t0: number }> {
+  harborStageLog.push({ stage, startedAt: new Date().toISOString(), ...extras });
+  flushHarborStages();
+  return { stage, t0: Date.now() };
+}
+
+async function endHarborStage(
+  handle: { stage: string; t0: number },
+  page: Page | null,
+  extras: Partial<HarborStageRecord> = {},
+): Promise<void> {
+  const rec = [...harborStageLog].reverse().find((row) => row.stage === handle.stage && !row.endedAt);
+  if (!rec) return;
+  rec.endedAt = new Date().toISOString();
+  rec.elapsedMs = Date.now() - handle.t0;
+  if (page) {
+    rec.url = page.url();
+    rec.visiblePhase = await visibleProductPhase(page);
+  }
+  Object.assign(rec, extras);
+  flushHarborStages();
+}
+
+/** Fresh authenticated author create reopen — never reuse the proposal-comparison page. */
+export async function openFreshAuthorCreatePage(args: {
+  browser: Browser;
+  agreementId: string;
+  viewport: { width: number; height: number };
+  partyCue?: string;
+}): Promise<Page> {
+  const handle = await beginHarborStage("fresh_author_create_navigation", { agreementId: args.agreementId });
+  const context = await args.browser.newContext({ viewport: args.viewport });
+  const page = await context.newPage();
+  acceptNativeDialogs(page);
+  page.on("pageerror", (err) => {
+    harborStageLog.push({
+      stage: "fresh_author_pageerror",
+      startedAt: new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+      agreementId: args.agreementId,
+      error: err.message,
+    });
+    flushHarborStages();
+  });
+  page.on("requestfailed", (request) => {
+    const rec: HarborStageRecord = {
+      stage: "fresh_author_request_failed",
+      startedAt: new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+      url: request.url(),
+      agreementId: args.agreementId,
+      error: `${request.failure()?.errorText || "requestfailed"} ${request.method()}`,
+    };
+    harborStageLog.push(rec);
+    flushHarborStages();
+  });
+  await seedCorePaidJourneyOwner(page);
+  await page.goto(`/app/create?agreementId=${encodeURIComponent(args.agreementId)}`, {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000,
+  });
+  await waitForOwnerWorkspaceReady(page, args.agreementId);
+  if (args.partyCue) {
+    await expect
+      .poll(async () => {
+        const text = await articleText(page, args.partyCue || "");
+        return text.includes(args.partyCue || "") ? text.length : 0;
+      }, { timeout: HARBOR_STAGE_TIMEOUT_MS })
+      .toBeGreaterThan(400);
+  }
+  await endHarborStage(handle, page, { agreementId: args.agreementId });
+  expect(page.url(), "fresh author reopen must land on create, not review-changes").toMatch(/\/app\/create/);
+  return page;
 }
 
 async function recipientPaperText(page: Page, partyCue: string): Promise<string> {
@@ -1275,6 +1449,29 @@ function acceptNativeDialogs(page: Page): void {
   page.on("dialog", (dialog) => {
     void dialog.accept();
   });
+}
+
+export function extractCompletedPdfText(pdfPath: string): string {
+  return execFileSync(
+    "python3",
+    [
+      "-c",
+      [
+        "import io, sys",
+        "from pathlib import Path",
+        "data = Path(sys.argv[1]).read_bytes()",
+        "try:",
+        "    from pypdf import PdfReader",
+        "    reader = PdfReader(io.BytesIO(data))",
+        "    print('\\n'.join((page.extract_text() or '') for page in reader.pages))",
+        "except Exception:",
+        "    import subprocess",
+        "    print(subprocess.check_output(['pdftotext', '-layout', sys.argv[1], '-'], text=True))",
+      ].join("\n"),
+      pdfPath,
+    ],
+    { encoding: "utf8", timeout: 20_000 },
+  );
 }
 
 function ownerOrigin(page: Page): string {
@@ -1485,16 +1682,44 @@ async function assertSignerFormHoldsIntakeOrFillOnlyOmitted(
   }
 }
 
+async function visibleDeliveryCtaDump(page: Page): Promise<string> {
+  return page
+    .evaluate(() => {
+      const ids = [...document.querySelectorAll("[data-testid]")]
+        .map((el) => el.getAttribute("data-testid") || "")
+        .filter((id) => /send|sign|review|signer|prepare|track|delivery/i.test(id))
+        .slice(0, 40);
+      const buttons = [...document.querySelectorAll("button")]
+        .filter((el) => (el as HTMLElement).offsetParent)
+        .map((el) => ((el as HTMLElement).innerText || "").replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .slice(0, 24);
+      return JSON.stringify({ url: location.href, ids, buttons });
+    })
+    .catch(() => `dump_failed ${page.url()}`);
+}
+
 async function clickOwnerSend(
   page: Page,
   testId: "simple-pro-send-for-review" | "simple-pro-send-for-signature",
 ): Promise<boolean> {
   const button = page.getByTestId(testId);
-  if (!(await button.isVisible({ timeout: 12_000 }).catch(() => false))) {
-    const openSetup = page.getByRole("button", { name: /Complete signer details|Finalize signer details/i }).first();
-    if (await openSetup.isVisible().catch(() => false)) await openSetup.click();
+  if (!(await button.isVisible({ timeout: 4_000 }).catch(() => false))) {
+    const switchSigning = page.getByTestId("pro-review-track-switch-signing");
+    const prepare = page.getByTestId("paid-pro-forced-prepare-signatures");
+    const openSetup = page
+      .getByTestId("pro-review-add-signer-details")
+      .or(page.getByTestId("paid-pro-forced-add-signer-details"))
+      .or(page.getByRole("button", { name: /Complete signer details|Finalize signer details|Prepare for signing/i }));
+    if (testId === "simple-pro-send-for-signature" && (await switchSigning.isVisible({ timeout: 1_500 }).catch(() => false))) {
+      await switchSigning.click();
+    } else if (testId === "simple-pro-send-for-signature" && (await prepare.isVisible({ timeout: 1_500 }).catch(() => false))) {
+      await prepare.click();
+    } else if (await openSetup.first().isVisible({ timeout: 1_500 }).catch(() => false)) {
+      await openSetup.first().click();
+    }
   }
-  if (!(await button.isVisible({ timeout: 12_000 }).catch(() => false))) return false;
+  if (!(await button.isVisible({ timeout: 8_000 }).catch(() => false))) return false;
   if (await button.isDisabled().catch(() => false)) {
     await expect(button).toBeEnabled({ timeout: 20_000 }).catch(() => undefined);
     if (await button.isDisabled().catch(() => false)) return false;
@@ -1512,12 +1737,81 @@ async function clickOwnerSend(
     await expect(finalize).toBeEnabled({ timeout: 20_000 });
     await finalize.click();
     const linksFailed = page.getByText(/Links were not created/i);
-    if (await linksFailed.isVisible({ timeout: 20_000 }).catch(() => false)) {
+    if (await linksFailed.isVisible({ timeout: 8_000 }).catch(() => false)) {
       const copy = await page.locator("body").innerText().catch(() => "");
       throw new Error(`signing_links_not_created ${copy.slice(0, 600)}`);
     }
   }
   return true;
+}
+
+export async function prepareAndClickSendForSignature(
+  page: Page,
+  agreementId: string,
+  signers: readonly { legalEntity: string; signerName: string; signerEmail?: string }[],
+): Promise<void> {
+  const handle = await beginHarborStage("signer_form_hydration_send_for_signature", { agreementId });
+  try {
+    expect(page.url(), "signing prep must stay on create").toMatch(/\/app\/create/);
+    await expect(page.locator("body"), "fresh create must paint the accepted paper before signing prep").toContainText(
+      signers[0]?.legalEntity || "Harbor",
+      { timeout: 20_000 },
+    );
+    await page.mouse.wheel(0, 360).catch(() => undefined);
+    await page.evaluate(() => window.scrollTo(0, 400)).catch(() => undefined);
+    const dump = await visibleDeliveryCtaDump(page);
+    writeQualityEvalArtifact("signing-prep-cta-dump.json", dump, "harbor");
+    const alreadyMinted = page.getByText(/Copy signing link|Signing links created/i);
+    if (await alreadyMinted.first().isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await endHarborStage(handle, page, { agreementId, visiblePhase: "signing_links_already_visible" });
+      return;
+    }
+    const signatureCtas = [
+      page.getByTestId("simple-pro-send-for-signature"),
+      page.getByTestId("pro-review-track-switch-signing"),
+      page.getByTestId("paid-pro-forced-prepare-signatures"),
+      page.getByTestId("paid-pro-sticky-cta-bar").getByRole("button").filter({
+        hasText: /Prepare for signing|Add signers|Send for signature|signature links/i,
+      }),
+      page.getByRole("button", {
+        name: /Prepare for signing instead|Prepare for signing|Add signers \/ prepare signature links|Send for signature/i,
+      }),
+    ];
+    let clicked = false;
+    for (const locator of signatureCtas) {
+      if (await locator.first().isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await locator.first().click({ force: true });
+        clicked = true;
+        break;
+      }
+    }
+    await assertSignerFormHoldsIntakeOrFillOnlyOmitted(page, signers);
+    const sent = await clickOwnerSend(page, "simple-pro-send-for-signature");
+    if (!sent) {
+      const confirm = page
+        .locator("button:visible")
+        .filter({
+          hasText:
+            /Finalize signer details and continue to signing|Create signing links|Prepare signature links|Prepare for signing/i,
+        })
+        .first();
+      if (await confirm.isVisible({ timeout: 8_000 }).catch(() => false)) {
+        await confirm.click();
+      } else if (!clicked) {
+        const body = (await page.locator("body").innerText().catch(() => "")).slice(0, 1200);
+        throw new Error(`send-for-signature must mount ${dump} body=${body}`);
+      }
+    }
+    await endHarborStage(handle, page, { agreementId });
+  } catch (err) {
+    const dump = await visibleDeliveryCtaDump(page);
+    const body = (await page.locator("body").innerText().catch(() => "")).slice(0, 1200);
+    await endHarborStage(handle, page, {
+      agreementId,
+      error: `${err instanceof Error ? err.message : String(err)} ${dump} ${body}`,
+    });
+    throw err;
+  }
 }
 
 function captureProposalPosts(page: Page): { ok: boolean; proposalId: string; url: string }[] {
@@ -1550,7 +1844,9 @@ export async function completeLocalReviewSignAndFinal(args: {
   fillProvidedIfEmpty?: boolean;
   proposalMarker?: string;
   recipientViewport?: { width: number; height: number };
+  alreadyAccepted?: boolean;
 }): Promise<{ receiptId: string; signedCount: number; snapshotId: string; digest: string }> {
+  harborStageLog.length = 0;
   acceptNativeDialogs(args.page);
   let snapshotId = args.snapshotId;
   let digest = args.digest;
@@ -1569,15 +1865,15 @@ export async function completeLocalReviewSignAndFinal(args: {
     await expect(args.page.locator("body")).toContainText(signer.legalEntity);
   }
   const parsedParties = await fetchOwnerParties(args.page, args.agreementId);
-  for (const signer of args.signers) {
-    const row = parsedParties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
-    expect(row, `saved party missing for ${signer.legalEntity}`).toBeTruthy();
-    if (signer.signerEmail && String(row?.email || "").trim()) {
-      expect(String(row?.email || "").toLowerCase(), `intake_signer_email_lost ${signer.legalEntity}`).toBe(
-        signer.signerEmail.toLowerCase(),
-      );
-    }
-  }
+  const canonicalPartyIds = assertDurablePartyIdentity(
+    "after_persist",
+    parsedParties,
+    args.signers,
+    new Map(),
+    { requireConfirmed: false },
+  );
+  let parties = parsedParties;
+  if (!args.alreadyAccepted) {
   await assertSignerFormHoldsIntakeOrFillOnlyOmitted(args.page, args.signers, {
     fillProvidedIfEmpty: args.fillProvidedIfEmpty,
   });
@@ -1585,23 +1881,10 @@ export async function completeLocalReviewSignAndFinal(args: {
   await expect.poll(async () => (await fetchOwnerParties(args.page, args.agreementId)).length, { timeout: 30_000 }).toBe(
     args.signers.length,
   );
-  const parties = await fetchOwnerParties(args.page, args.agreementId);
+  parties = await fetchOwnerParties(args.page, args.agreementId);
   const reviewSigners = recipientApproveSigners(args.signers, parties);
   expect(reviewSigners.length, "at least one counterparty must recipient-approve").toBeGreaterThan(0);
-  for (const signer of args.signers) {
-    const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
-    expect(row?.id, `participant id missing for ${signer.legalEntity}`).toBeTruthy();
-    if (signer.signerEmail && String(row?.email || "").trim()) {
-      expect(String(row?.email || "").toLowerCase(), `intake_signer_email_lost_after_send ${signer.legalEntity}`).toBe(
-        signer.signerEmail.toLowerCase(),
-      );
-    }
-    if (signer.signerName && partySignerName(row)) {
-      expect(partySignerName(row), `intake_signer_name_lost_after_send ${signer.legalEntity}`).toMatch(
-        new RegExp(signer.signerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
-      );
-    }
-  }
+  assertDurablePartyIdentity("after_send", parties, args.signers, canonicalPartyIds);
   const recoveredReview = new Map<string, string>();
   const workflowLinksReady = async () => {
     const handoff = await ownerReviewLinkHandoffRows(args.page, args.agreementId).catch(() => []);
@@ -1716,30 +1999,39 @@ export async function completeLocalReviewSignAndFinal(args: {
     await accept.click();
     await expect(args.page.getByTestId("owner-proposal-accept-success")).toBeVisible({ timeout: 20_000 });
     const authorViewport = args.page.viewportSize() ?? { width: 1280, height: 800 };
-    const authorCtx = await args.browser.newContext({ viewport: authorViewport });
-    const authorPage = await authorCtx.newPage();
-    acceptNativeDialogs(authorPage);
-    authorPage.on("pageerror", (err) => {
-      throw new Error(`accepted_author_reopen_exception ${err.message}`);
+    const acceptHandle = await beginHarborStage("owner_accept_fresh_author_reopen", {
+      agreementId: args.agreementId,
+      snapshotId,
+      digest,
     });
-    await seedCorePaidJourneyOwner(authorPage);
-    await installQualityEvalPageGuards(authorPage);
+    const authorPage = await openFreshAuthorCreatePage({
+      browser: args.browser,
+      agreementId: args.agreementId,
+      viewport: authorViewport,
+      partyCue: args.partyCue,
+    });
     mintedAfterAccept = captureRecipientMints(authorPage);
-    await authorPage.goto(`/app/create?agreementId=${args.agreementId}`, { waitUntil: "domcontentloaded" });
-    await waitForOwnerWorkspaceReady(authorPage, args.agreementId);
     args.page = authorPage;
-    let acceptedPaper = "";
-    await expect
-      .poll(async () => {
-        acceptedPaper = await articleText(args.page, args.partyCue);
-        return acceptedPaper.includes(args.proposalMarker) && args.paperReady(acceptedPaper) ? acceptedPaper.length : 0;
-      }, { timeout: 90_000 })
-      .toBeGreaterThan(400);
-    const acceptedSnap = await fetchOwnerCanonicalSnapshot(args.page, args.agreementId);
+    const acceptedSnapEarly = await fetchOwnerCanonicalSnapshot(args.page, args.agreementId);
+    expect(acceptedSnapEarly.ok, "accepted revision GET must succeed on fresh author restore").toBeTruthy();
+    expect(acceptedSnapEarly.corpus.includes(args.proposalMarker), "accepted GET must carry the owner-accepted corpus").toBeTruthy();
+    expect(args.paperReady(acceptedSnapEarly.corpus), "accepted GET corpus must remain commercially ready").toBeTruthy();
+    const acceptedPartiesEarly = await fetchOwnerParties(args.page, args.agreementId);
+    assertDurablePartyIdentity("after_owner_accept", acceptedPartiesEarly, args.signers, canonicalPartyIds);
+    await endHarborStage(acceptHandle, args.page, {
+      agreementId: args.agreementId,
+      snapshotId: acceptedSnapEarly.snapshotId,
+      digest: acceptedSnapEarly.digest,
+      parties: acceptedPartiesEarly,
+      http: { method: "GET", path: `/api/agreements/${args.agreementId}/canonical-review-snapshot`, status: 200 },
+    });
+    const acceptedSnap = acceptedSnapEarly;
     expect(acceptedSnap.ok, "accepted revision must persist a new snapshot").toBeTruthy();
     expect(acceptedSnap.snapshotId).not.toBe(snapshotId);
     snapshotId = acceptedSnap.snapshotId;
     digest = acceptedSnap.digest;
+    const acceptedParties = await fetchOwnerParties(args.page, args.agreementId);
+    assertDurablePartyIdentity("after_accepted_create_paint", acceptedParties, args.signers, canonicalPartyIds);
   }
   const workspaceNotRecipient = new Set<string>();
   for (const signer of reviewSigners) {
@@ -1844,32 +2136,78 @@ export async function completeLocalReviewSignAndFinal(args: {
     }, { timeout: 30_000 })
     .toBe(requiredReviewApprovals.length);
 
-  await seedCorePaidJourneyOwner(args.page);
-  await args.page.goto(`/app/create?agreementId=${args.agreementId}`, { waitUntil: "domcontentloaded" });
-  await waitForOwnerWorkspaceReady(args.page, args.agreementId);
-  await expect
-    .poll(async () => {
-      const text = await articleText(args.page, args.partyCue);
-      return args.paperReady(text) ? text.length : 0;
-    }, { timeout: 90_000 })
-    .toBeGreaterThan(400);
-  const restoredParties = await fetchOwnerParties(args.page, args.agreementId);
-  for (const signer of args.signers) {
-    const row = restoredParties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity));
-    expect(row, `restored party missing for ${signer.legalEntity}`).toBeTruthy();
-    if (signer.signerName) {
-      expect(partySignerName(row), `intake_signer_name_lost_after_restore ${signer.legalEntity}`).toMatch(
-        new RegExp(signer.signerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
-      );
-    }
-    if (signer.signerEmail) {
-      expect(String(row?.email || "").toLowerCase(), `intake_signer_email_lost_after_restore ${signer.legalEntity}`).toBe(
-        signer.signerEmail.toLowerCase(),
-      );
-    }
+  const restoreHandle = await beginHarborStage("post_approval_fresh_author_reopen", {
+    agreementId: args.agreementId,
+    snapshotId,
+    digest,
+  });
+  const authorViewport = args.page.viewportSize() ?? { width: 1280, height: 800 };
+  args.page = await openFreshAuthorCreatePage({
+    browser: args.browser,
+    agreementId: args.agreementId,
+    viewport: authorViewport,
+    partyCue: args.partyCue,
+  });
+  mintedAfterAccept = [...mintedAfterAccept, ...captureRecipientMints(args.page)];
+  const restoreSnap = await fetchOwnerCanonicalSnapshot(args.page, args.agreementId);
+  expect(restoreSnap.ok, "fresh author restore GET must succeed").toBeTruthy();
+  expect(args.paperReady(restoreSnap.corpus), "fresh author restore must keep accepted paper").toBeTruthy();
+  if (args.proposalMarker) {
+    expect(restoreSnap.corpus.includes(args.proposalMarker), "fresh restore must keep the accepted revision").toBeTruthy();
   }
-  await assertSignerFormHoldsIntakeOrFillOnlyOmitted(args.page, args.signers);
-  expect(await clickOwnerSend(args.page, "simple-pro-send-for-signature"), "send-for-signature must mount").toBeTruthy();
+  const restoredParties = await fetchOwnerParties(args.page, args.agreementId);
+  assertDurablePartyIdentity("after_fresh_restore", restoredParties, args.signers, canonicalPartyIds);
+  await endHarborStage(restoreHandle, args.page, {
+    agreementId: args.agreementId,
+    snapshotId: restoreSnap.snapshotId,
+    digest: restoreSnap.digest,
+    parties: restoredParties,
+    http: { method: "GET", path: `/api/agreements/${args.agreementId}/canonical-review-snapshot`, status: 200 },
+  });
+
+  const recipientReopenHandle = await beginHarborStage("post_approval_fresh_recipient_reopen", {
+    agreementId: args.agreementId,
+    snapshotId,
+    digest,
+  });
+  {
+    const recipientSigner = reviewSigners[0];
+    const recipientRow = parties.find((candidate) =>
+      String(candidate.name || "").includes(recipientSigner.legalEntity),
+    );
+    const recipientToken =
+      reviewTokenForParticipant(minted, reviewHandoff, String(recipientRow?.id || "")) ||
+      String(recoveredReview.get(String(recipientRow?.id || "")) || "");
+    expect(recipientToken.length, "fresh recipient reopen token").toBeGreaterThan(12);
+    const recCtx = await args.browser.newContext({ viewport: recipientViewport });
+    const recPage = await recCtx.newPage();
+    acceptNativeDialogs(recPage);
+    await recPage.goto(
+      `${ownerOrigin(args.page)}/agreements/${args.agreementId}/review?t=${encodeURIComponent(recipientToken)}`,
+      { waitUntil: "domcontentloaded", timeout: 30_000 },
+    );
+    await expect(recPage, "fresh recipient reopen must stay on the party-bound review route").toHaveURL(
+      /\/agreements\/.+\/review\?/,
+      { timeout: 20_000 },
+    );
+    const recBody = recPage.locator("body");
+    await expect(recBody, "fresh recipient reopen must keep the accepted Harbor paper").toContainText(
+      args.partyCue,
+      { timeout: 20_000 },
+    );
+    for (const signer of args.signers) {
+      await expect(recBody).toContainText(signer.signerName);
+    }
+    await endHarborStage(recipientReopenHandle, recPage, {
+      agreementId: args.agreementId,
+      snapshotId,
+      digest,
+    });
+    await recCtx.close();
+  }
+  }
+
+  await prepareAndClickSendForSignature(args.page, args.agreementId, args.signers);
   await expect
     .poll(() => {
       return args.signers.every((signer) => {
@@ -1894,6 +2232,24 @@ export async function completeLocalReviewSignAndFinal(args: {
   );
   expect(freezeAuthority.lockDigest, "signing lock must bind the accepted revision digest").toBe(digest);
   expect(freezeAuthority.lockSnapshotId, "signing lock must bind the accepted revision snapshot").toBe(snapshotId);
+  assertDurablePartyIdentity("after_signing_prep", freezeAuthority.parties, args.signers, canonicalPartyIds);
+  writeQualityEvalArtifact(
+    "party-identity-trace.json",
+    JSON.stringify(
+      {
+        agreement_id: args.agreementId,
+        parties: args.signers.map((signer) => ({
+          legalEntity: signer.legalEntity,
+          partyId: canonicalPartyIds.get(signer.legalEntity),
+          signerName: signer.signerName,
+          accessEmail: signer.signerEmail,
+        })),
+      },
+      null,
+      2,
+    ),
+    "identity",
+  );
   writeQualityEvalArtifact(
     "freeze-reuse.json",
     JSON.stringify(
@@ -1915,6 +2271,11 @@ export async function completeLocalReviewSignAndFinal(args: {
     "freeze",
   );
   for (const signer of args.signers) {
+    const signHandle = await beginHarborStage(`signature_${signer.legalEntity.replace(/\W+/g, "_")}`, {
+      agreementId: args.agreementId,
+      snapshotId,
+      digest,
+    });
     const row = parties.find((candidate) => String(candidate.name || "").includes(signer.legalEntity))!;
     const token = String(
       (mintedTokenForParticipant(allMinted(), "sign", String(row.id))?.body as { token?: string } | undefined)?.token || "",
@@ -1959,14 +2320,69 @@ export async function completeLocalReviewSignAndFinal(args: {
       signatureCompletedForParticipant(afterSign.audit, String(row.id)),
       `${signer.legalEntity} signature_completed missing for participant ${row.id}`,
     ).toBeTruthy();
+    const completedIds = new Set(
+      afterSign.audit
+        .filter((event) => String(event.event_type || "") === "signature_completed")
+        .map((event) => String(event.value?.participant_id || "").trim())
+        .filter(Boolean),
+    );
+    await endHarborStage(signHandle, recipient, {
+      agreementId: args.agreementId,
+      snapshotId,
+      digest,
+      parties: afterSign.parties,
+    });
+    if (completedIds.size < args.signers.length) {
+      const api = configuredLiveApiBase();
+      const runtime = loadCorePaidJourneyRuntime();
+      const proofRes = await args.page.request.get(
+        `${api}/api/agreements/${encodeURIComponent(args.agreementId)}/proof-status`,
+        {
+          headers: {
+            Authorization: `Bearer ${runtime.access_token}`,
+            "X-Claw-Org-Id": runtime.org_id,
+          },
+        },
+      );
+      expect(proofRes.ok(), `incomplete proof-status failed ${proofRes.status()}`).toBeTruthy();
+      const incompleteProof = (await proofRes.json()) as {
+        finalized_receipt?: { receipt_id?: string; bound?: boolean };
+      };
+      expect(
+        String(incompleteProof.finalized_receipt?.receipt_id || ""),
+        "1/2 signatures must not mint a receipt",
+      ).toBe("");
+      expect(Boolean(incompleteProof.finalized_receipt?.bound), "1/2 signatures must not bind a receipt").toBe(
+        false,
+      );
+      expect(
+        afterSign.audit.filter(
+          (event) => String(event.event_type || "") === "signed" && Boolean(event.value?.fully_executed),
+        ).length,
+        "1/2 signatures must not fully-execute",
+      ).toBe(0);
+    }
     await context.close();
   }
 
-  await seedCorePaidJourneyOwner(args.page);
-  await args.page.goto(`/app/agreements/${args.agreementId}/view-signed`, {
-    waitUntil: "domcontentloaded",
-    timeout: 30_000,
+  const signedHandle = await beginHarborStage("fresh_completed_author_reopen", {
+    agreementId: args.agreementId,
+    snapshotId,
+    digest,
   });
+  const signedPage = await args.browser.newContext({
+    viewport: args.page.viewportSize() ?? { width: 1280, height: 800 },
+  }).then(async (context) => {
+    const page = await context.newPage();
+    acceptNativeDialogs(page);
+    await installQualityEvalPageGuards(page);
+    await page.goto(`/app/agreements/${args.agreementId}/view-signed`, {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+    return page;
+  });
+  args.page = signedPage;
   await expect(args.page.getByTestId("owner-signed-agreement-page")).toBeVisible({ timeout: 30_000 });
   const finalDoc = args.page.getByTestId("owner-signed-agreement-document");
   await expect(finalDoc).toContainText(args.partyCue, { timeout: 30_000 });
@@ -2004,10 +2420,59 @@ export async function completeLocalReviewSignAndFinal(args: {
   await downloadPdf.click();
   const download = await downloadPromise;
   expect(download.suggestedFilename().toLowerCase()).toMatch(/pdf/);
+  const pdfDir = process.env.QUALITY_EVAL_RESULT_DIR || process.env.CORE_PAID_JOURNEY_LIVE_OUTPUT || "/tmp";
+  const pdfPath = join(pdfDir, `${args.agreementId}-completed.pdf`);
+  await download.saveAs(pdfPath);
+  const pdfText = extractCompletedPdfText(pdfPath);
+  expect(pdfText, "completed PDF must contain accepted customer terms").toContain(args.partyCue);
+  if (args.proposalMarker) expect(pdfText).toContain(args.proposalMarker);
+  for (const signer of args.signers) {
+    expect(pdfText, `completed PDF signature block ${signer.signerName}`).toContain(signer.signerName);
+  }
+  writeQualityEvalArtifact("completed-pdf-text.txt", pdfText, "pdf");
+  const finalAuthority = await fetchOwnerDraftAuthority(args.page, args.agreementId);
+  const uniqueSignatureCompleted = new Set(
+    finalAuthority.audit
+      .filter((event) => String(event.event_type || "") === "signature_completed")
+      .map((event) => String(event.value?.participant_id || "").trim())
+      .filter(Boolean),
+  );
+  expect(uniqueSignatureCompleted.size, "exactly two unique signature_completed records").toBe(args.signers.length);
+  const fullyExecuted = finalAuthority.audit.filter(
+    (event) => String(event.event_type || "") === "signed" && Boolean(event.value?.fully_executed),
+  );
+  expect(fullyExecuted.length, "exactly one signed/fully-executed event").toBe(1);
+  await endHarborStage(signedHandle, args.page, {
+    agreementId: args.agreementId,
+    snapshotId,
+    digest,
+    parties: finalAuthority.parties,
+    http: { method: "GET", path: `/api/agreements/${args.agreementId}/proof-status`, status: receiptRes.status() },
+  });
   return {
     receiptId: String(receipt.receipt_id || ""),
     signedCount: args.signers.length,
     snapshotId,
     digest,
   };
+}
+
+export const HARBOR_STAGE_TIMEOUT_MS = 60_000;
+
+/** Continue one already-accepted Harbor agreement through lock, two signatures, receipt, and PDF. */
+export async function continueAcceptedHarborThroughPdf(args: {
+  page: Page;
+  browser: Browser;
+  agreementId: string;
+  snapshotId: string;
+  digest: string;
+  partyCue: string;
+  paperReady: (article: string) => boolean;
+  signers: readonly { legalEntity: string; signerName: string; signerEmail?: string }[];
+}): Promise<{ receiptId: string; signedCount: number; snapshotId: string; digest: string }> {
+  return completeLocalReviewSignAndFinal({
+    ...args,
+    fillProvidedIfEmpty: false,
+    alreadyAccepted: true,
+  });
 }

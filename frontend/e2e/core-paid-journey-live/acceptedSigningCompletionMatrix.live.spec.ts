@@ -7,7 +7,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { loadCorePaidJourneyRuntime, seedCorePaidJourneyOwner } from "./corePaidJourneyLiveAuth";
-import { configuredLiveApiBase } from "./qualityEvalJourney";
+import {
+  articleText,
+  configuredLiveApiBase,
+  extractCompletedPdfText,
+  openFreshAuthorCreatePage,
+} from "./qualityEvalJourney";
 
 const enabled = Boolean(process.env.CORE_PAID_JOURNEY_LIVE_API && process.env.CORE_PAID_JOURNEY_LIVE_ORIGIN);
 test.skip(!enabled, "Local official API/origin required; no provider calls");
@@ -607,6 +612,27 @@ async function completeMatrixRow(
     corpus: args.corpus,
     session: `matrix-${args.name}`,
   });
+  const author = await openFreshAuthorCreatePage({
+    browser,
+    agreementId: seeded.agreementId,
+    viewport: args.viewport,
+    partyCue: args.cue,
+  });
+  args.assertPaper(await articleText(author, args.cue), `${args.name} owner reopen`);
+  await author.reload({ waitUntil: "domcontentloaded" });
+  await expect
+    .poll(async () => ((await articleText(author, args.cue)).includes(args.cue) ? 1 : 0), { timeout: 60_000 })
+    .toBe(1);
+  args.assertPaper(await articleText(author, args.cue), `${args.name} owner reload`);
+  const reloaded = await fetchOwnerAgreement(author, seeded.agreementId);
+  expect(reloaded.parties.map((party) => party.id)).toEqual(seeded.parties.map((party) => party.id));
+  expect(reloaded.parties.map((party) => party.name)).toEqual(seeded.parties.map((party) => party.name));
+  expect(reloaded.parties.map((party) => party.role)).toEqual(seeded.parties.map((party) => party.role));
+  expect(reloaded.parties.map((party) => party.email)).toEqual(seeded.parties.map((party) => party.email));
+  expect(reloaded.parties.map((party) => party.signerName)).toEqual(seeded.parties.map((party) => party.signerName));
+  expect(reloaded.acceptedSnapshotId).toBe(seeded.snapshotId);
+  expect(reloaded.acceptedDigest).toBe(seeded.digest);
+  await author.context().close();
   const mapping = args.signOrder.map((signerName) => {
     const expected = args.parties.find((party) => party.signerName === signerName)!;
     const persisted = seeded.parties.find((party) => party.name === expected.legalEntity)!;
@@ -739,6 +765,16 @@ async function completeMatrixRow(
   await expect(page.getByTestId("owner-signed-agreement-signatures")).toContainText(
     new RegExp(`Fully signed \\(${args.parties.length} of ${args.parties.length}\\)`),
   );
+  const downloadPromise = page.waitForEvent("download", { timeout: 30_000 });
+  await page.getByTestId("owner-signed-agreement-download-pdf").click();
+  const download = await downloadPromise;
+  const pdfDir =
+    process.env.ACCEPTED_SIGNING_COMPLETION_MATRIX_OUTPUT ||
+    join("..", "evals", "commercial-readiness", "results", "accepted-signing-completion-matrix", "local");
+  mkdirSync(pdfDir, { recursive: true });
+  const pdfPath = join(pdfDir, `${args.name}-completed.pdf`);
+  await download.saveAs(pdfPath);
+  args.assertPaper(extractCompletedPdfText(pdfPath), `${args.name} completed PDF`);
 
   const first = mapping[0];
   const reopen = await openIsolatedHref(

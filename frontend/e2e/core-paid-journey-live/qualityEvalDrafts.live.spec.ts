@@ -47,7 +47,7 @@ for (const scenario of selected) {
         scenario.id === "four_party_silver_mesa" ||
         scenario.id === "consulting" ||
         scenario.id === "saas"
-        ? 480_000
+        ? 600_000
         : 300_000,
     );
     const modelResponses: object[] = [];
