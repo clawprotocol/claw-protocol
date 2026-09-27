@@ -17,6 +17,20 @@ import {
   readPaidReviewSessionCorpusInvariant,
   resetPaidReviewSessionCorpusInvariantForTests,
 } from "./paidProReviewSessionCorpusInvariant";
+import {
+  clearAuthoritativeSigningSnapshot,
+  createAuthoritativeSigningSnapshot,
+} from "./authoritativeSigningSnapshot";
+import { buildCanonicalSignerManifest } from "./guidedDealCompletion/guidedReviewSigningContinuity";
+import { setPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
+import { shouldUsePaidProSourceOfTruthDisplayOnly } from "./paidProAuthoritativeRenderGate";
+import {
+  authorityPartiesToCanonicalPartyIdentities,
+  authorityPartiesToRecipientMetadata,
+  buildCanonicalFinalPartyManifestFromAuthority,
+  buildLivePaidProSignerMetadataAuthority,
+  setConsumedPaidProSignerMetadataAuthority,
+} from "./paidProSignerMetadataAuthority";
 import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
 import {
   clearPaidProSourceOfTruth,
@@ -24,6 +38,7 @@ import {
   getPaidProSourceOfTruthText,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
+import { replacePaidProSourceOfTruth } from "./paidProSourceOfTruthState";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { buildCanonicalAgreementSnapshot } from "./canonicalAgreementSnapshot";
 import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
@@ -106,6 +121,8 @@ describe("TEST512 — paid review session premium generation + post-freeze corpu
   });
 
   afterEach(() => {
+    setPaidProReviewSignerMetadataSessionActive(false);
+    clearAuthoritativeSigningSnapshot();
     sessionStorage.clear();
     localStorage.clear();
     resetPaidProPipelineTestIsolation();
@@ -225,6 +242,137 @@ describe("TEST512 — paid review session premium generation + post-freeze corpu
       });
       expect(hashPaidProCorpus(rendered)).toBe(session?.latchedCanonicalSoTHash);
     }
+  });
+
+  it("keeps accepted SoT bytes when a prepared signing snapshot repeats that corpus", () => {
+    const generationId = getOrInitSessionAgreementGenerationId();
+    markPaidReviewSessionPremiumGeneration(generationId, "ensure_premium_completion");
+    markPaidProPipelineValidationPassed({ text: SERVER_PAID_BODY, source: "server_full_draft" });
+    establishPaidProSourceOfTruth({
+      text: SERVER_PAID_BODY,
+      source: "server_full_draft",
+      reviewSessionId: generationId,
+      draft: test512Draft(),
+    });
+    const accepted = getPaidProSourceOfTruthText().trim();
+    const authority = buildLivePaidProSignerMetadataAuthority(
+      {
+        partyCount: 2,
+        recipient1Name: "Summit Ridge Advisory Group LLC",
+        recipient2Name: "Delta Integration Services LLC",
+        recipient1Email: "summit@example.test",
+        recipient2Email: "delta@example.test",
+        extraPartyReviewEmails: [],
+        extraPartyLegalNames: [],
+        partySignerNames: ["Avery Summit", "Blake Delta"],
+        partySignerTitles: ["", ""],
+        partyAddresses: ["", ""],
+      },
+      "live_ui",
+    );
+    const identities = authorityPartiesToCanonicalPartyIdentities(authority.parties);
+    createAuthoritativeSigningSnapshot({
+      corpus: accepted,
+      signerMetadata: authorityPartiesToRecipientMetadata(authority.parties),
+      partyManifest: buildCanonicalFinalPartyManifestFromAuthority(authority),
+      signatureBlockModel: buildCanonicalSignerManifest({ identities, signFirst: true }),
+      preserveFrozenServerFullHydratedCorpus: true,
+      persistFrozenToBackend: false,
+    });
+    const rendered = resolvePaidProReviewRenderPlain({
+      draft: test512Draft(),
+      intakeText: TEST512_INTAKE,
+    });
+    expect(rendered).toBe(accepted);
+  });
+
+  it("keeps the accepted three-party corpus when reload display-only overlay is necessary", () => {
+    const corpus = [
+      "CONSULTING SERVICES AGREEMENT",
+      'This Consulting Services Agreement is entered into by and among Harbor Peak Analytics LLC ("Consultant"), Ironvale Manufacturing Inc. ("Client"), and Alex Rivera ("Advisor").',
+      "Consultant shall perform AI workflow implementation. Client shall pay a fixed fee of $48,000. Advisor remains a distinct legal party.",
+      "The initial term is twelve (12) months beginning October 1, 2026.",
+      "This Agreement is governed by the laws of the State of Delaware.",
+      "If to Harbor Peak Analytics LLC: Email: notices@harborpeak.test.",
+      "Access remains pat.harbor@harbor.test and is not the Harbor notice address.",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "Harbor Peak Analytics LLC",
+      "By: ______________________",
+      "Name: Pat Harbor",
+      "Ironvale Manufacturing Inc.",
+      "By: ______________________",
+      "Name: Sam Ironvale",
+      "Alex Rivera",
+      "By: ______________________",
+      "Name: Alex Rivera",
+      "Operative consulting paragraph continues the Harbor, Ironvale, and Advisor engagement. ".repeat(80),
+    ].join("\n");
+    const draft = {
+      ...test512Draft(corpus),
+      title: "Consulting Services Agreement",
+      jurisdiction: "Delaware",
+      payment_terms: "$48,000",
+      duration: "12 months",
+      parties: [
+        { id: "party-harbor", name: "Harbor Peak Analytics LLC", role: "Consultant", email: "pat.harbor@harbor.test", signerName: "Pat Harbor" },
+        { id: "party-ironvale", name: "Ironvale Manufacturing Inc.", role: "Client", email: "sam.ironvale@ironvale.test", signerName: "Sam Ironvale" },
+        { id: "party-advisor", name: "Alex Rivera", role: "Advisor", email: "alex.rivera@advisor.test", signerName: "Alex Rivera" },
+      ],
+    } as ParsedDraftShape;
+    const generationId = getOrInitSessionAgreementGenerationId();
+    markPaidReviewSessionPremiumGeneration(generationId, "ensure_premium_completion");
+    replacePaidProSourceOfTruth({
+      text: corpus,
+      hash: hashPaidProCorpus(corpus),
+      accepted_at: Date.now(),
+      source: "server_full_draft",
+      reviewSessionId: generationId,
+    });
+    latchPaidReviewSessionCanonicalSoTHash({
+      reviewSessionId: generationId,
+      canonicalPlain: corpus,
+    });
+    const accepted = getPaidProSourceOfTruthText().trim();
+    expect(accepted).toContain("Harbor Peak Analytics LLC");
+    expect(accepted).toContain("Ironvale Manufacturing Inc.");
+    expect(accepted).toContain("Alex Rivera");
+    expect(accepted).toContain("$48,000");
+    expect(accepted).toContain("Delaware");
+    expect(accepted).toContain("notices@harborpeak.test");
+    const authority = buildLivePaidProSignerMetadataAuthority(
+      {
+        partyCount: 3,
+        recipient1Name: "Harbor Peak Analytics LLC",
+        recipient2Name: "Ironvale Manufacturing Inc.",
+        recipient1Email: "pat.harbor@harbor.test",
+        recipient2Email: "sam.ironvale@ironvale.test",
+        extraPartyReviewEmails: ["alex.rivera@advisor.test"],
+        extraPartyLegalNames: ["Alex Rivera"],
+        partySignerNames: ["Pat Harbor", "Sam Ironvale", "Alex Rivera"],
+        partySignerTitles: ["", "", ""],
+        partyAddresses: ["", "", ""],
+      },
+      "live_ui",
+      { draftPartyNames: draft.parties?.map((party) => String(party.name ?? "")) ?? [], persistedMembershipAuthoritative: true },
+    );
+    setConsumedPaidProSignerMetadataAuthority(authority);
+    setPaidProReviewSignerMetadataSessionActive(true);
+    expect(shouldUsePaidProSourceOfTruthDisplayOnly()).toBe(true);
+    const rendered = resolvePaidProReviewRenderPlain({
+      draft,
+      intakeText: corpus,
+    });
+    expect(rendered).toBe(accepted);
+    expect(rendered).toContain("Harbor Peak Analytics LLC");
+    expect(rendered).toContain("Ironvale Manufacturing Inc.");
+    expect(rendered).toContain("Alex Rivera");
+    expect(rendered).toContain("$48,000");
+    expect(rendered).toContain("notices@harborpeak.test");
+    expect((draft.parties ?? []).map((party) => party.id)).toEqual([
+      "party-harbor",
+      "party-ironvale",
+      "party-advisor",
+    ]);
   });
 
   it("5 — post-freeze review hash drift fails session lifetime parity assertion", () => {

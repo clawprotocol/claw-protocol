@@ -21,10 +21,27 @@ function splitFrozenOperativeAndExecution(text: string): { clause: string; tail:
   return { clause: text.slice(0, idx), tail: text.slice(idx) };
 }
 
+const SIGNATURE_TAIL_LINE =
+  /^(in witness whereof|by:|name:|title:|date:|signature|signed)\b|^[_\s.\-]+$/i;
+
+/**
+ * Accepted paper may continue with operative sentences after the witness heading.
+ * Those lines are not an execution tail and must survive signer projection.
+ */
+function executionTailDropsFrozenOperative(frozenTail: string, overlaidTail: string): boolean {
+  for (const line of frozenTail.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length < 40 || SIGNATURE_TAIL_LINE.test(trimmed)) continue;
+    if (!overlaidTail.includes(trimmed)) return true;
+  }
+  return false;
+}
+
 /** After freeze, keep the accepted clause and take only the overlaid execution tail. */
 export function preserveFrozenOperativeClause(frozenCorpus: string, overlaid: string): string {
   const frozenParts = splitFrozenOperativeAndExecution(frozenCorpus);
   const overlaidParts = splitFrozenOperativeAndExecution(overlaid);
+  if (executionTailDropsFrozenOperative(frozenParts.tail, overlaidParts.tail)) return frozenCorpus;
   if (overlaidParts.clause === frozenParts.clause) return overlaid;
   if (!overlaidParts.tail) return frozenCorpus;
   return `${frozenParts.clause}${overlaidParts.tail}`;

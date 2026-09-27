@@ -134,6 +134,28 @@ describe("paidProSignerMetadataAuthority", () => {
     expect(authority.parties[2]?.signerName).toBe("Alex Rivera");
   });
 
+  it("keeps durable persisted membership when intake still names discarded parties", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc.";
+    const authority = buildLivePaidProSignerMetadataAuthority(
+      ui({
+        partyCount: 2,
+        recipient1Name: harbor,
+        recipient2Name: ironvale,
+      }),
+      "live_ui",
+      {
+        intakeText:
+          "Harbor Peak Analytics LLC and Ironvale Manufacturing Inc. are the parties. " +
+          "Stale Third LLC and Stale Fourth LLC were mentioned in earlier intake text.",
+        draftPartyNames: [harbor, ironvale],
+        persistedMembershipAuthoritative: true,
+      },
+    );
+
+    expect(authority.parties.map((party) => party.partyLegalName)).toEqual([harbor, ironvale]);
+  });
+
   it("does not copy a sibling signer onto Advisor when local slots duplicate Ironvale", () => {
     const serverDraft = {
       parties: [

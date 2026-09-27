@@ -551,9 +551,14 @@ export function buildPaidProSignerMetadataParties(
     intakeText?: string | null;
     draftPartyNames?: readonly string[];
     preferCompleteUiLegalEntityAuthority?: boolean;
+    /** Saved agreement ids already fixed membership. Do not append extracted parties. */
+    persistedMembershipAuthoritative?: boolean;
   },
 ): PaidProSignerMetadataParty[] {
-  const frozenNames = readFrozenCanonicalManifestPartyNames();
+  const persistedNames = opts?.persistedMembershipAuthoritative
+    ? uniqueNamedLegalPartyNames(opts.draftPartyNames).slice(0, 4)
+    : [];
+  const frozenNames = persistedNames.length >= 2 ? persistedNames : readFrozenCanonicalManifestPartyNames();
   const hasFrozenManifest = frozenNames.filter((n) => n.trim().length >= 2).length >= 2;
   const authorityIdentities = hasFrozenManifest
     ? []
@@ -563,7 +568,7 @@ export function buildPaidProSignerMetadataParties(
         consumerPartyCount: ui.partyCount,
         surface: "metadata_authority_parties",
       });
-  const count = hasFrozenManifest
+  const resolvedAuthorityCount = hasFrozenManifest
     ? consumeAuthoritativeSignerCount(
         "metadata_authority_parties:frozen_manifest",
         {
@@ -587,6 +592,9 @@ export function buildPaidProSignerMetadataParties(
           },
           ui.partyCount,
         );
+  const count = persistedNames.length >= 2
+    ? persistedNames.length
+    : resolvedAuthorityCount;
   const uniqueDraftLegalNames = uniqueNamedLegalPartyNames(opts?.draftPartyNames);
   const uniqueFrozenLegalNames = uniqueNamedLegalPartyNames(frozenNames);
   const preferDraftLegalList =
@@ -679,11 +687,16 @@ export function buildPaidProSignerMetadataParties(
       : hasFrozenManifest
         ? frozenNames.slice(0, count)
         : filled.map((p) => p.partyLegalName);
-  return mergeIntakeSignerMetadataIntoAuthorityParties(
+  const merged = mergeIntakeSignerMetadataIntoAuthorityParties(
     filled,
     opts?.intakeText,
     legalEntitiesForMerge,
   );
+  // Intake may still contain entities discarded before persistence. It can enrich
+  // the durable rows, but it cannot append new members behind the saved party ids.
+  return opts?.persistedMembershipAuthoritative
+    ? merged.slice(0, filled.length)
+    : merged;
 }
 
 export function hashPaidProSignerMetadataAuthority(
@@ -754,6 +767,8 @@ export function buildLivePaidProSignerMetadataAuthority(
     intakeText?: string | null;
     draftPartyNames?: readonly string[];
     preferCompleteUiLegalEntityAuthority?: boolean;
+    /** Saved agreement ids already fixed membership. Do not append extracted parties. */
+    persistedMembershipAuthoritative?: boolean;
   },
 ): PaidProSignerMetadataAuthority {
   const parties = buildPaidProSignerMetadataParties(ui, opts);

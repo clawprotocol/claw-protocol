@@ -27,6 +27,7 @@ import {
 } from "./intakePartyManifestAuthority";
 import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import { durablePersistedLegalParties } from "../../launch/simpleProduct/paidProResumeDraftMerge";
 import {
   dedupeEntityCandidatesToLegalParties,
   extractAgreementEntityCandidates,
@@ -463,6 +464,15 @@ export function resolveAcceptanceManifestRecordsForExecution(args: {
   if (intakeText && intakeDescribesBrandLicensingDistributionManufacturingStack(intakeText)) {
     const fromBrandProse = manifestRecordsFromBrandLicensingProseIntake(intakeText, draft);
     if (fromBrandProse.length >= 4) return fromBrandProse;
+  }
+
+  const durableParties = durablePersistedLegalParties(draft?.parties);
+  if (durableParties) {
+    return manifestRecordsFromPartyNames(
+      durableParties.map((party) => String(party.name ?? "").trim()),
+      null,
+      draft,
+    );
   }
 
   const fromConsumedSignerAuthority = manifestRecordsFromConsumedSignerAuthority();

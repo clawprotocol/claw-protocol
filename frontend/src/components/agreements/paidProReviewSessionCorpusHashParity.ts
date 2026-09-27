@@ -16,12 +16,25 @@ import {
  * After freeze: review display hash must match latched canonical SoT hash for the session lifetime.
  * Reuses paid-pro-review-sot-parity allowances for signer-field-only hydration deltas.
  */
+export type PaidReviewSessionCorpusFailureDiagnostic = {
+  /** Fingerprints from `fingerprintPaidReviewSessionCorpusBody`, not `hashPaidProCorpus`. */
+  sourceOfTruthHash: string | null;
+  sourceOfTruthLength: number;
+  signingSnapshotHash: string | null;
+  signingSnapshotLength: number;
+  hasAuthoritativeSigningSnapshot: boolean;
+  sourceOfTruthDisplayOnly: boolean;
+  postFinalizeHydrationLocked: boolean;
+  signerExecutionOverlayNecessary: boolean;
+};
+
 export function assertPaidReviewSessionReviewCorpusHashParity(args: {
   reviewSessionId?: string | null;
   reviewPlain: string;
   surface: string;
   intakeText?: string | null;
   draft?: ParsedDraftShape | null;
+  failureDiagnostic?: PaidReviewSessionCorpusFailureDiagnostic | null;
 }): void {
   const sessionId = resolvePaidReviewSessionCorpusInvariantSessionId(args.reviewSessionId);
   const session = readPaidReviewSessionCorpusInvariantSession(sessionId);
@@ -46,17 +59,19 @@ export function assertPaidReviewSessionReviewCorpusHashParity(args: {
     parity.invariantOk;
 
   if (reviewHash && !matchesCanonical) {
-    const payload = {
-      ok: false,
+    const payload = paidReviewSessionCorpusFailurePayload({
       reviewSessionId: sessionId,
       surface: args.surface,
       latchedCanonicalSoTHash: canonicalHash,
-      reviewHash,
-      parityInvariantOk: parity.invariantOk,
+      reviewPlainHash: reviewHash,
+      reviewPlainLength: review.length,
+      latchedReviewDisplayHash: session.latchedReviewDisplayHash ?? null,
+      parity,
+      failureDiagnostic: args.failureDiagnostic,
       message:
         "paid review display corpus hash diverged from latched canonical SoT hash for this review session",
-    };
-    const msg = `[paid-review-session-corpus-hash-invariant] ${payload.message} session=${sessionId} surface=${args.surface}`;
+    });
+    const msg = `[paid-review-session-corpus-hash-invariant] ${payload.message} session=${sessionId} surface=${args.surface} diagnostic=${JSON.stringify(payload)}`;
     if (isPaidReviewSessionCorpusInvariantTestMode()) {
       throw new Error(msg);
     }
@@ -86,15 +101,18 @@ export function assertPaidReviewSessionReviewCorpusHashParity(args: {
   }
 
   if (session.latchedReviewDisplayHash !== reviewHash && !parity.invariantOk) {
-    const payload = {
-      ok: false,
+    const payload = paidReviewSessionCorpusFailurePayload({
       reviewSessionId: sessionId,
       surface: args.surface,
+      latchedCanonicalSoTHash: canonicalHash,
+      reviewPlainHash: reviewHash,
+      reviewPlainLength: review.length,
       latchedReviewDisplayHash: session.latchedReviewDisplayHash,
-      reviewHash,
+      parity,
+      failureDiagnostic: args.failureDiagnostic,
       message: "paid review display hash changed after initial post-freeze render for this session",
-    };
-    const msg = `[paid-review-session-corpus-hash-invariant] ${payload.message} session=${sessionId}`;
+    });
+    const msg = `[paid-review-session-corpus-hash-invariant] ${payload.message} session=${sessionId} diagnostic=${JSON.stringify(payload)}`;
     if (isPaidReviewSessionCorpusInvariantTestMode()) {
       throw new Error(msg);
     }
@@ -116,4 +134,53 @@ export function assertPaidReviewSessionReviewCorpusHashParity(args: {
       reviewHash,
     });
   }
+}
+
+function paidReviewSessionCorpusFailurePayload(args: {
+  reviewSessionId: string;
+  surface: string;
+  latchedCanonicalSoTHash: string;
+  reviewPlainHash: string;
+  reviewPlainLength: number;
+  latchedReviewDisplayHash: string | null;
+  parity: {
+    invariantOk: boolean;
+    signerFieldOnlyDelta: boolean;
+    blankSignerLinesRemaining: number;
+    canonicalHash: string | null;
+    reviewHash: string;
+  };
+  failureDiagnostic?: PaidReviewSessionCorpusFailureDiagnostic | null;
+  message: string;
+}) {
+  const diagnostic = args.failureDiagnostic;
+  return {
+    ok: false as const,
+    reviewSessionId: args.reviewSessionId,
+    surface: args.surface,
+    latchedCanonicalSoTHash: args.latchedCanonicalSoTHash,
+    latchedCanonicalSoTLength: lengthFromReviewSessionFingerprint(args.latchedCanonicalSoTHash),
+    reviewPlainHash: args.reviewPlainHash,
+    reviewPlainLength: args.reviewPlainLength,
+    sourceOfTruthHash: diagnostic?.sourceOfTruthHash ?? null,
+    sourceOfTruthLength: diagnostic?.sourceOfTruthLength ?? 0,
+    signingSnapshotHash: diagnostic?.signingSnapshotHash ?? null,
+    signingSnapshotLength: diagnostic?.signingSnapshotLength ?? 0,
+    latchedReviewDisplayHash: args.latchedReviewDisplayHash,
+    hasAuthoritativeSigningSnapshot: diagnostic?.hasAuthoritativeSigningSnapshot ?? null,
+    sourceOfTruthDisplayOnly: diagnostic?.sourceOfTruthDisplayOnly ?? null,
+    postFinalizeHydrationLocked: diagnostic?.postFinalizeHydrationLocked ?? null,
+    signerExecutionOverlayNecessary: diagnostic?.signerExecutionOverlayNecessary ?? null,
+    parityInvariantOk: args.parity.invariantOk,
+    paritySignerFieldOnlyDelta: args.parity.signerFieldOnlyDelta,
+    parityBlankSignerLinesRemaining: args.parity.blankSignerLinesRemaining,
+    parityCanonicalHash: args.parity.canonicalHash,
+    parityReviewHash: args.parity.reviewHash,
+    message: args.message,
+  };
+}
+
+function lengthFromReviewSessionFingerprint(hash: string): number | null {
+  const match = /^(\d+):/.exec(hash);
+  return match ? Number(match[1]) : null;
 }

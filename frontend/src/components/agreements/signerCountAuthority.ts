@@ -105,7 +105,7 @@ export type SignerCountAuthorityResolution = {
 export type SignerCountAuthorityArgs = {
   intakeText?: string | null;
   draftPartyNames?: readonly string[];
-  draftParties?: readonly { name?: string | null }[];
+  draftParties?: readonly { id?: string | null; name?: string | null }[];
   rawPartyCount?: number;
   corpusPlain?: string | null;
   userExpandedPartyCount?: number;
@@ -482,6 +482,21 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     } else {
       finalCount = Math.min(finalCount, Math.min(intakeManifestAuthorityCount, PAID_PRO_AUTHORITY_MAX_PARTIES));
     }
+  }
+
+  // Accepted reload: durable API party ids are membership authority. Intake/corpus
+  // extraction must not promote a saved 2/3/4-party set. A larger user-expanded
+  // signer-setup count still wins so an explicit add is not clamped.
+  const durablePersistedCount = (args.draftParties ?? []).filter(
+    (party) => String(party?.id ?? "").trim() && String(party?.name ?? "").trim().length >= 2,
+  ).length;
+  if (
+    durablePersistedCount >= 2 &&
+    durablePersistedCount <= PAID_PRO_AUTHORITY_MAX_PARTIES &&
+    userExpandedPartyCount <= durablePersistedCount
+  ) {
+    finalCount = durablePersistedCount;
+    source = "draft_parties";
   }
 
   return {

@@ -29,6 +29,7 @@ import {
   isReviewTrackHydrationSurface,
   logTest323ReviewerVisibleClauseParity,
   reviewTrackExecutionMetadataComplete,
+  spliceHydratedExecutionTail,
   type ReviewReadyHydratedDisplayCorpusSurface,
 } from "../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
 import {
@@ -80,11 +81,19 @@ export function buildReviewFirstDocumentDisplayHtml(args: {
     args.draft &&
     isReviewTrackHydrationSurface(surface)
   ) {
-    corpus = restoreDeclaredConsultantClientPaper(
-      applyReviewReadyMetadataBackfill(corpus, args.draft, {
+    const hydrated = applyReviewReadyMetadataBackfill(corpus, args.draft, {
         surface,
         selectedSource: args.selectedCorpusSource ?? "review_first_document_display",
-      }),
+      });
+    // A completed owner view may project persisted signature metadata, but the
+    // accepted legal body is immutable. Limit hydration to the execution tail so
+    // reviewer-access emails cannot replace accepted Notices-clause destinations.
+    const acceptedBodyPreserved =
+      surface === "owner_done" && args.selectedCorpusSource === "authoritative_signing_snapshot"
+        ? spliceHydratedExecutionTail(inputCorpus, hydrated)
+        : hydrated;
+    corpus = restoreDeclaredConsultantClientPaper(
+      acceptedBodyPreserved,
       inputCorpus,
     );
   }

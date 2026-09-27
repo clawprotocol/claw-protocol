@@ -75,7 +75,10 @@ import {
   resolvePaidProSignerStagingDisplayPlain,
   buildPaidProSignerStagingOverlayCacheKey,
 } from "./paidProSignerStagingDisplayCorpus";
-import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
+import {
+  hasAuthoritativeSigningSnapshot,
+  readAuthoritativeSigningCorpus,
+} from "./authoritativeSigningSnapshot";
 import {
   resolvePaidProAuthoritativeDisplayPlain,
   shouldUsePaidProSourceOfTruthDisplayOnly,
@@ -95,6 +98,7 @@ import {
 import { auditPaidProReviewRenderCorpus } from "./paidProCorpusLifecycleDiff";
 import { auditPaidProReviewRenderSotParity } from "./paidProReviewSotParity";
 import { assertPaidReviewSessionReviewCorpusHashParity } from "./paidProReviewSessionCorpusHashParity";
+import { fingerprintPaidReviewSessionCorpusBody } from "./paidProReviewSessionCorpusInvariantState";
 import {
   logExecutionBlockCount,
   logExecutionBlockLocation,
@@ -1035,17 +1039,20 @@ export function resolvePaidProReviewRenderPlain(
     parties: earlyParties,
     intakeText: args?.intakeText ?? null,
   });
+  const sotExactEarly = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
+  const signingCorpus = hasAuthoritativeSigningSnapshot() ? readAuthoritativeSigningCorpus().trim() : "";
+  const signingCorpusMatchesAcceptedSot =
+    sotExactEarly.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+    signingCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+    hashPaidProCorpus(signingCorpus) === hashPaidProCorpus(sotExactEarly);
   if (
-    hasPaidProSourceOfTruth() &&
+    sotExactEarly.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
     !isPaidProPostFinalizeHydratedCorpusLocked() &&
-    !hasAuthoritativeSigningSnapshot() &&
-    !earlyNeedsOverlay
+    (signingCorpusMatchesAcceptedSot ||
+      (!hasAuthoritativeSigningSnapshot() && !earlyNeedsOverlay))
   ) {
-    const sotExact = getPaidProSourceOfTruthText().trim();
-    if (sotExact.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-      auditPaidProReviewRenderCorpus(sotExact);
-      return sotExact;
-    }
+    auditPaidProReviewRenderCorpus(sotExactEarly);
+    return sotExactEarly;
   }
   const finishUserVisiblePlain = (plain: string): string => {
     let body = (plain || "").trim();
@@ -1180,6 +1187,18 @@ export function resolvePaidProReviewRenderPlain(
       surface: "paid_pro_review_render_plain",
       intakeText: args?.intakeText ?? null,
       draft: args?.draft ?? null,
+      failureDiagnostic: {
+        sourceOfTruthHash: fingerprintPaidReviewSessionCorpusBody(sotExactEarly),
+        sourceOfTruthLength: sotExactEarly.length,
+        signingSnapshotHash: signingCorpus
+          ? fingerprintPaidReviewSessionCorpusBody(signingCorpus)
+          : null,
+        signingSnapshotLength: signingCorpus.length,
+        hasAuthoritativeSigningSnapshot: hasAuthoritativeSigningSnapshot(),
+        sourceOfTruthDisplayOnly: shouldUsePaidProSourceOfTruthDisplayOnly(),
+        postFinalizeHydrationLocked: isPaidProPostFinalizeHydratedCorpusLocked(),
+        signerExecutionOverlayNecessary: needsSignerOverlay,
+      },
     });
   }
   return visible;

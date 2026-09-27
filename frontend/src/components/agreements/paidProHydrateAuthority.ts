@@ -21,6 +21,7 @@ import {
   readPremiumRecipientHandoff,
   resolveHandoffPartySlotCount,
 } from "./premiumPartyNamesHandoff";
+import { durablePersistedLegalParties } from "../../launch/simpleProduct/paidProResumeDraftMerge";
 
 export type PaidProHydrateStructuralContext = {
   structuralParties: readonly PaidProSignerMetadataParty[];
@@ -99,6 +100,19 @@ export function resolvePaidProHydrateStructuralContext(args: {
     }
   }
 
+  const durableMembership = durablePersistedLegalParties(args.draft?.parties);
+  if (durableMembership) {
+    structuralParties = durableMembership.map((party, partyIndex) => ({
+      partyIndex,
+      partyLegalName: String(party.name ?? "").trim(),
+      signerEmail: String((party as { signerEmail?: string; email?: string }).signerEmail ?? (party as { email?: string }).email ?? "").trim(),
+      signerName: String((party as { signerName?: string }).signerName ?? "").trim(),
+      signerTitle: String((party as { signerTitle?: string }).signerTitle ?? "").trim(),
+      partyAddress: String((party as { partyAddress?: string }).partyAddress ?? "").trim(),
+    }));
+    manifestSource = "corpus_enriched";
+  }
+
   if (structuralParties.length < 2) {
     const draftPartyNames =
       (args.draft?.parties ?? [])
@@ -130,8 +144,9 @@ export function resolvePaidProHydrateStructuralContext(args: {
   const canonicalAuthorityPartyCount = resolveAuthoritativeSignerCount({
     intakeText: args.intakeText ?? null,
     draftPartyNames,
-    draftParties: draftPartyNames.map((name) => ({ name })),
+    draftParties: args.draft?.parties ?? draftPartyNames.map((name) => ({ name })),
     manifestPartyCount: Math.max(structuralParties.length, draftPartyNames.length),
+    userExpandedPartyCount: durableMembership?.length,
   }).count;
 
   return {

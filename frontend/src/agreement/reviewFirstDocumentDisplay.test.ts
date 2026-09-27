@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { AgreementDraft } from "./agreementTypes";
 import { overlayCorpusDeclaredRoleLabels } from "../components/agreements/paidProAcceptedCorpusPartyRoles";
 import { applyPaidProReviewRenderSanitizer } from "../components/agreements/paidProReviewRenderCorpus";
 import { repairMalformedPaidProAgreementRecital } from "../components/agreements/paidProAgreementRecitalRepair";
@@ -264,5 +265,41 @@ By: __________________________`;
     const visible = extractVisiblePlainFromReviewHtml(html);
     expect(visible).toContain(`${ironvale} ("Client")`);
     expect(visible).not.toMatch(/Ironvale Manufacturing Inc\. Inc\./);
+  });
+
+  it("owner signed authoritative display preserves accepted notice contacts during execution hydration", () => {
+    const accepted = HARBOR_CONSULTANT_CORPUS.replace(
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      `10. NOTICES
+
+Notices shall be sent to each party's designated email address.
+If to ${HARBOR}: ${HARBOR} Attn: Maya Chen Email: notices@harborpeak.test
+If to ${IRONVALE}: ${IRONVALE} Attn: Jordan Hale Email: notices@ironvale.test
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.`,
+    );
+    const draft = {
+      id: "ag_harbor_completed",
+      title: "Consulting Services Agreement",
+      parties: [
+        { id: "party-harbor", name: HARBOR, signerName: "Maya Chen", email: "maya.chen@harborpeak.test" },
+        { id: "party-ironvale", name: IRONVALE, signerName: "Jordan Hale", email: "jordan.hale@ironvale.test" },
+      ],
+    } as unknown as AgreementDraft;
+    const html = buildReviewFirstDocumentDisplayHtml({
+      serverHtml: "",
+      corpusText: accepted,
+      partyNames: [HARBOR, IRONVALE],
+      draft,
+      surface: "owner_done",
+      selectedCorpusSource: "authoritative_signing_snapshot",
+      agreementId: draft.id,
+    });
+    const visible = extractVisiblePlainFromReviewHtml(html);
+    expect(visible).toContain("notices@harborpeak.test");
+    expect(visible).toContain("notices@ironvale.test");
+    expect(visible).toContain("$48,000");
+    expect(visible).toContain("Maya Chen");
+    expect(visible).toContain("Jordan Hale");
   });
 });
