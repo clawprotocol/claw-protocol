@@ -608,11 +608,14 @@ export function applyPaidProReviewRenderSanitizer(
     }
   }
 
-  if (parties.length >= 2) {
+  if (parties.length >= 2 && /\bIf to\b/i.test(text)) {
     const noticeRepair = repairIncompleteIfToNoticeStanzas(text, parties, ctx);
     if (noticeRepair.repairs.length > 0) {
-      text = noticeRepair.text;
-      repaired = true;
+      const next = noticeRepair.text.trim();
+      if (next.length >= Math.floor(text.trim().length * 0.85)) {
+        text = noticeRepair.text;
+        repaired = true;
+      }
     }
   }
 
@@ -672,9 +675,11 @@ export function applyPaidProReviewRenderSanitizer(
     repaired = true;
   }
 
-  if (parties.length >= 2) {
+  if (parties.length >= 2 && /\bIf to\b/i.test(out)) {
     const noticeDelivery = ensureOperativeIfToNoticeDelivery(out, parties, ctx);
-    if (noticeDelivery.repairs.length > 0) {
+    const next = noticeDelivery.text.trim();
+    const floor = Math.floor(out.trim().length * 0.85);
+    if (noticeDelivery.repairs.length > 0 && next.length >= floor) {
       out = noticeDelivery.text;
       repaired = true;
     }
@@ -1060,22 +1065,6 @@ export function resolvePaidProReviewRenderPlain(
     // Frozen SoT display-only: presentation projection only. Fused-name signing repairs strip
     // Party Notice Details and can rewrite openings — never run them on accepted SoT display.
     if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-      if (args?.skipUserVisibleDisplayPrep) return body;
-      const parties = resolvePartiesForReviewRender(args);
-      if (parties.length >= 2) {
-        const roleContext = {
-          intakeText: args?.intakeText ?? null,
-          draftPartyNames: (args?.draft?.parties ?? [])
-            .map((p) => String(p?.name ?? "").trim())
-            .filter(Boolean),
-          acceptedCorpus: body,
-        };
-        const noticed = ensureOperativeIfToNoticeDelivery(body, parties, roleContext);
-        const next = noticed.text.trim();
-        if (noticed.repairs.length > 0 && next.length >= Math.floor(body.length * 0.85)) {
-          return next;
-        }
-      }
       return body;
     }
     if (corpusContainsFusedPartyLegalName(body)) {

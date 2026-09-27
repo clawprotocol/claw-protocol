@@ -8472,7 +8472,6 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
     """Owner read of pending/accepted canonical review snapshot for review hydration."""
     assert_agreement_full_draft_read_allowed(request, agreement_id)
     from backend.services.accepted_review_snapshot import (
-        get_accepted_snapshot_record,
         get_review_hydration_snapshot,
         get_registry,
         public_accepted_snapshot_fragment,
@@ -8481,43 +8480,7 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
 
     draft = _load_or_404(agreement_id)
     reg = get_registry(draft)
-    accepted = get_accepted_snapshot_record(draft)
-    if isinstance(accepted, dict):
-        ok, err = verify_snapshot_integrity(accepted)
-        if not ok:
-            raise HTTPException(
-                status_code=409,
-                detail={"code": err or "accepted_snapshot_corrupt", "message": "Accepted snapshot failed integrity."},
-            )
-        return {
-            "ok": True,
-            "status": "accepted",
-            "snapshot": {
-                "snapshot_id": accepted.get("snapshotId"),
-                "agreement_id": accepted.get("agreementId"),
-                "corpus_plain": accepted.get("corpusPlain"),
-                "corpus_sha256": accepted.get("corpusSha256"),
-                "corpus_length": accepted.get("corpusLength"),
-                "generation_session_id": accepted.get("generationSessionId"),
-                "created_at": accepted.get("createdAt"),
-                "accepted_at": accepted.get("acceptedAt"),
-                "schema_version": accepted.get("schemaVersion"),
-                "status": accepted.get("status"),
-                "customer_confirmed_answers": accepted.get("customerConfirmedAnswers"),
-            },
-            "registry_version": reg.get("registryVersion"),
-            "public": public_accepted_snapshot_fragment(accepted),
-        }
-    snaps = reg.get("snapshots") if isinstance(reg.get("snapshots"), dict) else {}
-    pending = [
-        s
-        for s in snaps.values()
-        if isinstance(s, dict) and str(s.get("status") or "").strip() == "pending"
-    ]
-    pending.sort(key=lambda s: str(s.get("createdAt") or ""), reverse=True)
-    latest = pending[0] if pending else None
-    if not latest:
-        latest = get_review_hydration_snapshot(draft)
+    latest = get_review_hydration_snapshot(draft)
     if not isinstance(latest, dict):
         raise HTTPException(status_code=404, detail="canonical_review_snapshot_not_found")
     status = str(latest.get("status") or "").strip() or "pending"
