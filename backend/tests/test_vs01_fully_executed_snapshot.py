@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+
+import pytest
+
 from backend.services.vs01_fully_executed_snapshot import (
     completed_execution_by_name_violations,
     ensure_fully_executed_snapshot_on_draft,
@@ -143,6 +147,85 @@ def test_ensure_persists_fully_executed_snapshot_when_missing() -> None:
     assert fully_executed_snapshot_ready(result.draft_dict) is True
     snap = result.draft_dict["vs01_signing_packet_v1"]["fully_executed_snapshot"]
     assert "By: Owner Signer" in snap["corpus_plain"]
+
+
+@pytest.mark.parametrize("party_count", [2, 3, 4])
+def test_ensure_reconstructs_from_integrity_verified_accepted_snapshot_without_portable(
+    party_count: int,
+) -> None:
+    names = [
+        "Harbor Peak Analytics LLC",
+        "Ironvale Manufacturing Inc.",
+        "ClearSpring Distribution LLC",
+        "BrightPeak Retail Solutions LLC",
+    ][:party_count]
+    signers = ["Maya Chen", "Jordan Hale", "Maya Coleman", "Luis Ortega"][:party_count]
+    operative = (
+        "CONSULTING SERVICES AGREEMENT\n\n"
+        + "Commercial terms remain immutable. " * 55
+        + "\n\nIN WITNESS WHEREOF, the Parties execute this Agreement.\n\n"
+    )
+    witness = "\n\n".join(
+        f"{name}:\nBy: __________________________\nName: {signer}\n"
+        "Title: Officer\nDate: _____________________________"
+        for name, signer in zip(names, signers)
+    )
+    accepted_corpus = f"{operative}{witness}"
+    digest = hashlib.sha256(accepted_corpus.encode("utf-8")).hexdigest()
+    draft = {
+        "id": f"ag_accepted_only_{party_count}",
+        "parties": [
+            {
+                "id": f"party_{index}",
+                "name": name,
+                "role": "owner" if index == 0 else "reviewer",
+                "signer_name": signers[index],
+                "email": f"signer{index}@example.test",
+            }
+            for index, name in enumerate(names)
+        ],
+        "accepted_review_snapshot_v1": {
+            "schemaVersion": "claw.canonical_review_snapshot/v1",
+            "status": "accepted",
+            "snapshotId": f"crs_accepted_{party_count}",
+            "agreementId": f"ag_accepted_only_{party_count}",
+            "corpusPlain": accepted_corpus,
+            "corpusLength": len(accepted_corpus),
+            "corpusSha256": digest,
+        },
+        "audit_log": [
+            *[
+                {
+                    "event_type": "signature_completed",
+                    "at": f"2026-09-{20 + index:02d}T12:00:00Z",
+                    "value": {
+                        "participant_id": f"party_{index}",
+                        "typed_name": signer,
+                    },
+                }
+                for index, signer in enumerate(signers)
+            ],
+            {
+                "event_type": "signed",
+                "at": "2026-09-26T12:00:00Z",
+                "value": {"fully_executed": True},
+            },
+        ],
+    }
+
+    result = ensure_fully_executed_snapshot_on_draft(
+        draft, agreement_id=f"ag_accepted_only_{party_count}"
+    )
+    assert result.snapshot_ready is True
+    assert result.source == "accepted_snapshot_reconstructed"
+    snapshot = result.draft_dict["vs01_signing_packet_v1"]["fully_executed_snapshot"]
+    completed = snapshot["corpus_plain"]
+    assert completed.split("IN WITNESS WHEREOF", 1)[0] == accepted_corpus.split(
+        "IN WITNESS WHEREOF", 1
+    )[0]
+    for signer in signers:
+        assert f"By: {signer}" in completed
+    assert result.draft_dict["accepted_review_snapshot_v1"]["corpusPlain"] == accepted_corpus
 
 
 def test_stamp_witness_signature_and_date() -> None:

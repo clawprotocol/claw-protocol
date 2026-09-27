@@ -469,6 +469,60 @@ def reconstruct_corpus_from_audit_and_portable(draft: Dict[str, Any]) -> Optiona
     return corpus
 
 
+def _accepted_snapshot_portable_for_reconstruction(
+    draft: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Build the minimal signing map needed to replay audit signatures onto accepted bytes."""
+    from backend.services.accepted_review_snapshot import (
+        get_accepted_snapshot_record,
+        verify_snapshot_integrity,
+    )
+
+    accepted = get_accepted_snapshot_record(draft)
+    if not isinstance(accepted, dict):
+        return None
+    integrity_ok, _ = verify_snapshot_integrity(accepted)
+    if not integrity_ok:
+        return None
+    corpus = str(accepted.get("corpusPlain") or "")
+    parties = draft.get("parties") if isinstance(draft.get("parties"), list) else []
+    named = [p for p in parties if isinstance(p, dict) and str(p.get("name") or "").strip()]
+    if len(named) not in {2, 3, 4}:
+        return None
+    if any(not str(p.get("id") or "").strip() for p in named):
+        return None
+
+    roles: List[Dict[str, Any]] = []
+    for index, party in enumerate(named):
+        party_id = str(party.get("id") or "").strip()
+        roles.append(
+            {
+                "roleId": f"accepted_party_{index}",
+                "partyId": party_id,
+                "vs01CounterpartyId": party_id,
+                "partyIndex": index,
+                "entityName": str(party.get("name") or "").strip(),
+                "signerName": str(
+                    party.get("signer_name") or party.get("signerName") or ""
+                ).strip(),
+                "signerEmail": str(party.get("email") or "").strip(),
+                "requiresSignature": True,
+            }
+        )
+    return {
+        "v": 1,
+        "seed": {
+            "v": 1,
+            "agreementId": str(draft.get("id") or "").strip(),
+            "corpusPlain": corpus,
+            "corpusHash": str(accepted.get("corpusSha256") or "").strip().lower(),
+            "acceptedSnapshotId": str(accepted.get("snapshotId") or "").strip(),
+        },
+        "roles": roles,
+        "fields": [],
+    }
+
+
 @dataclass(frozen=True)
 class EnsureFullyExecutedSnapshotResult:
     draft_dict: Dict[str, Any]
@@ -586,6 +640,12 @@ def ensure_fully_executed_snapshot_on_draft(
     if not isinstance(stored, dict):
         stored = {"v": 1}
     portable = stored.get("portable") if isinstance(stored.get("portable"), dict) else {}
+    accepted_snapshot_fallback = False
+    if not portable:
+        accepted_portable = _accepted_snapshot_portable_for_reconstruction(draft)
+        if accepted_portable:
+            portable = accepted_portable
+            accepted_snapshot_fallback = True
 
     snap = extract_fully_executed_snapshot_from_portable(portable) if portable else None
     if snap and not all_signers_signed_from_audit(draft, draft.get("audit_log") or []):
@@ -659,10 +719,39 @@ def ensure_fully_executed_snapshot_on_draft(
 
     audit = draft.get("audit_log") or []
     if all_signers_signed_from_audit(draft, audit):
-        rebuilt = reconstruct_corpus_from_audit_and_portable(draft)
+        reconstruction_draft = (
+            {
+                **draft,
+                "vs01_signing_packet_v1": {**stored, "portable": portable},
+            }
+            if accepted_snapshot_fallback
+            else draft
+        )
+        rebuilt = reconstruct_corpus_from_audit_and_portable(reconstruction_draft)
         if rebuilt:
             built = build_snapshot_record(rebuilt, portable)
             if built:
+                if accepted_snapshot_fallback:
+                    from backend.services.completed_agreement_parity import (
+                        validate_completed_agreement_authorized_delta,
+                    )
+
+                    accepted_corpus = str((portable.get("seed") or {}).get("corpusPlain") or "")
+                    parity_ok, parity_code, _ = validate_completed_agreement_authorized_delta(
+                        frozen_corpus=accepted_corpus,
+                        completed_corpus=rebuilt,
+                    )
+                    violations = completed_execution_by_name_violations(rebuilt)
+                    if not parity_ok or violations:
+                        source = parity_code or "execution_identity_mismatch"
+                        _log.warning(
+                            "[vs01-final-signed-snapshot] agreement_id=%s source=accepted_snapshot_%s snapshot_ready=false",
+                            aid,
+                            source,
+                        )
+                        return EnsureFullyExecutedSnapshotResult(
+                            draft, False, f"accepted_snapshot_{source}", False
+                        )
                 next_seed = {
                     **seed,
                     "corpusPlain": rebuilt,
@@ -675,13 +764,14 @@ def ensure_fully_executed_snapshot_on_draft(
                     "fully_executed_snapshot": built,
                 }
                 _log.info(
-                    "[vs01-final-signed-snapshot] agreement_id=%s source=reconstructed snapshot_ready=true",
+                    "[vs01-final-signed-snapshot] agreement_id=%s source=%s snapshot_ready=true",
                     aid,
+                    "accepted_snapshot_reconstructed" if accepted_snapshot_fallback else "reconstructed",
                 )
                 return EnsureFullyExecutedSnapshotResult(
                     {**draft, "vs01_signing_packet_v1": next_stored},
                     True,
-                    "reconstructed",
+                    "accepted_snapshot_reconstructed" if accepted_snapshot_fallback else "reconstructed",
                     True,
                 )
 
