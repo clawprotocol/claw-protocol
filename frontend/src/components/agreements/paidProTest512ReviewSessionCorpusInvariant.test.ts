@@ -284,6 +284,9 @@ describe("TEST512 — paid review session premium generation + post-freeze corpu
       intakeText: TEST512_INTAKE,
     });
     expect(rendered).toBe(accepted);
+    expect(rendered.length).toBe(accepted.length);
+    expect(hashPaidProCorpus(rendered)).toBe(hashPaidProCorpus(accepted));
+    expect(rendered).not.toMatch(/\n\d+\.\s+NOTICES\b/);
   });
 
   it("keeps the accepted three-party corpus when reload display-only overlay is necessary", () => {

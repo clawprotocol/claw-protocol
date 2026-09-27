@@ -1052,9 +1052,10 @@ export function resolvePaidProReviewRenderPlain(
     hashPaidProCorpus(signingCorpus) === hashPaidProCorpus(sotExactEarly);
   if (
     sotExactEarly.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
-    !isPaidProPostFinalizeHydratedCorpusLocked() &&
     (signingCorpusMatchesAcceptedSot ||
-      (!hasAuthoritativeSigningSnapshot() && !earlyNeedsOverlay))
+      (!isPaidProPostFinalizeHydratedCorpusLocked() &&
+        !hasAuthoritativeSigningSnapshot() &&
+        !earlyNeedsOverlay))
   ) {
     auditPaidProReviewRenderCorpus(sotExactEarly);
     return sotExactEarly;
