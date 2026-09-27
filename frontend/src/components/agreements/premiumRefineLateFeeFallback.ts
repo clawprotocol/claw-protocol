@@ -10,11 +10,15 @@ import {
   premiumRefineTextContainsPlaceholderCorruption,
   PRO_REFINE_ADVISORY_APPEND_SUCCESS_SUMMARY,
   resolveStructuredAdvisoryKeysForAppend,
+  restorePremiumRefinePlaceholdersFromResolvedBaseline,
   scanPremiumRefinePlaceholderCorruption,
   tryPremiumRefineAdvisoryAppendAcceptance,
 } from "./premiumRefineAcceptance";
 import { postPremiumRefine, type PremiumRefineResponse } from "./premiumRefineApi";
-import { applyDeterministicSurgicalRevisionFallback } from "./premiumRefineDeterministicSurgicalFallback";
+import {
+  applyDeterministicSurgicalRevisionFallback,
+  parseQuotedSentenceInsertInstruction,
+} from "./premiumRefineDeterministicSurgicalFallback";
 import { resolveTerminationConvenienceNoticeDaysPostconditionIfNeeded } from "./premiumRefineTerminationConveniencePostcondition";
 
 type PremiumRefineAcceptanceResult = ReturnType<typeof evaluatePremiumRefineCandidate>;
@@ -384,10 +388,43 @@ export function resolvePremiumRefineApplyOutcome(args: {
 }): PremiumRefineResolveOutcome {
   const { apiOut, baselineText, baselineLen, summaryChanges, userInstruction } = args;
   const inst = userInstruction.trim();
-  const out0 = (apiOut || "").trim();
+  const rawOut = (apiOut || "").trim();
+  const restored = restorePremiumRefinePlaceholdersFromResolvedBaseline(rawOut, baselineText);
+  const out0 = restored.restored ? restored.text : rawOut;
+  if (restored.restored && typeof console !== "undefined" && typeof console.info === "function") {
+    // eslint-disable-next-line no-console
+    console.info("[premium_refine_restored_resolved_party_placeholders]", {
+      candidateHadPlaceholders: true,
+      restored: true,
+    });
+  }
   let acc = evaluatePremiumRefineCandidate(out0, baselineText, baselineLen, summaryChanges, inst);
   if (classifyPremiumRefineRevisionIntent(inst) === "advisory_note_or_comment" && acc.decision === "accepted") {
     acc = { ...acc, decision: "rejected_short" };
+  }
+
+  const quotedInstr = parseQuotedSentenceInsertInstruction(inst);
+  const quotedMissingFromCandidate = Boolean(quotedInstr && !out0.includes(quotedInstr.sentence));
+  if (acc.decision !== "accepted" || quotedMissingFromCandidate) {
+    const surgEarly = applyDeterministicSurgicalRevisionFallback({
+      currentDocumentText: baselineText,
+      userInstruction: inst,
+    });
+    if (surgEarly.applied && surgEarly.text.trim() !== baselineText.trim()) {
+      const outS = surgEarly.text.trim();
+      const accS = evaluatePremiumRefineCandidate(outS, baselineText, baselineLen, undefined, inst);
+      if (accS.decision === "accepted") {
+        return {
+          finalText: outS,
+          acceptance: accS,
+          usedLocalLateFeeFallback: false,
+          appliedDeterministicSurgicalFallback: true,
+          deterministicSurgicalFallbackReason: surgEarly.reason,
+          whatChangedLine: `Applied local rule: ${surgEarly.reason.replace(/_/g, " ")}.`,
+          unchangedDuplicateLateFee: false,
+        };
+      }
+    }
   }
 
   if (acc.decision === "accepted") {

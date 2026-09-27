@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  resolveDecision2AcceptedPrepareAction,
   resolvePaidProReviewDecisionPhase,
   resolvePostFinalizeReviewDecisionActive,
+  shouldHidePaidProReviewDecisionChromeForDashboardResume,
   shouldShowPaidProReviewDecisionChrome,
 } from "./paidProReviewDecisionModel";
 
@@ -53,5 +55,46 @@ describe("paidProReviewDecisionModel", () => {
     expect(shouldShowPaidProReviewDecisionChrome("decision_1")).toBe(true);
     expect(shouldShowPaidProReviewDecisionChrome("decision_2")).toBe(true);
     expect(shouldShowPaidProReviewDecisionChrome("signer_setup")).toBe(false);
+  });
+
+  it("does not hide review-decision chrome after accept remount finalizes signers", () => {
+    expect(
+      shouldHidePaidProReviewDecisionChromeForDashboardResume({
+        dashboardSignerSetupResumeUiActive: true,
+        inlineSignerSetupMounted: false,
+        signerMetadataFinalized: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldHidePaidProReviewDecisionChromeForDashboardResume({
+        dashboardSignerSetupResumeUiActive: true,
+        inlineSignerSetupMounted: true,
+        signerMetadataFinalized: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("Decision-2 / accepted Prepare enters esign track and does not remount signer setup", () => {
+    expect(
+      resolveDecision2AcceptedPrepareAction({
+        phase: "decision_2",
+        acceptedSnapshotEnabled: true,
+        signerDetailsComplete: true,
+      }),
+    ).toBe("enter_esign_track");
+    expect(
+      resolveDecision2AcceptedPrepareAction({
+        phase: "decision_2",
+        acceptedSnapshotEnabled: true,
+        signerDetailsComplete: false,
+      }),
+    ).toBe("fail_closed");
+    expect(
+      resolveDecision2AcceptedPrepareAction({
+        phase: "decision_1",
+        acceptedSnapshotEnabled: false,
+        signerDetailsComplete: false,
+      }),
+    ).toBe("remount_signer_setup");
   });
 });

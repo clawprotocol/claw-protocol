@@ -9,6 +9,7 @@ import { clearAcceptedProCorpusSafeDisplayCache } from "./paidProAcceptedCorpusS
 import {
   repairAgreementTemplatePlaceholders,
   repairPaidProFreezePlaceholderAuthority,
+  shouldAcceptPaidProCommercialFieldStubsAfterPfd200,
 } from "./agreementTemplatePlaceholderSafety";
 import {
   ensurePaidProAcceptanceExecutionBlockInvariant,
@@ -77,6 +78,7 @@ import {
   resolveDeclaredExplicitPartyCount,
   repairDraftPartiesFromIntakeAuthority,
 } from "./partySlotIdentityNormalize";
+import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import {
   readPremiumRecipientHandoff,
   resolveHandoffPartySlotCount,
@@ -122,7 +124,37 @@ import {
   relocatePostWitnessNumberedPaddingBeforeWitness,
   stripNumberedOperativeSectionsAfterExecution,
 } from "./paidProSupplementalProvisionsFillerGate";
-import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
+import {
+  extractAuthoritativeLegalNamesFromCommercialCorpus,
+  resolveAuthoritativeSignerCount,
+  resolvePartyNamesPreferringCommercialCorpus,
+} from "./signerCountAuthority";
+
+function overlayLeftoverDraftFromCommercialCorpus(
+  args: PreparePaidProFreezeCandidateArgs,
+): PreparePaidProFreezeCandidateArgs {
+  const leftover = (args.draft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter((n) => n.length >= 2);
+  const names = resolvePartyNamesPreferringCommercialCorpus({
+    intakeText: args.intakeText,
+    corpusPlain: args.text,
+    leftoverNames: leftover,
+  });
+  if (!args.draft || names.length < 3 || leftover.length >= names.length) {
+    return args;
+  }
+  return {
+    ...args,
+    draft: {
+      ...args.draft,
+      parties: names.map((name, i) => ({
+        ...(args.draft?.parties?.[i] ?? { role: "party" }),
+        name,
+      })),
+    },
+  };
+}
 
 function trim(s: string | null | undefined): string {
   return (s || "").trim();
@@ -392,8 +424,9 @@ function preparePreservedApprovedRevisionFreezeCandidate(
 }
 
 export function preparePaidProFreezeCandidateText(
-  args: PreparePaidProFreezeCandidateArgs,
+  incoming: PreparePaidProFreezeCandidateArgs,
 ): PaidProFreezeCandidatePrepResult {
+  const args = overlayLeftoverDraftFromCommercialCorpus(incoming);
   const requestedSource = (args.source ?? "server_full_draft").trim();
   const surface = args.surface ?? "paid_pro_freeze_candidate";
   const repairs: string[] = [];
@@ -916,6 +949,48 @@ export function isNonAuthoritativeFreezePartyName(name: string): boolean {
  * manifest (e.g. a 3-party recovery, a dropped Client, a phantom fifth party, or a "Party 1"
  * placeholder standing in for a legal entity).
  */
+function corpusMentionsLegalName(corpus: string, name: string): boolean {
+  const n = String(name || "").trim();
+  if (n.length < 2) return false;
+  if (corpus.includes(n)) return true;
+  const needle = n.replace(/[.,]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  const hay = corpus.replace(/[.,]/g, "").toLowerCase();
+  return needle.length >= 4 && hay.includes(needle);
+}
+
+/**
+ * True when a commercially usable corpus already names every intake-manifest legal party.
+ * Leftover 2-party draft.parties / lagged prep.parties must not fail-close that 200 body.
+ */
+export function commercialCorpusCarriesIntakeManifestParties(
+  corpus: string | null | undefined,
+  intakeText: string | null | undefined,
+  intakeManifestCount: number,
+): boolean {
+  if (intakeManifestCount < 3) return false;
+  const text = String(corpus ?? "").trim();
+  // Same commercial floor as signature-only placeholder demotion (BE N≥3 accept ≈8.5k).
+  if (text.length < 8_500) return false;
+  const labeledPrepNames = labeledPartyLegalEntities(String(intakeText ?? ""))
+    .map((n) => n.replace(/\s+/g, " ").trim())
+    .filter((n) => n.length >= 2 && !/^party\s*\d+$/i.test(n));
+  if (labeledPrepNames.length >= intakeManifestCount) {
+    return labeledPrepNames
+      .slice(0, intakeManifestCount)
+      .every((name) => corpusMentionsLegalName(text, name));
+  }
+  const intakeNames = resolveAuthoritativeIntakePartyNames(intakeText).filter(
+    isAuthoritativeLegalEntityName,
+  );
+  if (intakeNames.length >= intakeManifestCount) {
+    return intakeNames.slice(0, intakeManifestCount).every((name) => corpusMentionsLegalName(text, name));
+  }
+  // Leftover 2-party prep re-upserted only Party 1/2, wiping Party 3/4 labels from
+  // intake. The commercial 200 corpus still names the declared parties.
+  const corpusNames = extractAuthoritativeLegalNamesFromCommercialCorpus(text);
+  return corpusNames.length >= intakeManifestCount;
+}
+
 export function assertPaidProFreezeCandidateManifestCountAgreement(
   prep: PaidProFreezeCandidatePrepResult,
   args: PreparePaidProFreezeCandidateArgs,
@@ -925,6 +1000,13 @@ export function assertPaidProFreezeCandidateManifestCountAgreement(
   if (isCreatorDashboardSignerSetupResumeActive()) return;
   const intakeManifestCount = resolveAuthoritativeIntakeManifestCount(args.intakeText);
   if (intakeManifestCount < 3) return;
+
+  const corpus = String(args.text ?? prep.text ?? "");
+  // Real N≥3 premium-full-draft 200: corpus has the declared parties even if prep lagged
+  // (leftover two-party draft overlay). Do not fail-close Review on that extraction mismatch.
+  if (commercialCorpusCarriesIntakeManifestParties(corpus, args.intakeText, intakeManifestCount)) {
+    return;
+  }
 
   const placeholder = prep.parties.find((p) => isNonAuthoritativeFreezePartyName(p.name));
   if (placeholder) {
@@ -1159,7 +1241,19 @@ export function assertPaidProFreezeCandidateGates(
   assertPaidProFreezeCandidateManifestCountAgreement(prep, args);
 
   const freezeEntryText = trim(args.text);
-  if (containsUnresolvedRenderTokens(freezeEntryText)) {
+  // Live pfd 200 often still carries notice/signature field stubs. #196 demoted
+  // helpers; the freeze entry check is the runtime reject that still fail-closed.
+  if (
+    containsUnresolvedRenderTokens(freezeEntryText) &&
+    !shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+      text: freezeEntryText,
+      intakeRaw: args.intakeText,
+    }) &&
+    !shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+      text: trim(prep.text),
+      intakeRaw: args.intakeText,
+    })
+  ) {
     throw new Error(
       "[paid-pro-sot-freeze-blocked] unresolved_render_tokens_in_freeze_entry",
     );
@@ -1299,7 +1393,13 @@ export function assertPaidProFreezeCandidateGates(
     );
   }
 
-  if (containsUnresolvedRenderTokens(safeForCommit)) {
+  if (
+    containsUnresolvedRenderTokens(safeForCommit) &&
+    !shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+      text: safeForCommit,
+      intakeRaw: args.intakeText,
+    })
+  ) {
     throw new Error(
       "[paid-pro-sot-freeze-blocked] unresolved_render_tokens_after_notice_contact_authority",
     );
@@ -1720,8 +1820,9 @@ function extractPaidProFreezeRejectReason(message: string): string {
 
 /** Full prepare + gate — canonical acceptance / SoT freeze compatibility check. */
 export function buildPaidProFreezeCandidate(
-  args: PreparePaidProFreezeCandidateArgs,
+  incoming: PreparePaidProFreezeCandidateArgs,
 ): PaidProFreezeCandidateGateResult {
+  const args = overlayLeftoverDraftFromCommercialCorpus(incoming);
   const prep = preparePaidProFreezeCandidateText(args);
   tracePaidProAcceptancePipelineStage({
     stage: "validatePaidProOutput_validation_input",

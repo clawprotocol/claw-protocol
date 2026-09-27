@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -15,6 +17,18 @@ from backend.lawdog_dashboard.supabase_config import (
 )
 
 log = logging.getLogger("claw.lawdog_dashboard.supabase")
+
+# Dashboard org upsert is best-effort. bind-user-org client polls must not
+# sync-POST on the asyncio loop (failure or success) or they starve GET /health.
+# Failure (PGRST205 / 404 / timeout): skip all probes for the window.
+# Success: skip further POSTs for that org_id for the same window.
+_ORGANIZATION_UPSERT_TIMEOUT_SECONDS = 1.5
+_ORGANIZATION_SYNC_SKIP_SECONDS = 60.0
+_org_sync_lock = threading.Lock()
+_org_sync_skip_until = 0.0
+_org_sync_probe_in_flight = False
+_org_sync_failure_logged = False
+_org_sync_ok_until: Dict[str, float] = {}
 
 
 def _utc_now_iso() -> str:
@@ -46,13 +60,15 @@ def _request(
     params: Optional[Dict[str, str]] = None,
     json_body: Any = None,
     merge_duplicates: bool = False,
+    timeout: float = 20.0,
+    log_failures: bool = True,
 ) -> bool:
     rest = _rest_base()
     if rest is None or not is_supabase_dashboard_configured():
         return False
     url = f"{rest}/{path.lstrip('/')}"
     try:
-        with httpx.Client(timeout=20.0) as client:
+        with httpx.Client(timeout=timeout) as client:
             res = client.request(
                 method,
                 url,
@@ -61,41 +77,110 @@ def _request(
                 **({"json": json_body} if json_body is not None else {}),
             )
         if res.status_code >= 400:
-            log.warning(
-                "[lawdog-supabase] request_failed method=%s path=%s status=%s body=%s",
-                method,
-                path,
-                res.status_code,
-                (res.text or "")[:240],
-            )
+            if log_failures:
+                log.warning(
+                    "[lawdog-supabase] request_failed method=%s path=%s status=%s body=%s",
+                    method,
+                    path,
+                    res.status_code,
+                    (res.text or "")[:240],
+                )
             return False
         return True
     except Exception as exc:
-        log.warning(
-            "[lawdog-supabase] request_error method=%s path=%s error=%s",
-            method,
-            path,
-            type(exc).__name__,
-        )
+        if log_failures:
+            log.warning(
+                "[lawdog-supabase] request_error method=%s path=%s error=%s",
+                method,
+                path,
+                type(exc).__name__,
+            )
         return False
 
 
+def reset_organization_sync_circuit_for_tests() -> None:
+    """Clear fail-soft skip so unit tests see a fresh probe."""
+    global _org_sync_skip_until, _org_sync_probe_in_flight, _org_sync_failure_logged
+    with _org_sync_lock:
+        _org_sync_skip_until = 0.0
+        _org_sync_probe_in_flight = False
+        _org_sync_failure_logged = False
+        _org_sync_ok_until.clear()
+
+
+def _organization_recently_synced(oid: str, now_mono: float) -> bool:
+    until = _org_sync_ok_until.get(oid, 0.0)
+    if until <= now_mono:
+        _org_sync_ok_until.pop(oid, None)
+        return False
+    return True
+
+
+def _mark_organization_synced(oid: str, now_mono: float) -> None:
+    stale = [key for key, exp in _org_sync_ok_until.items() if exp <= now_mono]
+    for key in stale:
+        _org_sync_ok_until.pop(key, None)
+    _org_sync_ok_until[oid] = now_mono + _ORGANIZATION_SYNC_SKIP_SECONDS
+
+
+def _open_organization_sync_circuit(*, detail: str) -> None:
+    global _org_sync_skip_until, _org_sync_failure_logged
+    with _org_sync_lock:
+        _org_sync_skip_until = time.monotonic() + _ORGANIZATION_SYNC_SKIP_SECONDS
+        already_logged = _org_sync_failure_logged
+        _org_sync_failure_logged = True
+    if already_logged:
+        return
+    log.warning(
+        "[lawdog-supabase] organization_sync_unavailable fail_soft=1 detail=%s skip_seconds=%s",
+        (detail or "")[:240],
+        int(_ORGANIZATION_SYNC_SKIP_SECONDS),
+    )
+
+
 def ensure_organization(org_id: str, *, name: str = "") -> None:
+    """Best-effort organizations upsert. Fail-soft: never raise, never retry-storm."""
+    global _org_sync_probe_in_flight, _org_sync_skip_until, _org_sync_failure_logged
     oid = (org_id or "").strip()
     if not oid:
         return
-    now = _utc_now_iso()
-    _request(
-        "POST",
-        "organizations",
-        params={"on_conflict": "id"},
-        json_body={
-            "id": oid,
-            "name": (name or oid).strip() or oid,
-            "updated_at": now,
-        },
-        merge_duplicates=True,
-    )
+    now_mono = time.monotonic()
+    with _org_sync_lock:
+        if now_mono < _org_sync_skip_until:
+            return
+        if _organization_recently_synced(oid, now_mono):
+            return
+        if _org_sync_probe_in_flight:
+            return
+        _org_sync_probe_in_flight = True
+        already_logged = _org_sync_failure_logged
+    try:
+        now = _utc_now_iso()
+        ok = _request(
+            "POST",
+            "organizations",
+            params={"on_conflict": "id"},
+            json_body={
+                "id": oid,
+                "name": (name or oid).strip() or oid,
+                "updated_at": now,
+            },
+            merge_duplicates=True,
+            timeout=_ORGANIZATION_UPSERT_TIMEOUT_SECONDS,
+            log_failures=not already_logged,
+        )
+        if ok:
+            with _org_sync_lock:
+                _org_sync_skip_until = 0.0
+                _org_sync_failure_logged = False
+                _mark_organization_synced(oid, time.monotonic())
+            return
+        _open_organization_sync_circuit(detail="organizations_upsert_failed")
+    except Exception as exc:
+        _open_organization_sync_circuit(detail=type(exc).__name__)
+    finally:
+        with _org_sync_lock:
+            _org_sync_probe_in_flight = False
 
 
 def upsert_agreement_dashboard_row(

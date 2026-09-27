@@ -204,6 +204,82 @@ def test_embed_texts_blocked_skips_embeddings(monkeypatch: pytest.MonkeyPatch) -
     mock_emb.assert_not_called()
 
 
+def test_call_legal_llm_explicit_revision_keeps_full_doc_and_party_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refine must not 4k-truncate the payload or rewrite resolved orgs to [ORG_n]."""
+    import json
+
+    captured: dict = {}
+
+    def fake_create(**kwargs: object) -> MagicMock:
+        captured["messages"] = kwargs.get("messages")
+        return _stub_completion_response()
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = fake_create
+    monkeypatch.setattr("backend.llm_router._get_client", lambda: mock_client)
+
+    marker = "CERT_AI_REVISE_MARKER_POST175_0902T1958 — Notices by confirmed electronic mail."
+    doc = (
+        "This Agreement is entered into by and between Cedar Peak Advisors LLC and "
+        "Blue Harbor Logistics LLC.\n"
+        + ("Scope operational paragraph with mutual obligations.\n" * 400)
+        + "\n## Notices\nNotices shall be delivered as set forth herein.\n"
+    )
+    assert len(doc) > 8000
+    payload = json.dumps(
+        {
+            "intake": "B2B services between Cedar Peak Advisors LLC and Blue Harbor Logistics LLC.",
+            "action": "update",
+            "current_document_text": doc,
+            "user_refinement_prompt": (
+                'In the Notices section, add this exact sentence as its own short paragraph: '
+                f'"{marker}" Keep all other sections unchanged.'
+            ),
+        },
+        ensure_ascii=False,
+    )
+    call_legal_llm(
+        [{"role": "user", "content": payload}],
+        airlock_profile="agreement_outbound",
+        call_purpose="explicit_revision",
+    )
+    outbound = captured["messages"][0]["content"]
+    assert "Cedar Peak Advisors LLC" in outbound
+    assert "Blue Harbor Logistics LLC" in outbound
+    assert "[ORG_1]" not in outbound
+    assert "[ORG_2]" not in outbound
+    assert marker in outbound
+    assert "user_refinement_prompt" in outbound
+    assert len(outbound) > 8000
+
+
+def test_call_legal_llm_explicit_revision_still_redacts_email(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    def fake_create(**kwargs: object) -> MagicMock:
+        captured["messages"] = kwargs.get("messages")
+        return _stub_completion_response()
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = fake_create
+    monkeypatch.setattr("backend.llm_router._get_client", lambda: mock_client)
+
+    email = "billing@cedarpeak.example"
+    call_legal_llm(
+        [{"role": "user", "content": f"Notice to {email} at Cedar Peak Advisors LLC."}],
+        airlock_profile="agreement_outbound",
+        call_purpose="explicit_revision",
+    )
+    outbound = captured["messages"][0]["content"]
+    assert email not in outbound
+    assert "[EMAIL_1]" in outbound
+    assert "Cedar Peak Advisors LLC" in outbound
+
+
 def test_embed_texts_uses_minimized_input(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict = {}
 

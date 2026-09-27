@@ -20,14 +20,14 @@ describe("ownershipMigrationFinalize", () => {
     writeCreateReviewAgreementResumeId(null);
   });
 
-  it("resolves canonical id from migrated list with continuation preference", () => {
+  it("resolves canonical id from migrated list preferring the prior leftover persist", () => {
     expect(
       resolveCanonicalMigratedAgreementId({
         migratedAgreementIds: ["ag-a", "ag-b"],
         continuationAgreementId: "ag-b",
-        priorClientAgreementId: "ag-anon",
+        priorClientAgreementId: "ag-a",
       }),
-    ).toBe("ag-b");
+    ).toBe("ag-a");
   });
 
   it("commits receipt and writes resume id", () => {

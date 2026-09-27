@@ -71,4 +71,33 @@ describe("canonicalPartyStructuredAddress", () => {
       "100 Market Street, Chicago, IL 60601",
     );
   });
+
+  it("rejects term / effective-date / jurisdiction stuffed into Address (Northline/Harbor)", () => {
+    expect(
+      sanitizeCanonicalPartyAddress(
+        "30 days, Upon full execution by the parties unless otherwise specified., Texas",
+      ),
+    ).toBe("");
+    expect(sanitizeCanonicalPartyAddress("$2,400")).toBe("");
+    expect(sanitizeCanonicalPartyAddress("logo and brand kit")).toBe("");
+    expect(sanitizeCanonicalPartyAddress("100 Mesa Drive, Austin, Texas")).toBe(
+      "100 Mesa Drive, Austin, Texas",
+    );
+  });
+
+  it("rejects the live Harbor intake / commercial-safeguard Address blob as non-postal", () => {
+    const liveHarborAddressBlob =
+      "User-stated material terms:, 30-day term, Texas governing law, Commercial safeguards (edit as needed), Deliverables and IP: Deliverables and ownership/license rights will follow the statement of work or specifications agreed by the Parties., Economics preserved from intake (confirm in Schedule A):";
+    expect(sanitizeCanonicalPartyAddress(liveHarborAddressBlob)).toBe("");
+    expect(sanitizeCanonicalPartyAddress("User-stated material terms:")).toBe("");
+    expect(sanitizeCanonicalPartyAddress("30-day term")).toBe("");
+    expect(sanitizeCanonicalPartyAddress("Texas governing law")).toBe("");
+    expect(sanitizeCanonicalPartyAddress("Commercial safeguards (edit as needed)")).toBe("");
+    expect(
+      sanitizeCanonicalPartyAddress("Economics preserved from intake (confirm in Schedule A):"),
+    ).toBe("");
+    expect(sanitizeCanonicalPartyAddress("100 Mesa Drive, Austin, Texas")).toBe(
+      "100 Mesa Drive, Austin, Texas",
+    );
+  });
 });

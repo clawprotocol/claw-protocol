@@ -1060,8 +1060,22 @@ export function resolvePaidProReviewRenderPlain(
     // Frozen SoT display-only: presentation projection only. Fused-name signing repairs strip
     // Party Notice Details and can rewrite openings — never run them on accepted SoT display.
     if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-      // After freeze, review document-surface plain is the frozen corpus.
-      // Presentation overlays must not become new canonical legal text.
+      if (args?.skipUserVisibleDisplayPrep) return body;
+      const parties = resolvePartiesForReviewRender(args);
+      if (parties.length >= 2) {
+        const roleContext = {
+          intakeText: args?.intakeText ?? null,
+          draftPartyNames: (args?.draft?.parties ?? [])
+            .map((p) => String(p?.name ?? "").trim())
+            .filter(Boolean),
+          acceptedCorpus: body,
+        };
+        const noticed = ensureOperativeIfToNoticeDelivery(body, parties, roleContext);
+        const next = noticed.text.trim();
+        if (noticed.repairs.length > 0 && next.length >= Math.floor(body.length * 0.85)) {
+          return next;
+        }
+      }
       return body;
     }
     if (corpusContainsFusedPartyLegalName(body)) {

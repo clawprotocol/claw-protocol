@@ -97,17 +97,19 @@ export function AuthCallbackPage() {
           logProductEvent("continuation_restored", { surface: "auth_callback" });
         }
 
-        const serverOrg = (result.orgId || "").trim() || getOrgId();
+        const serverOrg = (result.orgId || "").trim();
         if (isUserWorkspaceOrgId(serverOrg)) {
           setOrgId(serverOrg);
         }
-        if (!isUserWorkspaceOrgId(serverOrg)) {
+        if (!isUserWorkspaceOrgId(getOrgId())) {
+          // Prefer dashboard over create when org bind did not settle — avoids anon-* probes.
           completedRef.current = true;
           setPhase("success");
           navigate("/app");
           return;
         }
 
+        // Server dest is pre-auth conversion id. A stale next UUID must not win.
         const destination = resolveAuthCallbackDestination({
           serverDestination: result.destinationPath,
           usedContinuation: result.usedContinuation,

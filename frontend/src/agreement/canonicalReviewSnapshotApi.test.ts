@@ -1,6 +1,15 @@
 /** @vitest-environment jsdom */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  collectReviewPlainTopLevelSectionNumbers,
+  reviewPlainHasLateSkippedSectionNumbers,
+} from "../components/agreements/reviewPlainSectionContinuity";
+import {
+  clearPaintedSequentialPersistReviewForTests,
+  latchPaintedSequentialPersistReview,
+  resolvePersistReviewPlainForClientPreflight,
+} from "../components/agreements/paidProPaintedSequentialPersistReview";
+import {
   acceptCanonicalReviewSnapshot,
   acceptDisplayedCommercialReviewSnapshot,
   canEnableCommercialPrepareFromServerSnapshot,
@@ -19,6 +28,7 @@ describe("canonicalReviewSnapshotApi", () => {
   beforeEach(() => {
     sessionStorage.clear();
     vi.restoreAllMocks();
+    clearPaintedSequentialPersistReviewForTests();
   });
 
   it("stores and reads accepted snapshot ref scoped by agreement", () => {
@@ -423,6 +433,122 @@ describe("canonicalReviewSnapshotApi", () => {
     expect(result.snapshot.corpus_sha256).toBe(namedDigest);
   });
 
+  it("prepare retries a stale GET once so resume Continue is not persist_get_authority_mismatch", async () => {
+    const corpus = ("OPERATIVE\n\n" + "z".repeat(600)).trim();
+    const digest = await sha256CorpusDigest(corpus);
+    const stale = ("STALE\n\n" + "w".repeat(600)).trim();
+    const staleDigest = await sha256CorpusDigest(stale);
+    let gets = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/canonical-review-snapshot") && method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            snapshot: {
+              snapshot_id: "crs_fresh",
+              agreement_id: "4e18814c-c8fe-4eb9-85ae-a3e694cb596e",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "pending",
+            },
+          }),
+        } as Response;
+      }
+      if (url.includes("/canonical-review-snapshot") && method === "GET") {
+        gets += 1;
+        const snap =
+          gets === 1
+            ? {
+                snapshot_id: "crs_stale",
+                agreement_id: "4e18814c-c8fe-4eb9-85ae-a3e694cb596e",
+                corpus_plain: stale,
+                corpus_sha256: staleDigest,
+                corpus_length: stale.length,
+                status: "pending",
+              }
+            : {
+                snapshot_id: "crs_fresh",
+                agreement_id: "4e18814c-c8fe-4eb9-85ae-a3e694cb596e",
+                corpus_plain: corpus,
+                corpus_sha256: digest,
+                corpus_length: corpus.length,
+                status: "pending",
+              };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ status: "pending", snapshot: snap }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await prepareCommercialReviewSnapshotAuthority({
+      agreementId: "4e18814c-c8fe-4eb9-85ae-a3e694cb596e",
+      corpusPlain: corpus,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.code);
+    expect(result.snapshot.snapshot_id).toBe("crs_fresh");
+    expect(gets).toBe(2);
+  });
+
+  it("prepare still fail-closes when GET stays on a different snapshot after retry", async () => {
+    const corpus = ("OPERATIVE\n\n" + "z".repeat(600)).trim();
+    const digest = await sha256CorpusDigest(corpus);
+    const other = ("OTHER\n\n" + "q".repeat(600)).trim();
+    const otherDigest = await sha256CorpusDigest(other);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/canonical-review-snapshot") && method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            snapshot: {
+              snapshot_id: "crs_fresh",
+              agreement_id: "ag_div",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "pending",
+            },
+          }),
+        } as Response;
+      }
+      if (url.includes("/canonical-review-snapshot") && method === "GET") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "pending",
+            snapshot: {
+              snapshot_id: "crs_other",
+              agreement_id: "ag_div",
+              corpus_plain: other,
+              corpus_sha256: otherDigest,
+              corpus_length: other.length,
+              status: "pending",
+            },
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await prepareCommercialReviewSnapshotAuthority({
+      agreementId: "ag_div",
+      corpusPlain: corpus,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("persist_get_authority_mismatch");
+  });
+
   it("acceptDisplayedCommercialReviewSnapshot fails when display differs from GET", async () => {
     const corpus = ("OPERATIVE\n\n" + "x".repeat(600)).trim();
     const digest = await sha256CorpusDigest(corpus);
@@ -593,5 +719,922 @@ describe("canonicalReviewSnapshotApi", () => {
       corpusLength: corpus.length,
     });
     expect(canEnableCommercialPrepareFromServerSnapshot("ag_local_only")).toBe(true);
+  });
+
+  it("persistCanonicalReviewSnapshot refuses 12-then-14 without repair-then-accept", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const skipped = [
+      "SERVICES AGREEMENT",
+      "",
+      "This Services Agreement is between Cedar Ridge LLC and Maple Grove Inc.",
+      "",
+      "1. Services and Deliverables",
+      "Designer will provide the deliverables.",
+      "",
+      "10. Miscellaneous",
+      "This is the entire agreement.",
+      "",
+      "11. Independent Contractor and Assignment",
+      "Designer is an independent contractor.",
+      "",
+      "12. Force Majeure",
+      "Neither party is liable for delay beyond its control.",
+      "",
+      "14. Notices",
+      "Any notice must be in writing.",
+      "",
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+    const res = await persistCanonicalReviewSnapshot({
+      agreementId: "ag_skip",
+      corpusPlain: skipped,
+      intakeText: "Cedar Ridge LLC is hiring Maple Grove Inc, governing law Oklahoma.",
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.code).toBe("skipped_top_level_section_integers");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { law: "Oklahoma", client: "Cedar Ridge LLC", provider: "Maple Grove Inc", attnA: "Jordan Hale", attnB: "Morgan Ellis" },
+    { law: "Colorado", client: "Riverbend Studio", provider: "Oak Point LLC", attnA: "Casey Quinn", attnB: "Riley Chen" },
+    { law: "New York", client: "Summit Craft Co", provider: "Harborline Design LLC", attnA: "Avery Cole", attnB: "Sam Ortiz" },
+  ] as const)(
+    "persistCanonicalReviewSnapshot accepts sequential wrapped-heading 1..12 with Notices Attn ($law)",
+    async ({ law, client, provider, attnA, attnB }) => {
+      const sequential = [
+        "SERVICES AGREEMENT",
+        "",
+        `This Services Agreement is between ${client} and ${provider}.`,
+        "",
+        "1. Services and Deliverables",
+        "Designer will provide a logo and brand kit.",
+        "",
+        "2. Revisions,",
+        "Client Input, and Changes",
+        "The flat fee includes up to two rounds of reasonable revisions.",
+        "",
+        "3. Fees and Payment",
+        "Fees are due as stated.",
+        "",
+        "4. Term and Termination",
+        "The engagement continues until complete.",
+        "4.1 Early Termination",
+        "Either party may terminate for material breach.",
+        "",
+        "5. Intellectual Property",
+        "Client owns final deliverables upon payment.",
+        "5.1 Portfolio License",
+        "Designer retains a limited portfolio license.",
+        "",
+        "6. Confidentiality",
+        "Each party keeps non-public information confidential.",
+        "",
+        "7. Representations and Warranties",
+        "Each party represents it has authority to enter this Agreement.",
+        "",
+        "8. Indemnification",
+        "Each party indemnifies the other for third-party claims arising from its breach.",
+        "",
+        "9. Liability Allocation",
+        "Total liability is capped at fees paid.",
+        "",
+        "10. Independent Contractor and Assignment",
+        "This Agreement cannot be assigned without prior written consent.",
+        "",
+        "11. Governing Law",
+        `This Agreement is governed by the laws of ${law}, without regard to conflict-of-laws principles.`,
+        "",
+        "12. Notices",
+        "Any notice must be in writing.",
+        "1. Email",
+        "2. Personal delivery",
+        `If to ${client}:`,
+        `Attn: ${attnA}`,
+        "10. Main Street",
+        `If to ${provider}:`,
+        `Attn: ${attnB}`,
+        "2. Revisions,",
+        "Client Input, and Changes",
+        "",
+        "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+        "",
+        "x".repeat(400),
+      ].join("\n");
+      const digest = await sha256CorpusDigest(sequential);
+      const fetchMock = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          snapshot: {
+            snapshot_id: "crs_wrap_1_12",
+            agreement_id: "ag_wrap_1_12",
+            corpus_plain: sequential,
+            corpus_sha256: digest,
+            corpus_length: sequential.length,
+            status: "pending",
+          },
+        }),
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+      const res = await persistCanonicalReviewSnapshot({
+        agreementId: "ag_wrap_1_12",
+        corpusPlain: sequential,
+        intakeText: `${client} is hiring ${provider}, governing law ${law}.`,
+      });
+      expect(res.ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalled();
+      expect(sequential).not.toMatch(/Texas|Northline|Priya|Diego/);
+    },
+  );
+
+  it.each([
+    { law: "Oklahoma", client: "Cedar Ridge LLC", provider: "Maple Grove Inc", attnA: "Jordan Hale", attnB: "Morgan Ellis" },
+    { law: "Colorado", client: "Riverbend Studio", provider: "Oak Point LLC", attnA: "Casey Quinn", attnB: "Riley Chen" },
+    { law: "New York", client: "Summit Craft Co", provider: "Harborline Design LLC", attnA: "Avery Cole", attnB: "Sam Ortiz" },
+  ] as const)(
+    "persistCanonicalReviewSnapshot accepts persist-time HTML/markup 1..12 ($law)",
+    async ({ law, client, provider, attnA, attnB }) => {
+      const headingMarkers = [
+        "Services",
+        "Revisions",
+        "Fees",
+        "Term",
+        "Intellectual",
+        "Confidentiality",
+        "Representations",
+        "Indemnification",
+        "Liability",
+        "Independent",
+        "Governing",
+        "Notices",
+      ];
+      const sequential = [
+        "SERVICES AGREEMENT",
+        "",
+        `This Services Agreement is between ${client} and ${provider}.`,
+        "",
+        "1. Services and Deliverables",
+        "Designer will provide a logo and brand kit.",
+        "",
+        "2. Revisions,",
+        "Client Input, and Changes",
+        "The flat fee includes up to two rounds of reasonable revisions.",
+        "",
+        "3. Fees and Payment",
+        "Fees are due as stated.",
+        "",
+        "4. Term and Termination",
+        "The engagement continues until complete.",
+        "4.1 Early Termination",
+        "Either party may terminate for material breach.",
+        "",
+        "5. Intellectual Property",
+        "Client owns final deliverables upon payment.",
+        "",
+        "6. Confidentiality",
+        "Each party keeps non-public information confidential.",
+        "",
+        "7. Representations and Warranties",
+        "Each party represents it has authority to enter this Agreement.",
+        "",
+        "8. Indemnification",
+        "Each party indemnifies the other for third-party claims arising from its breach.",
+        "",
+        "9. Liability Allocation",
+        "Total liability is capped at fees paid.",
+        "",
+        "10. Independent Contractor and Assignment",
+        "This Agreement cannot be assigned without prior written consent.",
+        "",
+        "11. Governing Law",
+        `This Agreement is governed by the laws of ${law}, without regard to conflict-of-laws principles.`,
+        "",
+        "12. Notices",
+        "Any notice must be in writing.",
+        "1. Email",
+        "2. Personal delivery",
+        "3. Overnight courier",
+        `If to ${client}:`,
+        `Attn: ${attnA}`,
+        "10. Main Street",
+        `If to ${provider}:`,
+        `Attn: ${attnB}`,
+        "2. Revisions,",
+        "Client Input, and Changes",
+        "",
+        "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+        "",
+        "x".repeat(400),
+      ].join("\n");
+      const htmlCorpus = sequential
+        .split("\n")
+        .map((line) => {
+          const trimmed = line.trim();
+          if (
+            trimmed &&
+            !/^\d+\.\d+/.test(trimmed) &&
+            /^\d{1,2}\.\s+/.test(trimmed) &&
+            headingMarkers.some((marker) => trimmed.includes(marker))
+          ) {
+            return `<h2 class="premium-doc-section-heading">${trimmed}</h2>`;
+          }
+          return trimmed ? `<p>${trimmed}</p>` : "";
+        })
+        .join("\n");
+      const markupCorpus = sequential
+        .replace("2. Revisions,", '<h2 class="premium-doc-section-heading">2. Revisions,</h2>')
+        .replace("12. Notices", "<strong>12. Notices</strong>")
+        .replace(
+          "1. Email\n2. Personal delivery\n3. Overnight courier",
+          "1. Email<br />2. Personal delivery<br />3. Overnight courier",
+        );
+      for (const corpus of [htmlCorpus, markupCorpus]) {
+        const digest = await sha256CorpusDigest(corpus);
+        const fetchMock = vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            snapshot: {
+              snapshot_id: "crs_wrap_html_1_12",
+              agreement_id: "ag_wrap_html_1_12",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "pending",
+            },
+          }),
+        }));
+        vi.stubGlobal("fetch", fetchMock);
+        const res = await persistCanonicalReviewSnapshot({
+          agreementId: "ag_wrap_html_1_12",
+          corpusPlain: corpus,
+          intakeText: `${client} is hiring ${provider}, governing law ${law}.`,
+        });
+        expect(res.ok).toBe(true);
+        expect(fetchMock).toHaveBeenCalled();
+        expect(corpus).not.toMatch(/Texas|Northline|Priya|Diego/);
+      }
+    },
+  );
+
+  it("persistCanonicalReviewSnapshot refuses HTML 12-then-14 without repair-then-accept", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const skipped = [
+      "<h2 class=\"premium-doc-section-heading\">1. Services and Deliverables</h2>",
+      "<p>Designer will provide the deliverables.</p>",
+      "<h2 class=\"premium-doc-section-heading\">10. Miscellaneous</h2>",
+      "<p>This is the entire agreement.</p>",
+      "<h2 class=\"premium-doc-section-heading\">11. Independent Contractor and Assignment</h2>",
+      "<p>Designer is an independent contractor.</p>",
+      "<h2 class=\"premium-doc-section-heading\">12. Force Majeure</h2>",
+      "<p>Neither party is liable for delay beyond its control.</p>",
+      "<h2 class=\"premium-doc-section-heading\">14. Notices</h2>",
+      "<p>Any notice must be in writing.</p>",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+    const res = await persistCanonicalReviewSnapshot({
+      agreementId: "ag_skip_html",
+      corpusPlain: skipped,
+      intakeText: "Cedar Ridge LLC is hiring Maple Grove Inc, governing law Oklahoma.",
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.code).toBe("skipped_top_level_section_integers");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("persistCanonicalReviewSnapshot accepts leftover 1..8 and does not remint to 10/11/12/13", async () => {
+    const leftover = [
+      "SERVICES AGREEMENT",
+      "",
+      "This consulting engagement is between Summit Craft Co and Harborline Design LLC.",
+      "",
+      "1. Services and Deliverables",
+      "Designer will provide the deliverables.",
+      "",
+      "2. Fees",
+      "Fees are due as stated.",
+      "",
+      "3. Term and Termination",
+      "The engagement continues until complete.",
+      "",
+      "4. Intellectual Property",
+      "Client owns final deliverables upon payment.",
+      "",
+      "5. Confidentiality",
+      "Each party keeps non-public information confidential.",
+      "",
+      "6. Limitation of Liability",
+      "Liability is limited to fees paid.",
+      "",
+      "7. Governing Law",
+      "This Agreement is governed by the laws of the jurisdiction named in the intake.",
+      "",
+      "8. Notices",
+      "Notices must be in writing.",
+      "",
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+    const digest = await sha256CorpusDigest(leftover);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        snapshot: {
+          snapshot_id: "crs_leftover",
+          agreement_id: "ag_leftover",
+          corpus_plain: leftover,
+          corpus_sha256: digest,
+          corpus_length: leftover.length,
+          status: "pending",
+        },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await persistCanonicalReviewSnapshot({
+      agreementId: "ag_leftover",
+      corpusPlain: leftover,
+    });
+    expect(res.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalled();
+    const firstCall = fetchMock.mock.calls[0] as unknown as [string, RequestInit?];
+    const body = JSON.parse(String(firstCall[1]?.body ?? "{}"));
+    expect(body.corpus_plain).toContain("1. Services and Deliverables");
+    expect(body.corpus_plain).toContain("8. Notices");
+    expect(body.corpus_plain).not.toMatch(/\n10\. /);
+    expect(body.corpus_plain).not.toMatch(/\n11\. /);
+    expect(body.corpus_plain).not.toMatch(/\n12\. /);
+    expect(body.corpus_plain).not.toMatch(/\n13\. /);
+  });
+
+  function sequentialPainted1to12(args: {
+    client: string;
+    provider: string;
+    law: string;
+    attnA: string;
+    attnB: string;
+  }): string {
+    return [
+      "SERVICES AGREEMENT",
+      "",
+      `This Services Agreement is between ${args.client} and ${args.provider}.`,
+      "",
+      "1. Services and Deliverables",
+      "Designer will provide a logo and brand kit.",
+      "",
+      "2. Revisions, Client Input, and Changes",
+      "The flat fee includes up to two rounds of reasonable revisions.",
+      "",
+      "3. Fees and Payment",
+      "Fees are due as stated.",
+      "",
+      "4. Term and Termination",
+      "The engagement continues until complete.",
+      "4.1 Early Termination",
+      "Either party may terminate for material breach.",
+      "",
+      "5. Intellectual Property",
+      "Client owns final deliverables upon payment.",
+      "5.1 Portfolio License",
+      "Designer retains a limited portfolio license.",
+      "",
+      "6. Confidentiality",
+      "Each party keeps non-public information confidential.",
+      "",
+      "7. Representations and Warranties",
+      "Each party represents it has authority to enter this Agreement.",
+      "",
+      "8. Indemnification",
+      "Each party indemnifies the other for third-party claims arising from its breach.",
+      "",
+      "9. Liability Allocation",
+      "Total liability is capped at fees paid.",
+      "",
+      "10. Independent Contractor and Assignment",
+      "This Agreement cannot be assigned without prior written consent.",
+      "",
+      "11. Governing Law",
+      `This Agreement is governed by the laws of ${args.law}, without regard to conflict-of-laws principles.`,
+      "",
+      "12. Notices",
+      "Any notice must be in writing.",
+      "1. Email",
+      "2. Personal delivery",
+      `If to ${args.client}:`,
+      `Attn: ${args.attnA}`,
+      "10. Main Street",
+      `If to ${args.provider}:`,
+      `Attn: ${args.attnB}`,
+      "",
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+  }
+
+  function shorterAuthorityThatLateSkips(): string {
+    return [
+      "SERVICES AGREEMENT",
+      "",
+      "This Services Agreement is between Cedar Ridge LLC and Maple Grove Inc.",
+      "",
+      "1. Services and Deliverables",
+      "Designer will provide the deliverables.",
+      "",
+      "10. Miscellaneous",
+      "This is the entire agreement.",
+      "",
+      "12. Notices",
+      "Any notice must be in writing.",
+      "",
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+  }
+
+  it("persistCanonicalReviewSnapshot POSTs painted sequential 1..12 when authority corpus would skip", async () => {
+    const authority = shorterAuthorityThatLateSkips();
+    const painted = sequentialPainted1to12({
+      client: "Cedar Ridge LLC",
+      provider: "Maple Grove Inc",
+      law: "Oklahoma",
+      attnA: "Jordan Hale",
+      attnB: "Morgan Ellis",
+    });
+    expect(reviewPlainHasLateSkippedSectionNumbers(authority)).toBe(true);
+    expect(collectReviewPlainTopLevelSectionNumbers(painted)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(reviewPlainHasLateSkippedSectionNumbers(painted)).toBe(false);
+    expect(resolvePersistReviewPlainForClientPreflight({
+      corpusPlain: authority,
+      paintedPersistPlain: painted,
+    })).toBe(painted);
+    expect(painted.length).toBeGreaterThan(authority.length);
+
+    const digest = await sha256CorpusDigest(painted);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        snapshot: {
+          snapshot_id: "crs_painted_1_12",
+          agreement_id: "ag_painted_1_12",
+          corpus_plain: painted,
+          corpus_sha256: digest,
+          corpus_length: painted.length,
+          status: "pending",
+        },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await persistCanonicalReviewSnapshot({
+      agreementId: "ag_painted_1_12",
+      corpusPlain: authority,
+      paintedPersistPlain: painted,
+      intakeText: "Cedar Ridge LLC is hiring Maple Grove Inc, governing law Oklahoma.",
+    });
+    expect(res.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalled();
+    const firstCall = fetchMock.mock.calls[0] as unknown as [string, RequestInit?];
+    const body = JSON.parse(String(firstCall[1]?.body ?? "{}"));
+    expect(body.corpus_plain).toBe(painted);
+    expect(collectReviewPlainTopLevelSectionNumbers(body.corpus_plain)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+    ]);
+  });
+
+  it("persistCanonicalReviewSnapshot POSTs latched painted 1..12 when persist corpus is the shorter authority", async () => {
+    const authority = shorterAuthorityThatLateSkips();
+    const painted = sequentialPainted1to12({
+      client: "Riverbend Studio",
+      provider: "Oak Point LLC",
+      law: "Colorado",
+      attnA: "Casey Quinn",
+      attnB: "Riley Chen",
+    });
+    latchPaintedSequentialPersistReview({
+      paintedPlain: painted,
+      authorityPlain: authority,
+    });
+    expect(resolvePersistReviewPlainForClientPreflight({ corpusPlain: authority })).toBe(painted);
+    const digest = await sha256CorpusDigest(painted);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        snapshot: {
+          snapshot_id: "crs_latched_paint",
+          agreement_id: "ag_latched_paint",
+          corpus_plain: painted,
+          corpus_sha256: digest,
+          corpus_length: painted.length,
+          status: "pending",
+        },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await persistCanonicalReviewSnapshot({
+      agreementId: "ag_latched_paint",
+      corpusPlain: authority,
+    });
+    expect(res.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalled();
+    const firstCall = fetchMock.mock.calls[0] as unknown as [string, RequestInit?];
+    const body = JSON.parse(String(firstCall[1]?.body ?? "{}"));
+    expect(body.corpus_plain).toBe(painted);
+  });
+
+  it("persistCanonicalReviewSnapshot still refuses painted 12-then-14 and 10-then-12", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const skipped1214 = [
+      "SERVICES AGREEMENT",
+      "",
+      "1. Services and Deliverables",
+      "Designer will provide the deliverables.",
+      "",
+      "10. Miscellaneous",
+      "This is the entire agreement.",
+      "",
+      "11. Independent Contractor and Assignment",
+      "Designer is an independent contractor.",
+      "",
+      "12. Force Majeure",
+      "Neither party is liable for delay beyond its control.",
+      "",
+      "14. Notices",
+      "Any notice must be in writing.",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+    const skipped1012 = [
+      "SERVICES AGREEMENT",
+      "",
+      "1. Services and Deliverables",
+      "Designer will provide the deliverables.",
+      "",
+      "10. Miscellaneous",
+      "This is the entire agreement.",
+      "",
+      "12. Notices",
+      "Any notice must be in writing.",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+    for (const skipped of [skipped1214, skipped1012]) {
+      expect(reviewPlainHasLateSkippedSectionNumbers(skipped)).toBe(true);
+      const res = await persistCanonicalReviewSnapshot({
+        agreementId: "ag_painted_skip",
+        corpusPlain: skipped,
+        paintedPersistPlain: skipped,
+      });
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.code).toBe("skipped_top_level_section_integers");
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("persistCanonicalReviewSnapshot leftover painted 1..8 stays 1..8", async () => {
+    const leftover = [
+      "SERVICES AGREEMENT",
+      "",
+      "This consulting engagement is between Summit Craft Co and Harborline Design LLC.",
+      "",
+      "1. Services and Deliverables",
+      "Designer will provide the deliverables.",
+      "",
+      "2. Fees",
+      "Fees are due as stated.",
+      "",
+      "3. Term and Termination",
+      "The engagement continues until complete.",
+      "",
+      "4. Intellectual Property",
+      "Client owns final deliverables upon payment.",
+      "",
+      "5. Confidentiality",
+      "Each party keeps non-public information confidential.",
+      "",
+      "6. Limitation of Liability",
+      "Liability is limited to fees paid.",
+      "",
+      "7. Governing Law",
+      "This Agreement is governed by the laws of the jurisdiction named in the intake.",
+      "",
+      "8. Notices",
+      "Notices must be in writing.",
+      "",
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+    expect(collectReviewPlainTopLevelSectionNumbers(leftover)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    const digest = await sha256CorpusDigest(leftover);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        snapshot: {
+          snapshot_id: "crs_leftover_paint",
+          agreement_id: "ag_leftover_paint",
+          corpus_plain: leftover,
+          corpus_sha256: digest,
+          corpus_length: leftover.length,
+          status: "pending",
+        },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await persistCanonicalReviewSnapshot({
+      agreementId: "ag_leftover_paint",
+      corpusPlain: leftover,
+      paintedPersistPlain: leftover,
+    });
+    expect(res.ok).toBe(true);
+    const firstCall = fetchMock.mock.calls[0] as unknown as [string, RequestInit?];
+    const body = JSON.parse(String(firstCall[1]?.body ?? "{}"));
+    expect(collectReviewPlainTopLevelSectionNumbers(body.corpus_plain)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8,
+    ]);
+    expect(body.corpus_plain).not.toMatch(/\n10\. /);
+    expect(body.corpus_plain).not.toMatch(/\n11\. /);
+    expect(body.corpus_plain).not.toMatch(/\n12\. /);
+    expect(body.corpus_plain).not.toMatch(/\n13\. /);
+  });
+
+  it("prepare stashes prior accepted id when persist+GET returns a new pending", async () => {
+    const { readAcceptConcurrencyToken } = await import("./canonicalReviewSnapshotApi");
+    const corpus = ("OPERATIVE\n\n" + "x".repeat(600)).trim();
+    const digest = await sha256CorpusDigest(corpus);
+    storeAcceptedReviewSnapshotRef({
+      agreementId: "ag_resume",
+      snapshotId: "crs_commercial",
+      corpusSha256: "f".repeat(64),
+      corpusLength: 1200,
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/canonical-review-snapshot") && method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            snapshot: {
+              snapshot_id: "crs_pending",
+              agreement_id: "ag_resume",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "pending",
+            },
+            accepted_snapshot_id: "crs_commercial",
+            registry_version: 2,
+          }),
+        } as Response;
+      }
+      if (url.includes("/canonical-review-snapshot") && method === "GET") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "pending",
+            snapshot: {
+              snapshot_id: "crs_pending",
+              agreement_id: "ag_resume",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "pending",
+            },
+            accepted_snapshot_id: "crs_commercial",
+            registry_version: 2,
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const prepared = await prepareCommercialReviewSnapshotAuthority({
+      agreementId: "ag_resume",
+      corpusPlain: corpus,
+    });
+    expect(prepared.ok).toBe(true);
+    expect(readAcceptedReviewSnapshotRef("ag_resume")).toBeNull();
+    expect(readAcceptConcurrencyToken("ag_resume")?.snapshotId).toBe("crs_commercial");
+  });
+
+  it("acceptDisplayed recovers 409 pending GET with server token + allow_revision", async () => {
+    const corpus = ("OPERATIVE\n\n" + "y".repeat(600)).trim();
+    const digest = await sha256CorpusDigest(corpus);
+    storeDisplayReviewSnapshotAuthority({
+      agreementId: "4e18814c-c8fe-4eb9-85ae-a3e694cb596e",
+      snapshotId: "crs_pending",
+      corpusSha256: digest,
+      corpusLength: corpus.length,
+      status: "pending",
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/accept") && method === "POST") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          expected_accepted_snapshot_id?: string;
+          allow_revision?: boolean;
+        };
+        if (body.allow_revision && body.expected_accepted_snapshot_id === "crs_commercial") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              accepted: {
+                snapshot_id: "crs_pending",
+                agreement_id: "4e18814c-c8fe-4eb9-85ae-a3e694cb596e",
+                corpus_plain: corpus,
+                corpus_sha256: digest,
+                corpus_length: corpus.length,
+                status: "accepted",
+              },
+            }),
+          } as Response;
+        }
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({
+            detail: { code: "accept_concurrency_conflict" },
+          }),
+        } as Response;
+      }
+      if (url.includes("/canonical-review-snapshot") && method === "GET") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "pending",
+            snapshot: {
+              snapshot_id: "crs_pending",
+              agreement_id: "4e18814c-c8fe-4eb9-85ae-a3e694cb596e",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "pending",
+            },
+            accepted_snapshot_id: "crs_commercial",
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await acceptDisplayedCommercialReviewSnapshot({
+      agreementId: "4e18814c-c8fe-4eb9-85ae-a3e694cb596e",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.code);
+    expect(result.accepted.snapshot_id).toBe("crs_pending");
+    expect(readAcceptedReviewSnapshotRef("4e18814c-c8fe-4eb9-85ae-a3e694cb596e")?.snapshotId).toBe(
+      "crs_pending",
+    );
+    const acceptBodies = fetchMock.mock.calls
+      .filter((c) => String(c[0]).includes("/accept"))
+      .map((c) => JSON.parse(String((c[1] as RequestInit | undefined)?.body ?? "{}")));
+    expect(acceptBodies.length).toBeGreaterThanOrEqual(1);
+    expect(acceptBodies.some((b) => b.allow_revision === true)).toBe(true);
+    expect(acceptBodies.some((b) => b.expected_accepted_snapshot_id === "crs_commercial")).toBe(true);
+    expect(acceptBodies.every((b) => b.corpus_plain === undefined)).toBe(true);
+  });
+
+  it("acceptDisplayed retries once after 409 when GET stays pending", async () => {
+    const corpus = ("OPERATIVE\n\n" + "w".repeat(600)).trim();
+    const digest = await sha256CorpusDigest(corpus);
+    storeDisplayReviewSnapshotAuthority({
+      agreementId: "ag_409",
+      snapshotId: "crs_pending",
+      corpusSha256: digest,
+      corpusLength: corpus.length,
+      status: "pending",
+    });
+    let getCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/accept") && method === "POST") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          expected_accepted_snapshot_id?: string;
+          allow_revision?: boolean;
+        };
+        if (body.allow_revision === true && body.expected_accepted_snapshot_id === "crs_commercial") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              accepted: {
+                snapshot_id: "crs_pending",
+                agreement_id: "ag_409",
+                corpus_plain: corpus,
+                corpus_sha256: digest,
+                corpus_length: corpus.length,
+                status: "accepted",
+              },
+            }),
+          } as Response;
+        }
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({ detail: { code: "accept_concurrency_conflict" } }),
+        } as Response;
+      }
+      if (method === "GET") {
+        getCount += 1;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "pending",
+            snapshot: {
+              snapshot_id: "crs_pending",
+              agreement_id: "ag_409",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "pending",
+            },
+            accepted_snapshot_id: getCount === 1 ? null : "crs_commercial",
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await acceptDisplayedCommercialReviewSnapshot({ agreementId: "ag_409" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.code);
+    expect(result.accepted.status).toBe("accepted");
+    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/accept")).length).toBe(2);
+  });
+
+  it("acceptDisplayed treats matching accepted GET as success without a second accept", async () => {
+    const corpus = ("OPERATIVE\n\n" + "z".repeat(600)).trim();
+    const digest = await sha256CorpusDigest(corpus);
+    storeDisplayReviewSnapshotAuthority({
+      agreementId: "ag_already",
+      snapshotId: "crs_done",
+      corpusSha256: digest,
+      corpusLength: corpus.length,
+      status: "pending",
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/accept")) throw new Error("accept should not run");
+      if (method === "GET") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "accepted",
+            snapshot: {
+              snapshot_id: "crs_done",
+              agreement_id: "ag_already",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "accepted",
+            },
+            accepted_snapshot_id: "crs_done",
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await acceptDisplayedCommercialReviewSnapshot({ agreementId: "ag_already" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.code);
+    expect(result.accepted.snapshot_id).toBe("crs_done");
+    expect(readAcceptedReviewSnapshotRef("ag_already")?.snapshotId).toBe("crs_done");
+  });
+
+  it("acceptDisplayed and ensure fail closed without display / agreement id", async () => {
+    const { ensureAcceptedCommercialReviewForEsignHandoff } = await import(
+      "./canonicalReviewSnapshotApi"
+    );
+    const missingDisplay = await acceptDisplayedCommercialReviewSnapshot({
+      agreementId: "ag_no_display",
+    });
+    expect(missingDisplay.ok).toBe(false);
+    if (!missingDisplay.ok) expect(missingDisplay.code).toBe("display_authority_missing");
+    const missingId = await ensureAcceptedCommercialReviewForEsignHandoff({ agreementId: "" });
+    expect(missingId.ok).toBe(false);
+    if (!missingId.ok) expect(missingId.code).toBe("invalid_accept_args");
   });
 });

@@ -9,8 +9,20 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.agreements.premium_full_draft_section_emit import (
+    SKIPPED_TOP_LEVEL_SECTION_INTEGERS,
+)
+from backend.agreements.review_plain_section_continuity import (
+    collect_review_plain_top_level_section_numbers,
+)
 from backend.main import app
-from backend.services.accepted_review_snapshot import sha256_hex_text
+from backend.services.accepted_review_snapshot import (
+    get_review_hydration_snapshot,
+    is_leftover_starter_accepted_row,
+    leftover_accepted_vs_new_pending_continue,
+    owner_revision_empty_token_latest_pending,
+    sha256_hex_text,
+)
 from backend.services.vs01_signing_envelope_provenance import (
     build_vs01_signing_envelope_provenance,
     fingerprint_agreement_body,
@@ -1004,3 +1016,511 @@ def test_customer_confirmed_answers_round_trip_on_snapshot_create_and_get(monkey
     assert got.status_code == 200, got.text
     assert got.json()["snapshot"]["customer_confirmed_answers"] == answers
     assert got.json()["snapshot"]["corpus_plain"] == corpus.strip()
+
+
+def _pad_snapshot_corpus(plain: str) -> str:
+    body = (plain or "").strip()
+    if len(body) >= 500:
+        return body
+    pad = "Each party shall perform its obligations in good faith. "
+    extra = pad * ((500 - len(body)) // len(pad) + 2)
+    return f"{body}\n\n{extra.strip()}"
+
+
+def _leftover_logo_org1_starter() -> str:
+    """Leftover/starter Logo Design row with unresolved [ORG_1] — not persist Review."""
+    return _pad_snapshot_corpus(
+        "\n".join(
+            [
+                "LOGO DESIGN AGREEMENT",
+                "",
+                "This Logo Design Agreement is entered into by and between Northline Studio "
+                "(Northline) and [ORG_1] (Client).",
+                "",
+                "1. Scope. Designer will create a mark for the unresolved client slot.",
+                "2. Fees. Fees are due as stated on the starter template.",
+                "",
+                "IN WITNESS WHEREOF.",
+            ]
+        )
+    )
+
+
+def _painted_sequential_services_northline_harbor() -> str:
+    from backend.tests.test_review_plain_section_continuity import (
+        _sequential_1_through_12_wrapped_notices,
+    )
+
+    painted = _sequential_1_through_12_wrapped_notices(
+        client="Northline Studio",
+        provider="Harbor Marks LLC",
+        law="Texas",
+        attn_a="Priya Shah",
+        attn_b="Diego Alvarez",
+    ).replace(
+        "design services for a logo and brand kit.",
+        "design services for a logo and brand kit for a total fee of $2,400.",
+    )
+    return _pad_snapshot_corpus(painted)
+
+
+def test_hydration_picker_prefers_pending_persist_over_leftover_accepted():
+    leftover = {
+        "snapshotId": "crs_leftover_logo",
+        "status": "accepted",
+        "createdAt": "2026-08-01T00:00:00Z",
+        "corpusPlain": _leftover_logo_org1_starter(),
+    }
+    painted = {
+        "snapshotId": "crs_painted_services",
+        "status": "pending",
+        "createdAt": "2026-09-01T00:00:00Z",
+        "corpusPlain": _painted_sequential_services_northline_harbor(),
+    }
+    draft = {
+        "accepted_review_snapshot_v1": leftover,
+        "canonical_review_snapshots_v1": {
+            "snapshots": {
+                "crs_leftover_logo": leftover,
+                "crs_painted_services": painted,
+            },
+            "acceptedSnapshotId": "crs_leftover_logo",
+        },
+    }
+    picked = get_review_hydration_snapshot(draft)
+    assert picked is not None
+    assert picked["snapshotId"] == "crs_painted_services"
+    assert picked["corpusPlain"].startswith("SERVICES AGREEMENT")
+    assert "LOGO DESIGN AGREEMENT" not in picked["corpusPlain"]
+    assert "[ORG_1]" not in picked["corpusPlain"]
+
+    accepted_only = {
+        "accepted_review_snapshot_v1": leftover,
+        "canonical_review_snapshots_v1": {
+            "snapshots": {"crs_leftover_logo": leftover},
+            "acceptedSnapshotId": "crs_leftover_logo",
+        },
+    }
+    fallback = get_review_hydration_snapshot(accepted_only)
+    assert fallback is not None
+    assert fallback["snapshotId"] == "crs_leftover_logo"
+
+
+def test_get_after_persist_returns_written_snapshot_not_leftover_accepted(
+    monkeypatch, tmp_path
+):
+    """POST painted sequential persist Review; GET must return that same written row."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    leftover = _leftover_logo_org1_starter()
+    leftover_accepted = _persist_and_accept(client, aid, leftover)
+    assert leftover_accepted["snapshot_id"]
+    assert leftover.startswith("LOGO DESIGN AGREEMENT")
+    assert "[ORG_1]" in leftover
+
+    painted = _painted_sequential_services_northline_harbor()
+    assert painted.startswith("SERVICES AGREEMENT")
+    assert "Northline Studio" in painted and "Harbor Marks LLC" in painted
+    assert "Texas" in painted
+    assert "$2,400" in painted
+    assert collect_review_plain_top_level_section_numbers(painted) == list(range(1, 13))
+    assert "LOGO DESIGN AGREEMENT" not in painted
+    assert "[ORG_1]" not in painted
+
+    posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={
+            "corpus_plain": painted,
+            "generation_session_id": "gen_persist_get_written",
+            "claimed_digest": sha256_hex_text(painted),
+        },
+    )
+    assert posted.status_code == 200, posted.text
+    snap = posted.json()["snapshot"]
+    assert snap["snapshot_id"] != leftover_accepted["snapshot_id"]
+    assert (snap.get("corpus_plain") or "").strip() == painted
+
+    got = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got.status_code == 200, got.text
+    body = got.json()
+    retrieved = body["snapshot"]
+    corpus = (retrieved.get("corpus_plain") or "").strip()
+    assert retrieved["snapshot_id"] == snap["snapshot_id"]
+    assert retrieved["corpus_sha256"] == snap["corpus_sha256"]
+    assert retrieved["corpus_length"] == snap["corpus_length"]
+    assert corpus == painted
+    assert corpus.startswith("SERVICES AGREEMENT")
+    assert "Northline Studio" in corpus and "Harbor Marks LLC" in corpus
+    assert "LOGO DESIGN AGREEMENT" not in corpus
+    assert "[ORG_1]" not in corpus
+    assert retrieved["snapshot_id"] != leftover_accepted["snapshot_id"]
+
+
+def test_leftover_starter_row_classifier_is_logo_org1_not_painted_services():
+    leftover = {
+        "status": "accepted",
+        "corpusPlain": _leftover_logo_org1_starter(),
+    }
+    painted = {
+        "status": "pending",
+        "corpusPlain": _painted_sequential_services_northline_harbor(),
+    }
+    commercial = {
+        "status": "accepted",
+        "corpusPlain": _corpus("COMMERCIAL"),
+    }
+    assert is_leftover_starter_accepted_row(leftover) is True
+    assert is_leftover_starter_accepted_row(painted) is False
+    assert is_leftover_starter_accepted_row(commercial) is False
+    assert "[ORG_1]" in leftover["corpusPlain"]
+    assert leftover["corpusPlain"].startswith("LOGO DESIGN AGREEMENT")
+    assert painted["corpusPlain"].startswith("SERVICES AGREEMENT")
+    assert "[ORG_1]" not in painted["corpusPlain"]
+
+    leftover["snapshotId"] = "crs_leftover_logo"
+    painted["snapshotId"] = "crs_painted_services"
+    painted["createdAt"] = "2026-09-01T00:00:00Z"
+    leftover["createdAt"] = "2026-08-01T00:00:00Z"
+    reg = {
+        "acceptedSnapshotId": "crs_leftover_logo",
+        "snapshots": {
+            "crs_leftover_logo": leftover,
+            "crs_painted_services": painted,
+        },
+    }
+    assert leftover_accepted_vs_new_pending_continue(
+        registry=reg, accepting_snapshot=painted
+    ) is True
+    assert leftover_accepted_vs_new_pending_continue(
+        registry=reg, accepting_snapshot=leftover
+    ) is False
+    commercial["snapshotId"] = "crs_commercial"
+    commercial_reg = {
+        "acceptedSnapshotId": "crs_commercial",
+        "snapshots": {
+            "crs_commercial": commercial,
+            "crs_painted_services": painted,
+        },
+    }
+    assert leftover_accepted_vs_new_pending_continue(
+        registry=commercial_reg, accepting_snapshot=painted
+    ) is False
+
+    commercial["status"] = "accepted"
+    painted["status"] = "pending"
+    assert owner_revision_empty_token_latest_pending(
+        registry=commercial_reg,
+        accepting_snapshot=painted,
+        allow_revision=True,
+        expected_token="",
+    ) is True
+    assert owner_revision_empty_token_latest_pending(
+        registry=commercial_reg,
+        accepting_snapshot=painted,
+        allow_revision=False,
+        expected_token="",
+    ) is False
+    assert leftover_accepted_vs_new_pending_continue(
+        registry=commercial_reg, accepting_snapshot=painted
+    ) is False
+
+
+def test_accept_pending_persist_succeeds_over_leftover_accepted_logo_org1(
+    monkeypatch, tmp_path
+):
+    """POST painted sequential Review, GET matches, accept 200 despite leftover accepted."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    leftover = _leftover_logo_org1_starter()
+    leftover_accepted = _persist_and_accept(client, aid, leftover)
+    assert leftover_accepted["snapshot_id"]
+    assert leftover.startswith("LOGO DESIGN AGREEMENT")
+    assert "[ORG_1]" in leftover
+
+    painted = _painted_sequential_services_northline_harbor()
+    assert painted.startswith("SERVICES AGREEMENT")
+    assert "Northline Studio" in painted and "Harbor Marks LLC" in painted
+    assert collect_review_plain_top_level_section_numbers(painted) == list(range(1, 13))
+    assert "LOGO DESIGN AGREEMENT" not in painted
+    assert "[ORG_1]" not in painted
+
+    posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={
+            "corpus_plain": painted,
+            "generation_session_id": "gen_leftover_accept_continue",
+            "claimed_digest": sha256_hex_text(painted),
+        },
+    )
+    assert posted.status_code == 200, posted.text
+    snap = posted.json()["snapshot"]
+    assert snap["snapshot_id"] != leftover_accepted["snapshot_id"]
+    assert (snap.get("corpus_plain") or "").strip() == painted
+
+    got_pending = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got_pending.status_code == 200, got_pending.text
+    pending_body = got_pending.json()
+    pending = pending_body["snapshot"]
+    assert pending_body.get("status") == "pending"
+    assert pending["snapshot_id"] == snap["snapshot_id"]
+    assert (pending.get("corpus_plain") or "").strip() == painted
+
+    # Live Continue after persist+GET sends empty expected (leftover ref cleared).
+    accepted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": snap["snapshot_id"],
+            "expected_digest": snap["corpus_sha256"],
+            "expected_accepted_snapshot_id": "",
+            "display_snapshot_id": snap["snapshot_id"],
+            "display_digest": snap["corpus_sha256"],
+            "display_length": snap["corpus_length"],
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    accepted_snap = accepted.json()["accepted"]
+    assert accepted_snap["snapshot_id"] == snap["snapshot_id"]
+    assert accepted_snap["status"] == "accepted"
+    assert (accepted_snap.get("corpus_plain") or "").strip() == painted
+
+    got_accepted = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got_accepted.status_code == 200, got_accepted.text
+    after = got_accepted.json()
+    after_snap = after["snapshot"]
+    after_corpus = (after_snap.get("corpus_plain") or "").strip()
+    assert after.get("status") == "accepted"
+    assert after_snap["snapshot_id"] == snap["snapshot_id"]
+    assert after_corpus == painted
+    assert after_corpus.startswith("SERVICES AGREEMENT")
+    assert "Northline Studio" in after_corpus and "Harbor Marks LLC" in after_corpus
+    assert "LOGO DESIGN AGREEMENT" not in after_corpus
+    assert "[ORG_1]" not in after_corpus
+    assert after_snap["snapshot_id"] != leftover_accepted["snapshot_id"]
+
+
+def test_real_commercial_accepted_still_blocks_empty_token_pending_accept(
+    monkeypatch, tmp_path
+):
+    """Non-leftover accepted commercial still owns accept; expected='' of a later pending 409s."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    first = _corpus("COMMERCIAL")
+    accepted = _persist_and_accept(client, aid, first)
+    later = _corpus("REVISION")
+    posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": later, "claimed_digest": sha256_hex_text(later)},
+    )
+    assert posted.status_code == 200, posted.text
+    later_snap = posted.json()["snapshot"]
+    blocked = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": later_snap["snapshot_id"],
+            "expected_digest": later_snap["corpus_sha256"],
+            "expected_accepted_snapshot_id": "",
+            "allow_revision": False,
+        },
+    )
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["detail"]["code"] in {
+        "accept_concurrency_conflict",
+        "different_snapshot_already_accepted",
+    }
+    got = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got.status_code == 200
+    # Latest pending still hydrates; accepted commercial row is unchanged.
+    assert got.json()["snapshot"]["snapshot_id"] == later_snap["snapshot_id"]
+    from backend.services.agreement_draft_store import load_draft
+
+    draft = load_draft(aid)
+    assert draft["accepted_review_snapshot_v1"]["snapshotId"] == accepted["snapshot_id"]
+    assert draft["accepted_review_snapshot_v1"]["corpusPlain"] == first.strip()
+
+
+def test_resume_continue_accepts_latest_pending_over_commercial_with_allow_revision(
+    monkeypatch, tmp_path
+):
+    """Resume Screen 2 Continue: persist+GET clears local token; allow_revision recovers."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    first = _corpus("COMMERCIAL")
+    accepted = _persist_and_accept(client, aid, first)
+    later = _corpus("SIGNER_APPLIED")
+    posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": later, "claimed_digest": sha256_hex_text(later)},
+    )
+    assert posted.status_code == 200, posted.text
+    later_snap = posted.json()["snapshot"]
+    assert posted.json().get("accepted_snapshot_id") == accepted["snapshot_id"]
+
+    got_pending = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got_pending.status_code == 200, got_pending.text
+    pending_body = got_pending.json()
+    assert pending_body.get("status") == "pending"
+    assert pending_body["snapshot"]["snapshot_id"] == later_snap["snapshot_id"]
+    assert pending_body.get("accepted_snapshot_id") == accepted["snapshot_id"]
+
+    recovered = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": later_snap["snapshot_id"],
+            "expected_digest": later_snap["corpus_sha256"],
+            "expected_accepted_snapshot_id": "",
+            "allow_revision": True,
+            "display_snapshot_id": later_snap["snapshot_id"],
+            "display_digest": later_snap["corpus_sha256"],
+            "display_length": later_snap["corpus_length"],
+        },
+    )
+    assert recovered.status_code == 200, recovered.text
+    recovered_snap = recovered.json()["accepted"]
+    assert recovered_snap["snapshot_id"] == later_snap["snapshot_id"]
+    assert recovered_snap["status"] == "accepted"
+
+    got_accepted = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got_accepted.status_code == 200, got_accepted.text
+    after = got_accepted.json()
+    assert after.get("status") == "accepted"
+    assert after["snapshot"]["snapshot_id"] == later_snap["snapshot_id"]
+    assert after.get("accepted_snapshot_id") == later_snap["snapshot_id"]
+    assert (after["snapshot"].get("corpus_plain") or "").strip() == later.strip()
+
+
+def test_resume_continue_accept_with_server_accepted_token_and_allow_revision(
+    monkeypatch, tmp_path
+):
+    """Client recovery: GET accepted_snapshot_id + allow_revision accepts latest pending."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    first = _corpus("COMMERCIAL")
+    accepted = _persist_and_accept(client, aid, first)
+    later = _corpus("RESUME_CONTINUE")
+    posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": later, "claimed_digest": sha256_hex_text(later)},
+    )
+    assert posted.status_code == 200, posted.text
+    later_snap = posted.json()["snapshot"]
+    got = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got.status_code == 200
+    assert got.json().get("status") == "pending"
+    token = got.json().get("accepted_snapshot_id")
+    assert token == accepted["snapshot_id"]
+
+    recovered = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": later_snap["snapshot_id"],
+            "expected_digest": later_snap["corpus_sha256"],
+            "expected_accepted_snapshot_id": token,
+            "allow_revision": True,
+            "display_snapshot_id": later_snap["snapshot_id"],
+            "display_digest": later_snap["corpus_sha256"],
+            "display_length": later_snap["corpus_length"],
+        },
+    )
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()["accepted"]["snapshot_id"] == later_snap["snapshot_id"]
+
+
+def test_owner_revision_empty_token_still_requires_latest_pending(monkeypatch, tmp_path):
+    """allow_revision + expected='' cannot accept a stale pending when a newer pending exists."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    first = _corpus("COMMERCIAL")
+    _persist_and_accept(client, aid, first)
+    mid = _corpus("MID")
+    mid_posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": mid, "claimed_digest": sha256_hex_text(mid)},
+    )
+    assert mid_posted.status_code == 200, mid_posted.text
+    mid_snap = mid_posted.json()["snapshot"]
+    later = _corpus("LATEST")
+    later_posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": later, "claimed_digest": sha256_hex_text(later)},
+    )
+    assert later_posted.status_code == 200, later_posted.text
+
+    blocked = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": mid_snap["snapshot_id"],
+            "expected_digest": mid_snap["corpus_sha256"],
+            "expected_accepted_snapshot_id": "",
+            "allow_revision": True,
+        },
+    )
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["detail"]["code"] == "accept_concurrency_conflict"
+
+
+def test_persist_route_still_refuses_true_12_then_14(monkeypatch, tmp_path):
+    from backend.tests.test_review_plain_section_continuity import _twelve_then_fourteen
+
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    skipped = _pad_snapshot_corpus(
+        _twelve_then_fourteen(client="Cedar Ridge LLC", provider="Maple Grove Inc")
+    )
+    assert collect_review_plain_top_level_section_numbers(skipped) != list(
+        range(1, len(collect_review_plain_top_level_section_numbers(skipped)) + 1)
+    )
+    refused = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": skipped, "claimed_digest": sha256_hex_text(skipped)},
+    )
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["detail"]["code"] == SKIPPED_TOP_LEVEL_SECTION_INTEGERS
+
+
+def test_leftover_1_through_8_persist_get_stays_1_through_8(monkeypatch, tmp_path):
+    from backend.tests.test_review_plain_section_continuity import _leftover_eight_section
+
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    leftover = _pad_snapshot_corpus(
+        _leftover_eight_section(client="Summit Craft Co", provider="Harborline Design LLC")
+    )
+    assert collect_review_plain_top_level_section_numbers(leftover) == list(range(1, 9))
+    posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": leftover, "claimed_digest": sha256_hex_text(leftover)},
+    )
+    assert posted.status_code == 200, posted.text
+    snap = posted.json()["snapshot"]
+    got = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got.status_code == 200, got.text
+    corpus = (got.json()["snapshot"].get("corpus_plain") or "").strip()
+    assert got.json()["snapshot"]["snapshot_id"] == snap["snapshot_id"]
+    nums = collect_review_plain_top_level_section_numbers(corpus)
+    assert nums == list(range(1, 9))
+    assert 10 not in nums
+    assert 11 not in nums
+    assert 12 not in nums
+    assert 13 not in nums

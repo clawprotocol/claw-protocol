@@ -22,6 +22,22 @@ export type CheckoutFlowProgress = {
 };
 
 /**
+ * Free→Pro / create-flow checkout: last-good Monthly+Annual chooser.
+ * Historically keyed only on `CREATE_FLOW_CHECKOUT_AGREEMENT_ID`. Continue with Pro now
+ * keeps a real persisted agreement ID in the path and still returns to `/app/create`.
+ */
+export function isCreateFlowAgreementCheckout(params: {
+  agreementId: string;
+  isSingleAgreementCheckout: boolean;
+  returnTo: string;
+}): boolean {
+  if (params.isSingleAgreementCheckout) return false;
+  if (params.agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID) return true;
+  const path = (params.returnTo || "").trim().split("?")[0] || "";
+  return path === "/app/create" || path.startsWith("/app/create/");
+}
+
+/**
  * Checkout stepper: never mark Send complete or Sign active while the user is only paying to upgrade.
  * Starter create-flow checkout highlights Upgrade; send-path checkouts highlight Send.
  */
@@ -30,8 +46,7 @@ export function resolveCheckoutFlowProgress(params: {
   isSingleAgreementCheckout: boolean;
   returnTo: string;
 }): CheckoutFlowProgress {
-  const isCreateAgreementCheckout =
-    params.agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID && !params.isSingleAgreementCheckout;
+  const isCreateAgreementCheckout = isCreateFlowAgreementCheckout(params);
 
   if (isCreateAgreementCheckout) {
     return {

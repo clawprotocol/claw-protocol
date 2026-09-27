@@ -123,6 +123,28 @@ export function hasAuthoritativeSigningSnapshot(): boolean {
   return Boolean(authoritativeSigningSnapshot?.corpus?.trim());
 }
 
+/**
+ * Remount restore — reinstall an already-persisted signing snapshot into this tab.
+ * Does not POST frozen-signing-authority or rewrite persist. Last-good after hard refresh
+ * when accept + frozen authority already succeeded in a prior session.
+ */
+export function installAuthoritativeSigningSnapshotFromPersist(
+  snapshot: AuthoritativeSigningSnapshot,
+): AuthoritativeSigningSnapshot {
+  const corpus = (snapshot.corpus || "").trim();
+  if (!corpus) return snapshot;
+  if (authoritativeSigningSnapshot?.corpus?.trim()) {
+    return authoritativeSigningSnapshot;
+  }
+  authoritativeSigningSnapshot = { ...snapshot, corpus };
+  authorityPhase = "SIGNER_METADATA_FINALIZED";
+  setPaidProPinnedSignerAppliedCorpus(corpus);
+  const authority = buildSnapshotPaidProSignerMetadataAuthority();
+  if (authority) setConsumedPaidProSignerMetadataAuthority(authority);
+  logSnapshotConsumed({ reason: "paid_return_remount_restore", hash: authoritativeSigningSnapshot.hash });
+  return authoritativeSigningSnapshot;
+}
+
 export function getAuthoritativeSigningSnapshot(): AuthoritativeSigningSnapshot | null {
   return authoritativeSigningSnapshot;
 }

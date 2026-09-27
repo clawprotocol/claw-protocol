@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import secrets
+import threading
+import time
 import uuid
 from typing import Any, Dict, Optional, Set
 
@@ -33,9 +36,11 @@ from backend.security.supabase_jwt import (
 )
 from backend.security.workspace_identity import verify_anonymous_session_from_request, extract_anonymous_session_token
 from backend.security.safe_redirect import (
+    CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
     build_destination_with_agreement,
-    is_approved_server_quick_pdf_return,
     canonicalize_quick_pdf_return,
+    extract_agreement_id_from_app_path,
+    is_approved_server_quick_pdf_return,
     resolve_safe_redirect_path,
 )
 from backend.config.deployment_runtime import claw_environment
@@ -44,6 +49,13 @@ from backend.admin_console.store import get_admin_console_store
 
 router = APIRouter(prefix="/v1/workspace", tags=["workspace-auth"])
 _log = logging.getLogger("claw.workspace_auth")
+
+# Repeat AuthProvider polls must not re-run identity upsert / billing init_schema.
+# First successful already-bound bind is cached briefly; claim/repair signals bypass.
+_BIND_NOOP_TTL_SECONDS = 45.0
+_bind_noop_lock = threading.Lock()
+_bind_noop_until: Dict[str, float] = {}
+_bind_noop_payload: Dict[str, Dict[str, Any]] = {}
 
 
 def _safe_identity_from_request(
@@ -92,7 +104,6 @@ def _persist_workspace_user_identity(
     em, dn = _safe_identity_from_request(request, email=email, display_name=display_name)
     try:
         store = get_admin_console_store()
-        store.init_schema()
         store.upsert_workspace_user_identity(
             user_id=user_id,
             org_id=org_id,
@@ -146,10 +157,111 @@ def _stable_org_id_for_user(user_id: str) -> str:
     return f"user-{uid}"
 
 
+def reset_bind_user_org_noop_cache_for_tests() -> None:
+    """Clear the already-bound bind TTL so unit tests see a fresh first bind."""
+    with _bind_noop_lock:
+        _bind_noop_until.clear()
+        _bind_noop_payload.clear()
+
+
+def _bind_noop_payload_for(user_id: str, org_id: str) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "org_id": org_id,
+        "user_id": user_id,
+        "migrated_agreement_count": 0,
+        "migrated_agreement_ids": [],
+        "billing_migrated": False,
+        "claim_method": None,
+    }
+
+
+def _peek_bind_noop_cache(user_id: str) -> Optional[Dict[str, Any]]:
+    uid = (user_id or "").strip()
+    if not uid:
+        return None
+    now = time.monotonic()
+    with _bind_noop_lock:
+        until = _bind_noop_until.get(uid, 0.0)
+        if until <= now:
+            _bind_noop_until.pop(uid, None)
+            _bind_noop_payload.pop(uid, None)
+            return None
+        cached = _bind_noop_payload.get(uid)
+        return dict(cached) if cached else None
+
+
+def _store_bind_noop_cache(user_id: str, org_id: str) -> None:
+    uid = (user_id or "").strip()
+    if not uid:
+        return
+    now = time.monotonic()
+    with _bind_noop_lock:
+        stale = [key for key, exp in _bind_noop_until.items() if exp <= now]
+        for key in stale:
+            _bind_noop_until.pop(key, None)
+            _bind_noop_payload.pop(key, None)
+        _bind_noop_until[uid] = now + _BIND_NOOP_TTL_SECONDS
+        _bind_noop_payload[uid] = _bind_noop_payload_for(uid, org_id)
+
+
+def _bind_claim_or_repair_requested(
+    *,
+    request: Request,
+    body: BindUserOrgIn,
+    org_id: str,
+) -> bool:
+    """True when leftover-anon / previous org / billing-repair signals require the full path."""
+    prev = (body.previous_org_id or "").strip()
+    if prev and prev != org_id:
+        return True
+    if (body.subscription_source_org_id or "").strip():
+        return True
+    for raw in body.entitlement_repair_candidates or []:
+        if str(raw or "").strip():
+            return True
+    return bool(_live_leftover_anon_org(request))
+
+
 def _is_claimable_draft_source_org(org_id: str) -> bool:
     """Only server-minted anonymous workspaces may transfer draft ownership."""
     oid = (org_id or "").strip()
     return bool(oid.startswith("anon-"))
+
+
+def _live_leftover_anon_org(request: Request) -> str:
+    """Same-tab leftover anonymous org, if the session is still claimable."""
+    if not extract_anonymous_session_token(request):
+        return ""
+    try:
+        row = verify_anonymous_session_from_request(request)
+    except HTTPException:
+        return ""
+    org = str(row.get("org_id") or "").strip()
+    if org and _is_claimable_draft_source_org(org):
+        return org
+    return ""
+
+
+def _claim_source_org_for_unpaid_converter(
+    *,
+    request: Request,
+    dest_path: str,
+    continuation_org: str,
+    target_org_id: str,
+) -> str:
+    """Claim leftover-anon drafts for the unpaid converter — never a user-* workspace.
+
+    dest_path is unused: a stale checkout UUID must not choose the claim source.
+    Leftover-anon of this tab is the only eligible source.
+    """
+    leftover = _live_leftover_anon_org(request)
+    prev = (continuation_org or "").strip()
+    if leftover and leftover != target_org_id:
+        return leftover
+    if prev and prev != target_org_id and _is_claimable_draft_source_org(prev):
+        return prev
+    return ""
 
 
 def _assert_claimable_previous_org(previous_org_id: str, target_org_id: str) -> None:
@@ -188,17 +300,6 @@ def _attach_anon_session_cookie(*, response: Response, request: Request, token: 
     )
 
 
-def _target_can_import_guest_drafts(target_org_id: str) -> bool:
-    """Import guest drafts into a workspace only after Pro entitlement."""
-    from backend.usage_economics.commercial_entitlement import (
-        STATE_PRO,
-        resolve_commercial_entitlement,
-    )
-
-    decision = resolve_commercial_entitlement(f"org:{(target_org_id or '').strip()}")
-    return str(decision.get("state") or "") == STATE_PRO
-
-
 def _migrate_drafts_for_claim(
     *,
     prev_org_id: str,
@@ -212,23 +313,12 @@ def _migrate_drafts_for_claim(
     migrated_agreements = ustore.list_agreement_ids_for_subject(from_subject)
     if not migrated_agreements:
         return []
-    if not _target_can_import_guest_drafts(target_org_id):
-        _log.info(
-            "guest_draft_import_deferred prev=%s target=%s count=%s reason=entitlement_required",
-            prev_org_id,
-            target_org_id,
-            len(migrated_agreements),
-        )
-        ustore.emit_event(
-            subject_ref=to_subject,
-            event_type="guest_draft_import_deferred",
-            payload={
-                "claim_method": claim_method,
-                "previous_org_id": prev_org_id,
-                "pending_count": len(migrated_agreements),
-            },
-        )
-        return []
+    # Always claim ownership immediately upon authentication. Entitlement checks
+    # gate what the user can DO with agreements (send, advanced features, etc.),
+    # not whether they can read their own agreements. Deferring ownership transfer
+    # until Pro entitlement breaks the auth flow: authenticated users receive 403
+    # on GET when trying to read their own agreement because ownership stayed on
+    # the anonymous org.
     claimed = ustore.record_agreements_claimed(
         agreement_ids=migrated_agreements,
         to_subject_ref=to_subject,
@@ -449,8 +539,17 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
     purpose = str(cont_row.get("auth_purpose") or "").strip().lower()
     is_returning = purpose in ("returning_sign_in", "dashboard", "quick_pdf_return") or str(cont_row.get("session_id") or "") == "returning"
 
-    prev_org = str(cont_row.get("org_id") or "").strip()
-    ensure_organization(org_id, name=user_id)
+    dest_path = str(cont_row.get("destination_path") or "/app")
+    prev_org = _claim_source_org_for_unpaid_converter(
+        request=request,
+        dest_path=dest_path,
+        continuation_org=str(cont_row.get("org_id") or ""),
+        target_org_id=org_id,
+    )
+    try:
+        ensure_organization(org_id, name=user_id)
+    except Exception:
+        _log.warning("ensure_organization_fail_soft org_id=%s", org_id)
     _persist_workspace_user_identity(
         request,
         user_id=user_id,
@@ -461,23 +560,26 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
     )
 
     migrated: list[str] = []
-    if not is_returning and prev_org and prev_org != org_id:
+    if prev_org and prev_org != org_id:
         if not anon_row:
-            raise HTTPException(status_code=401, detail={"code": "anonymous_session_required"})
-        if str(anon_row.get("session_id") or "") != str(cont_row.get("session_id") or ""):
-            raise HTTPException(status_code=403, detail={"code": "continuation_session_mismatch"})
-        _assert_claimable_previous_org(prev_org, org_id)
-        pending_before = get_usage_economics_store().list_agreement_ids_for_subject(f"org:{prev_org}")
-        migrated = _migrate_drafts_for_claim(
-            prev_org_id=prev_org,
-            target_org_id=org_id,
-            claim_method=claim_method,
-        )
-        # Keep the anon session claimable when import is deferred until Genesis/Pro.
-        if migrated or not pending_before:
-            store.mark_session_claimed(session_id=str(anon_row.get("session_id") or ""), user_id=user_id)
-    elif is_returning:
-        prev_org = ""
+            if is_returning:
+                prev_org = ""
+            else:
+                raise HTTPException(status_code=401, detail={"code": "anonymous_session_required"})
+        else:
+            if not is_returning:
+                if str(anon_row.get("session_id") or "") != str(cont_row.get("session_id") or ""):
+                    raise HTTPException(status_code=403, detail={"code": "continuation_session_mismatch"})
+            _assert_claimable_previous_org(prev_org, org_id)
+            pending_before = get_usage_economics_store().list_agreement_ids_for_subject(f"org:{prev_org}")
+            migrated = _migrate_drafts_for_claim(
+                prev_org_id=prev_org,
+                target_org_id=org_id,
+                claim_method=claim_method,
+            )
+            # Keep the anon session claimable when import is deferred until Genesis/Pro.
+            if migrated or not pending_before:
+                store.mark_session_claimed(session_id=str(anon_row.get("session_id") or ""), user_id=user_id)
 
     billing_migrated = _repair_billing_after_bind(
         user_id=user_id,
@@ -489,24 +591,27 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
     )
     store.consume_continuation(continuation_id=body.continuation_id.strip(), user_id=user_id)
 
+    dest_aid = extract_agreement_id_from_app_path(dest_path) or ""
+    cont_aid = str(cont_row.get("agreement_id") or "").strip()
+    if cont_aid == CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
+        cont_aid = ""
+    # Pre-auth continuation id is the conversion agreement. A dest_path remint
+    # (36568b4c-style stale/foreign UUID) must not become checkout dest.
+    pre_auth = cont_aid or dest_aid
+    pin_aid = pre_auth
+    if dest_aid and migrated and dest_aid not in migrated:
+        if pre_auth in migrated:
+            pin_aid = pre_auth
+        else:
+            pin_aid = migrated[0]
+    elif dest_aid and dest_aid != pre_auth and pre_auth:
+        pin_aid = pre_auth
+    elif not pin_aid and migrated:
+        pin_aid = migrated[0]
     dest = build_destination_with_agreement(
-        destination_path=str(cont_row.get("destination_path") or "/app"),
-        agreement_id=str(cont_row.get("agreement_id") or "") or None,
+        destination_path=dest_path,
+        agreement_id=pin_aid or None,
     )
-    ustore = get_usage_economics_store()
-    ustore.init_schema()
-    if cont_row.get("agreement_id"):
-        owner = ustore.owner_subject_for_agreement(str(cont_row["agreement_id"]))
-        if owner and owner != f"org:{org_id}":
-            # Guest import may be deferred until Genesis/Pro; ownership stays on prev org.
-            deferred_ok = (
-                bool(prev_org)
-                and not migrated
-                and owner == f"org:{prev_org}"
-                and not _target_can_import_guest_drafts(org_id)
-            )
-            if not deferred_ok:
-                raise HTTPException(status_code=403, detail={"code": "post_claim_agreement_mismatch"})
 
     return {
         "ok": True,
@@ -565,16 +670,15 @@ def _repair_billing_after_bind(
         return False
 
 
-@router.post("/bind-user-org")
-async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]:
-    user_id = require_supabase_user_id(request)
-    if body.user_id.strip() != user_id:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "user_id_mismatch", "message": "Authenticated user mismatch."},
-        )
-    org_id = _stable_org_id_for_user(user_id)
-    display = (body.display_name or body.email or "LawDog workspace").strip()[:200]
+def _bind_user_org_uncached(
+    request: Request,
+    body: BindUserOrgIn,
+    *,
+    user_id: str,
+    org_id: str,
+    display: str,
+    cache_noop_on_success: bool,
+) -> Dict[str, Any]:
     claim_method = (body.claim_method or "unknown").strip()[:64]
     slug, intent, candidate = _normalize_genesis_dog_onboarding(
         community_slug=body.community_slug,
@@ -582,7 +686,10 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
         affiliate_candidate=body.affiliate_candidate,
     )
 
-    ensure_organization(org_id, name=display)
+    try:
+        ensure_organization(org_id, name=display)
+    except Exception:
+        _log.warning("ensure_organization_fail_soft org_id=%s", org_id)
     _persist_workspace_user_identity(
         request,
         user_id=user_id,
@@ -596,6 +703,12 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
 
     migrated_agreements: list[str] = []
     prev = (body.previous_org_id or "").strip()
+    # Org already bound (previous_org_id is user-*) still claims same-session
+    # leftover-anon remints. No Pro yet is not another workspace.
+    if not prev or prev == org_id:
+        leftover = _live_leftover_anon_org(request)
+        if leftover and leftover != org_id:
+            prev = leftover
     if prev and prev != org_id:
         if _is_claimable_draft_source_org(prev):
             ustore = get_usage_economics_store()
@@ -640,6 +753,8 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
         require_anon_source_match=True,
     )
 
+    if cache_noop_on_success:
+        _store_bind_noop_cache(user_id, org_id)
     return {
         "ok": True,
         "org_id": org_id,
@@ -649,6 +764,37 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
         "billing_migrated": billing_migrated,
         "claim_method": claim_method if migrated_agreements else None,
     }
+
+
+@router.post("/bind-user-org")
+async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]:
+    user_id = require_supabase_user_id(request)
+    if body.user_id.strip() != user_id:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "user_id_mismatch", "message": "Authenticated user mismatch."},
+        )
+    org_id = _stable_org_id_for_user(user_id)
+    display = (body.display_name or body.email or "LawDog workspace").strip()[:200]
+    claim_or_repair = _bind_claim_or_repair_requested(request=request, body=body, org_id=org_id)
+    if not claim_or_repair:
+        cached = _peek_bind_noop_cache(user_id)
+        if cached is not None:
+            try:
+                ensure_organization(org_id, name=display)
+            except Exception:
+                _log.warning("ensure_organization_fail_soft org_id=%s", org_id)
+            return cached
+
+    return await asyncio.to_thread(
+        _bind_user_org_uncached,
+        request,
+        body,
+        user_id=user_id,
+        org_id=org_id,
+        display=display,
+        cache_noop_on_success=not claim_or_repair,
+    )
 
 
 @router.post("/demo-activate-subscription")

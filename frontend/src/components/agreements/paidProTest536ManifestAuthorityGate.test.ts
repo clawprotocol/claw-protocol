@@ -239,6 +239,38 @@ describe("TEST536 — authoritative intake manifest party count", () => {
     ).not.toThrow();
   });
 
+  it("does not mismatch-reject a usable N=4 commercial corpus when leftover prep is 2-party", () => {
+    const corpus = [
+      "PROFESSIONAL TECHNOLOGY SERVICES AND AI IMPLEMENTATION AGREEMENT",
+      "",
+      `This Agreement is entered into by and among ${CANONICAL_FOUR.join(", ")}.`,
+      "",
+      "1. SCOPE. The parties shall perform the professional services described herein.",
+      "2. FEES. Total project fee is $450,000 payable in milestone installments.",
+      "3. TERM. Eighteen months with ninety days of post-launch support.",
+      "4. CONFIDENTIALITY. Each party shall protect confidential information.",
+      "5. IP. Work product ownership follows the assigned workstreams.",
+      "6. LIABILITY. Limitation of liability applies except for confidentiality breach.",
+      "7. GOVERNING LAW. Delaware law governs.",
+      "",
+    ].join("\n");
+    const pad =
+      "The parties shall cooperate in good faith on deliverables, reporting, and commercial milestones. ";
+    let body = corpus;
+    while (body.length < 15_381) body += pad;
+    for (const name of CANONICAL_FOUR) {
+      expect(body).toContain(name);
+    }
+    const leftoverTwo = makePrep([TEST518_REDWOOD, TEST518_SUMMIT]);
+    expect(() =>
+      assertPaidProFreezeCandidateManifestCountAgreement(leftoverTwo, {
+        text: body,
+        intakeText: TEST536_SIGNER_BLOCK_INTAKE,
+        draft: draftWith([TEST518_REDWOOD, TEST518_SUMMIT]),
+      }),
+    ).not.toThrow();
+  });
+
   // Guard: 2-party intakes are outside the multi-party manifest gate (no over-reach).
   it("does not activate the manifest gate for non-multi-party intakes", () => {
     const twoPartyIntake =

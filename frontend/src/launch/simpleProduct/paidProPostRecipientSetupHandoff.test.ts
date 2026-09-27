@@ -21,6 +21,7 @@ describe("paidProPostRecipientSetupHandoff", () => {
     expect(s).toContain("resolvePaidSessionSignatureTrackHandoff");
     expect(s).toContain("mergePaidSessionSignatureTrackDraft");
     expect(s).toContain("relaxPaidSessionCorpusAssert: options.relaxPaidSessionCorpusAssert");
+    expect(s).toContain('userMessage: "We could not open the e-sign workspace. Try again in a moment."');
     expect(s).toContain("assertGuidedProVs01BridgeCorpusReady");
     expect(s).toContain("resolveGuidedVs01SigningHandoffForBridge");
     expect(s).toContain("mergeAgreementDraftWithGuidedSigningHandoff");

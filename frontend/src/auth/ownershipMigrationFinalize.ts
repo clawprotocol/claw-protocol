@@ -27,10 +27,11 @@ export function resolveCanonicalMigratedAgreementId(args: {
   const prior = (args.priorClientAgreementId || readCreateReviewAgreementResumeId() || "").trim();
 
   if (migrated.length === 0) {
-    return continuation || prior || null;
+    // Do not adopt a stale/foreign continuation UUID when nothing was claimed.
+    return prior || null;
   }
-  if (continuation && migrated.includes(continuation)) return continuation;
   if (prior && migrated.includes(prior)) return prior;
+  if (continuation && migrated.includes(continuation)) return continuation;
   return migrated[0] ?? null;
 }
 

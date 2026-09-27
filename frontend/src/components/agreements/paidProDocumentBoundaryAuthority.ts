@@ -23,6 +23,10 @@ import {
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { scanUnresolvedRenderTokens } from "./userVisibleRenderTokenAuthority";
 import { paidProVerboseQaLogsEnabled } from "./paidProPerfLogging";
+import {
+  isLeftoverOverlayIdentitySlotToken,
+  shouldAcceptPaidProCommercialFieldStubsAfterPfd200,
+} from "./agreementTemplatePlaceholderSafety";
 
 export type PaidProDocumentBoundaryAuthorityOpts = PaidProNoticeContactAuthorityOpts & {
   /** When true (freeze path), unresolved boundary violations throw. */
@@ -56,6 +60,29 @@ export type PaidProDocumentBoundaryAuthorityResult = {
 };
 
 const RECITAL_FUSED_SECTION_RE = /Parties\."\d+\./i;
+
+const COMMERCIAL_FIELD_STUB_RE =
+  /^\[?\s*(?:(?:SIGNER|PARTY|CONTACT|ORG)_)?(?:EMAIL|ADDRESS|PARTY_ADDRESS|NAME|TITLE|DATE|SIGNATURE|INITIALS?|PARTY_NAME|SIGNER_NAME)(?:_\d+)?\s*\]?$/i;
+
+function isCommercialFieldStubToken(token: string): boolean {
+  const t = String(token || "").trim();
+  if (/\[\s*INSERT\b/i.test(t) || /\{\{/.test(t) || /<\s*insert/i.test(t)) return false;
+  return COMMERCIAL_FIELD_STUB_RE.test(t.replace(/\s+/g, ""));
+}
+
+function acceptCommercialFieldStubsOnMultipartyPfd200(
+  text: string,
+  intakeText?: string | null,
+): boolean {
+  return shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+    text,
+    intakeRaw: intakeText,
+  });
+}
+
+function isBoundaryAcceptablePfd200Token(token: string): boolean {
+  return isCommercialFieldStubToken(token) || isLeftoverOverlayIdentitySlotToken(token);
+}
 
 function lineHasInlineFusedTopLevelSection(line: string): boolean {
   const trimmed = line.trim();
@@ -238,7 +265,12 @@ export function applyPaidProDocumentBoundaryAuthority(
   const unresolvedRenderTokens = contact.ok
     ? []
     : [...new Set(scanUnresolvedRenderTokens(out).map((m) => m.token))];
-  const ok = violations.length === 0 && contact.ok;
+  const commercialFieldStubsOnly =
+    unresolvedRenderTokens.length > 0 &&
+    unresolvedRenderTokens.every((t) => isBoundaryAcceptablePfd200Token(t)) &&
+    acceptCommercialFieldStubsOnMultipartyPfd200(out, opts?.intakeText);
+  const contactOk = contact.ok || commercialFieldStubsOnly;
+  const ok = violations.length === 0 && contactOk;
   if (opts?.blockOnViolation && violations.length > 0) {
     throw new Error(`[paid-pro-document-boundary-blocked] ${violations.join(",")}`);
   }
@@ -270,6 +302,15 @@ export function assertPaidProDocumentBoundaryAuthorityForFreeze(
     out = result.text;
     lastViolations = result.violations;
     lastUnresolvedTokens = result.unresolvedRenderTokens;
+    if (
+      !result.ok &&
+      result.violations.length === 0 &&
+      lastUnresolvedTokens.length > 0 &&
+      lastUnresolvedTokens.every((t) => isBoundaryAcceptablePfd200Token(t)) &&
+      acceptCommercialFieldStubsOnMultipartyPfd200(out, opts?.intakeText)
+    ) {
+      return out;
+    }
     if (result.ok && result.violations.length === 0) {
       if (!opts?.deferClauseFamilyStructuralValidation) {
         assertClauseFamilyStructuralIntegrityForFreeze(out, {

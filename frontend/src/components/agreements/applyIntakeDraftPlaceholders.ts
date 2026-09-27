@@ -5,6 +5,7 @@
  * when intake (or explicit party names) already resolve them. Supports ordered N = 2–4.
  */
 
+import { extractHiringPatternPartyNames } from "./agreementIntakeClarification";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { PAID_PRO_GTM_MAX_SIGNING_PARTIES } from "./paidProAuthorityLimits";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
@@ -12,8 +13,8 @@ import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { isPlaceholderPartyName } from "./starterPartyLimits";
 
 const GOV_LAW_RE =
-  /\b(?:Governing\s+law|governed\s+by(?:\s+the\s+laws?\s+of)?|laws?\s+of)\s*[:\-]?\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?|[A-Z]{2})\b/;
-const GOV_LAW_LABEL_RE = /\bGoverning\s+law\s*:\s*([A-Za-z][A-Za-z\s]{1,40})/i;
+  /\b(?:governing\s+law|governed\s+by(?:\s+the\s+laws?\s+of)?|laws?\s+of)\s*[:\-]?\s*([A-Za-z][a-zA-Z]+(?:\s+[A-Za-z][a-zA-Z]+)?|[A-Z]{2})\b/i;
+const GOV_LAW_LABEL_RE = /\bgoverning\s+law\s*:\s*([A-Za-z][A-Za-z\s]{1,40})/i;
 
 /** Role / legacy brackets mapped by ordered slot index (0-based). */
 const ROLE_BRACKET_RES_BY_INDEX: ReadonlyArray<readonly RegExp[]> = [
@@ -106,6 +107,7 @@ export function resolveIntakeDraftPartyNames(
     .map(usablePartyName)
     .filter(Boolean);
   const labeled = extractLabeledPartyNames(String(intakeText || ""));
+  const hiringPattern = extractHiringPatternPartyNames(String(intakeText || ""));
   const ordered =
     fromExplicit.length >= 2
       ? fromExplicit
@@ -113,7 +115,9 @@ export function resolveIntakeDraftPartyNames(
         ? between
         : labeled.length >= 2
           ? labeled
-          : [];
+          : hiringPattern.length >= 2
+            ? hiringPattern
+            : [];
   if (ordered.length < 2) return null;
   return ordered.slice(0, PAID_PRO_GTM_MAX_SIGNING_PARTIES);
 }

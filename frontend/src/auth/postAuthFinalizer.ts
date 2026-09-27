@@ -25,6 +25,7 @@ import {
 } from "../launch/paidCheckoutOrgContext";
 import { clearAnonymousSession, logAuthDiagnostic } from "./anonymousSessionApi";
 import { commitPostAuthOwnershipMigration } from "./ownershipMigrationFinalize";
+import { applyClaimedAgreementIdsToPreAuth } from "./preAuthCheckoutAgreement";
 import { readCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
 
 export type PostAuthFinalizeResult = {
@@ -60,6 +61,7 @@ function applyOwnershipMigrationFromServer(args: {
   if (args.migratedAgreementCount <= 0 && ids.length === 0 && !args.continuationAgreementId && !args.destinationPath) {
     return;
   }
+  applyClaimedAgreementIdsToPreAuth(ids);
   commitPostAuthOwnershipMigration({
     migratedAgreementIds: ids,
     continuationAgreementId:
@@ -160,7 +162,9 @@ export async function finalizeAuthenticatedSession(args: {
     accessToken: accessToken || undefined,
   });
 
-  clearAnonymousSession();
+  if (bind.migrated_agreement_count > 0) {
+    clearAnonymousSession();
+  }
   await refreshSubscriptionEntitlement();
 
   const ctx = readAuthContinuationContext();

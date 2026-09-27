@@ -1,0 +1,170 @@
+/** @vitest-environment jsdom */
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+  applyClaimedAgreementIdsToPreAuth,
+  clearPreAuthCheckoutAgreementId,
+  countConversionDraftMintsAfterFirstPersist,
+  pinCheckoutPathToPreAuthAgreement,
+  readKnownConversionAgreementId,
+  readPreAuthCheckoutAgreementId,
+  rememberPreAuthCheckoutAgreementId,
+  resolveAgreementIdAfterAuthRemount,
+  resolveContinueWithProCheckoutAgreementId,
+  resolveExistingConversionAgreementId,
+  shouldMintNewDraftForConversion,
+  syncPreAuthFromKnownConversionAgreementId,
+} from "./preAuthCheckoutAgreement";
+import { ACTIVE_AGREEMENT_GENERATION_STORAGE_KEY } from "../lib/agreementGenerationId";
+import { AGREEMENT_CREATE_REVIEW_RESUME_KEY } from "../components/agreements/agreementIntakeStorage";
+
+const GUEST = "5e79c874-91bd-4d43-95f1-80a827e8b26a";
+const STALE = "36568b4c-1300-4d62-97eb-826bdf2dd6c0";
+const ACTIVE_GEN = "9216ed40-eb15-4356-9ba4-a7ada836a0d6";
+
+describe("preAuthCheckoutAgreement", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    clearPreAuthCheckoutAgreementId();
+  });
+
+  it("never replaces the first real checkout UUID with a later remint", () => {
+    expect(rememberPreAuthCheckoutAgreementId(GUEST)).toBe(GUEST);
+    expect(rememberPreAuthCheckoutAgreementId(STALE)).toBe(GUEST);
+    expect(readPreAuthCheckoutAgreementId()).toBe(GUEST);
+  });
+
+  it("pins a stale checkout dest back to the pre-auth persist", () => {
+    rememberPreAuthCheckoutAgreementId(GUEST);
+    expect(
+      pinCheckoutPathToPreAuthAgreement(`/app/checkout/${STALE}?tier=pro&cadence=monthly`),
+    ).toBe(`/app/checkout/${GUEST}?tier=pro&cadence=monthly`);
+  });
+
+  it("does not mint a second draft once the conversion persist exists", () => {
+    expect(
+      resolveExistingConversionAgreementId({
+        reviewAgreementId: null,
+        resumeId: GUEST,
+        preAuthId: null,
+      }),
+    ).toBe(GUEST);
+    expect(
+      resolveExistingConversionAgreementId({
+        reviewAgreementId: STALE,
+        resumeId: STALE,
+        preAuthId: GUEST,
+      }),
+    ).toBe(GUEST);
+    expect(shouldMintNewDraftForConversion(GUEST)).toBe(false);
+    expect(shouldMintNewDraftForConversion(null)).toBe(true);
+    expect(shouldMintNewDraftForConversion("__claw_create_checkout__")).toBe(true);
+    expect(
+      resolveExistingConversionAgreementId({
+        reviewAgreementId: null,
+        resumeId: null,
+        preAuthId: null,
+        activeGenerationId: ACTIVE_GEN,
+      }),
+    ).toBe(ACTIVE_GEN);
+  });
+
+  it("known conversion reader falls back to active generation when pre_auth is null", () => {
+    expect(readKnownConversionAgreementId()).toBeNull();
+    sessionStorage.setItem(ACTIVE_AGREEMENT_GENERATION_STORAGE_KEY, ACTIVE_GEN);
+    expect(readPreAuthCheckoutAgreementId()).toBeNull();
+    expect(readKnownConversionAgreementId()).toBe(ACTIVE_GEN);
+    expect(syncPreAuthFromKnownConversionAgreementId()).toBe(ACTIVE_GEN);
+    expect(readPreAuthCheckoutAgreementId()).toBe(ACTIVE_GEN);
+  });
+
+  it("known conversion reader prefers pre_auth over resume and active generation", () => {
+    rememberPreAuthCheckoutAgreementId(GUEST);
+    sessionStorage.setItem(AGREEMENT_CREATE_REVIEW_RESUME_KEY, STALE);
+    sessionStorage.setItem(ACTIVE_AGREEMENT_GENERATION_STORAGE_KEY, ACTIVE_GEN);
+    expect(readKnownConversionAgreementId()).toBe(GUEST);
+    expect(syncPreAuthFromKnownConversionAgreementId()).toBe(GUEST);
+  });
+
+  it("keeps claimed leftover persist when bind returns it after a stale dest", () => {
+    expect(applyClaimedAgreementIdsToPreAuth([GUEST])).toBe(GUEST);
+    expect(readPreAuthCheckoutAgreementId()).toBe(GUEST);
+    expect(applyClaimedAgreementIdsToPreAuth([STALE])).toBe(GUEST);
+  });
+
+  it("reuses persist/resume after remount even when a remint receipt exists", () => {
+    const remount = resolveAgreementIdAfterAuthRemount({
+      reactRefId: null,
+      resumeId: GUEST,
+      preAuthId: GUEST,
+      pendingReceiptCanonicalId: STALE,
+    });
+    expect(remount).toEqual({ agreementId: GUEST, mustMint: false });
+    expect(shouldMintNewDraftForConversion(remount.agreementId)).toBe(false);
+  });
+
+  it("does not mint a second UUID when only resume survives remount", () => {
+    const remount = resolveAgreementIdAfterAuthRemount({
+      reactRefId: null,
+      resumeId: GUEST,
+      preAuthId: null,
+      pendingReceiptCanonicalId: STALE,
+    });
+    expect(remount.mustMint).toBe(false);
+    expect(remount.agreementId).toBe(GUEST);
+  });
+
+  it("does not mint when only the active generation ID exists", () => {
+    const remount = resolveAgreementIdAfterAuthRemount({
+      reactRefId: null,
+      resumeId: null,
+      preAuthId: null,
+      activeGenerationId: ACTIVE_GEN,
+    });
+    expect(remount.mustMint).toBe(false);
+    expect(remount.agreementId).toBe(ACTIVE_GEN);
+    expect(shouldMintNewDraftForConversion(remount.agreementId)).toBe(false);
+  });
+
+  it("Continue-with-Pro hop uses active gen over a reminted resume when pre_auth is null", () => {
+    expect(
+      resolveContinueWithProCheckoutAgreementId({
+        reviewAgreementId: STALE,
+        resumeId: STALE,
+        preAuthId: null,
+        activeGenerationId: ACTIVE_GEN,
+      }),
+    ).toBe(ACTIVE_GEN);
+  });
+
+  it("Continue-with-Pro hop keeps pre_auth unchanged when it is already set", () => {
+    expect(
+      resolveContinueWithProCheckoutAgreementId({
+        reviewAgreementId: STALE,
+        resumeId: STALE,
+        preAuthId: GUEST,
+        activeGenerationId: ACTIVE_GEN,
+      }),
+    ).toBe(GUEST);
+  });
+
+  it("Continue-with-Pro hop has no persist when no AID exists", () => {
+    expect(
+      resolveContinueWithProCheckoutAgreementId({
+        reviewAgreementId: null,
+        resumeId: null,
+        preAuthId: null,
+        activeGenerationId: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("mints exactly once on persist then remount then Google then checkout prep", () => {
+    const journey = countConversionDraftMintsAfterFirstPersist(GUEST, [
+      { reactRefId: null, resumeId: GUEST, preAuthId: GUEST },
+      { reactRefId: null, resumeId: GUEST, preAuthId: GUEST, pendingReceiptCanonicalId: STALE },
+      { reactRefId: STALE, resumeId: GUEST, preAuthId: GUEST, pendingReceiptCanonicalId: STALE },
+    ]);
+    expect(journey.mintCount).toBe(1);
+    expect(journey.agreementId).toBe(GUEST);
+  });
+});

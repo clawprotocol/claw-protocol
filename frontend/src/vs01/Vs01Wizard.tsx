@@ -16,7 +16,7 @@ import { detailsStepIsValid } from "./detailsStepValidation";
 import type { PlacedSigningField } from "./signingFields";
 import { getVs01UrlBootstrap } from "./vs01UrlBootstrap";
 import { resolveReviewerEffectiveAccessToken } from "../agreement/reviewerTokenPersistence";
-import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared } from "./vs01WorkspaceSigningStatus";
+import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared, isAgreementPacketPrepared, readAgreementFieldsPlacedCount } from "./vs01WorkspaceSigningStatus";
 import { fetchDocumentContent, fetchDocumentEsignHandoff, getReceipt } from "./vs01Api";
 import { useAuth } from "../auth/AuthProvider";
 import { shouldDeferVs01SeedDocumentLoad } from "./vs01SeedDocumentAuthGate";
@@ -45,6 +45,29 @@ import { resolvePrepareBridgeSigningCorpus } from "./vs01PrepareBridgeCorpus";
 import {
   vs01PaidSessionWorkspaceHydrateMinCorpusLen,
 } from "../components/agreements/paidProPaidSessionLanding";
+import {
+  ensureReviewCorpusOnEsignEntry,
+  fetchRemountCertifiedReviewCorpus,
+  leftoverRemountShouldFailClosedToast,
+  remountPrepareShouldPaintBeforeContentInspect,
+  resolveAcceptedCrsPlainForRemountPaint,
+  resolveCertifiedReviewForEsignRemount,
+  resolveEsignEntryReviewBindContext,
+} from "./vs01EsignRemountReviewBind";
+import {
+  fetchRemountPaintPlainFromDocumentContent,
+  remountPrepareShouldFailClosedWithoutCertifiedCorpus,
+  resolveRemountPrepareCorpusIncludingContent,
+  restorePrepareFromFrozenSigningAuthority,
+} from "./vs01EsignRemountPrepareRestore";
+import {
+  extractPlainTextFromDocumentContent,
+  leftoverGetContentRefuseFromError,
+} from "./vs01ReviewCorpusServerContent";
+import {
+  packetPlainMatchesPersistReviewCorpus,
+  reviewCorpusLooksLikeLeftoverFusedNotices,
+} from "./vs01CurrentReviewSotForSeed";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
 import {
   buildVs01CanonicalPacketSeed,
@@ -55,6 +78,7 @@ import {
 import { buildVs01RecipientSigningUrl } from "./StepReceipt";
 import {
   clearPaidProVs01PostSignHandoff,
+  readPaidProVs01PostSignHandoff,
   writePaidProVs01PostSignHandoff,
   type PaidProVs01PostSignHandoffV1,
 } from "./vs01PaidProPostSignHandoff";
@@ -84,7 +108,18 @@ import {
 import { handlePreparePacketContinue } from "./vs01PreparePacketContinue";
 import { sealPortablePacketEnvelopeProvenance } from "./vs01SigningEnvelopeProvenance";
 import { dispatchSigningInvitesFromHandoff } from "./vs01SigningInviteDelivery";
-import { paidProPacketReadyDashboardPath } from "./vs01PaidProPacketReadyNavigation";
+import {
+  FIRST_FAILING_PREPARE_LANDING_PREDICATE,
+  isPaidProPacketReadyDashboardPath,
+  resolvePostPrepareBuyerSurface,
+} from "./vs01PrivateSigningLinksLanding";
+import {
+  FIRST_FAILING_PLACEMENT_SKIP_PREDICATE,
+  canClaimPrivateSigningLinksReady,
+  countPlacedSigningFields,
+  resolvePrepareStepAfterSeed,
+  resolveRemountPrepareStep,
+} from "./vs01PreparePlacementBeforeLinks";
 import { bootstrapVs01RecipientSigningAuthority } from "./vs01RecipientAuthorityBootstrap";
 import type { Vs01RecipientIdentityAuthority } from "./vs01RecipientIdentityAuthority";
 import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
@@ -224,7 +259,7 @@ export function Vs01Wizard({
   const recipientAuthorityResolvedRef = useRef(false);
   const recipientAuthorityIdentityRef = useRef<Vs01RecipientIdentityAuthority | null>(null);
   /** Paid Pro `/app/esign/:id?agreement_bridge=1` — LawDog already collected signers; never show VS01 details step. */
-  const [paidProAgreementBridgeSkip] = useState(() =>
+  const [paidProAgreementBridgeSkip, setPaidProAgreementBridgeSkip] = useState(() =>
     computePaidProAgreementBridgeSkip(seedDocumentId, hideStepper),
   );
   const [vs01LinkedAgreementId, setVs01LinkedAgreementId] = useState<string | null>(() =>
@@ -640,6 +675,67 @@ export function Vs01Wizard({
     onStepChangeRef.current?.(target);
   }, []);
 
+  const persistBridgePreparePacketCeremony = useCallback(
+    async (args: {
+      linkedAgreementId: string;
+      did: string;
+      handoff: PaidProVs01PostSignHandoffV1;
+      roles: Parameters<typeof dispatchSigningInvitesFromHandoff>[1];
+      portablePacket: Vs01CanonicalPacketPortableV1 | null;
+    }): Promise<boolean> => {
+      const { linkedAgreementId, did, roles } = args;
+      let portablePacket = args.portablePacket;
+      if (portablePacket) {
+        try {
+          portablePacket = await sealPortablePacketEnvelopeProvenance({
+            documentId: did,
+            portable: portablePacket,
+            roles,
+          });
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Signing packet provenance could not be sealed against the accepted agreement.",
+          );
+          return false;
+        }
+      }
+      if (!portablePacket) {
+        setError("The signing packet could not be built. Signing links were not sent.");
+        return false;
+      }
+      const delivery = await dispatchSigningInvitesFromHandoff(args.handoff, roles, {
+        portablePacket,
+        documentId: did,
+        afterPayCeremony: true,
+      });
+      // eslint-disable-next-line no-console
+      console.info("[vs01-signing-invites-dispatched]", {
+        agreementIdShort: linkedAgreementId.slice(0, 16),
+        attempted: delivery.attempted,
+        ok: delivery.ok,
+        sentCount: delivery.sentCount,
+        skipReason: delivery.skipReason,
+        packetPersisted: delivery.packetPersisted,
+        packetDigestShort: portablePacket?.envelopeProvenance?.packetDigest?.slice(0, 16) ?? null,
+        acceptedSoTDigestShort:
+          portablePacket?.envelopeProvenance?.acceptedSoTDigest?.slice(0, 16) ?? null,
+      });
+      if (!delivery.ok || !delivery.packetPersisted) {
+        setError(
+          delivery.skipReason
+            ? `Signing links could not be persisted (${delivery.skipReason}).`
+            : "Signing links could not be persisted.",
+        );
+        return false;
+      }
+      markAgreementPacketPrepared(linkedAgreementId);
+      return true;
+    },
+    [],
+  );
+
   const completeBridgePreparePacket = useCallback(() => {
     const linkedAgreementId =
       (vs01LinkedAgreementId ?? "").trim() ||
@@ -650,6 +746,109 @@ export function Vs01Wizard({
       setError("Agreement or document is not ready yet.");
       return;
     }
+
+    const stayOnPrivateSigningLinks = (
+      handoff: PaidProVs01PostSignHandoffV1,
+      extra?: { fieldsPlacedCount?: number; idempotent?: boolean },
+    ) => {
+      writePaidProVs01PostSignHandoff(handoff);
+      setPacketHandoff(handoff);
+      clearVs01DraftState(did, "packet_ready_in_wizard");
+      const currentPath =
+        typeof window !== "undefined"
+          ? `${window.location.pathname}${window.location.search}`
+          : `/app/esign/${did}`;
+      let packetReadyQuery = false;
+      try {
+        packetReadyQuery =
+          typeof window !== "undefined" &&
+          new URLSearchParams(window.location.search).get("vs01_packet_ready") === "1";
+      } catch {
+        packetReadyQuery = false;
+      }
+      const landing = resolvePostPrepareBuyerSurface({
+        seedOk: true,
+        documentId: did,
+        currentPath,
+        packetReadyQuery,
+      });
+      // eslint-disable-next-line no-console
+      console.info("[vs01-packet-prepared]", {
+        agreementId: linkedAgreementId,
+        documentIdShort: did.slice(0, 8),
+        counterpartySignerCount: handoff.signers.length,
+        totalParticipantCount: handoff.signers.length + 1,
+        senderMustSignFirst: handoff.senderMustSignFirst ?? false,
+        fieldsPlacedCount: extra?.fieldsPlacedCount ?? 0,
+      });
+      const placedForLinks = extra?.fieldsPlacedCount ?? 0;
+      if (!canClaimPrivateSigningLinksReady(placedForLinks)) {
+        // eslint-disable-next-line no-console
+        console.info("[vs01-placement-before-links]", {
+          agreementId: linkedAgreementId,
+          vs01DocumentId: did,
+          fieldsPlacedCount: placedForLinks,
+          firstFailingPredicate: FIRST_FAILING_PLACEMENT_SKIP_PREDICATE,
+          reason: resolvePrepareStepAfterSeed({ fieldsPlacedCount: placedForLinks }).reason,
+        });
+        return;
+      }
+      // eslint-disable-next-line no-console
+      console.info("[vs01-private-signing-links-stay]", {
+        agreementId: linkedAgreementId,
+        packetPrepareOnly: true,
+        signerCount: handoff.signers.length,
+        vs01DocumentId: did,
+        destination: landing.reason,
+        packetReadyMustNotWin: true,
+        firstFailingPredicateClosed: FIRST_FAILING_PREPARE_LANDING_PREDICATE,
+        placementSkipPredicateClosed: FIRST_FAILING_PLACEMENT_SKIP_PREDICATE,
+        idempotent: extra?.idempotent === true,
+        fieldsPlacedCount: placedForLinks,
+      });
+      markAgreementPacketPrepared(linkedAgreementId);
+      goToStep(3);
+      if (
+        landing.navigateTo &&
+        !isPaidProPacketReadyDashboardPath(landing.navigateTo) &&
+        landing.navigateTo !== currentPath
+      ) {
+        navigate(landing.navigateTo);
+      }
+    };
+
+    const existingHandoff = isAgreementPacketPrepared(linkedAgreementId)
+      ? readPaidProVs01PostSignHandoff(linkedAgreementId)
+      : null;
+    if (existingHandoff && (existingHandoff.signers?.length ?? 0) > 0) {
+      const remount = resolveRemountPrepareStep({
+        agreementId: linkedAgreementId,
+        senderPlacedCount: senderPlacedFields.length,
+        recipientPlacedCount: recipientPlacedFields.length,
+      });
+      if (remount.step === 3) {
+        // Prepared marker is written only after the ceremony packet persisted.
+        // eslint-disable-next-line no-console
+        console.info("[vs01-packet-prepare-remount-links-stay]", {
+          agreementId: linkedAgreementId,
+          fieldsPlacedCount: remount.fieldsPlacedCount,
+        });
+        stayOnPrivateSigningLinks(existingHandoff, {
+          idempotent: true,
+          fieldsPlacedCount: remount.fieldsPlacedCount,
+        });
+        return;
+      }
+      // eslint-disable-next-line no-console
+      console.info("[vs01-placement-before-links]", {
+        agreementId: linkedAgreementId,
+        fieldsPlacedCount: remount.fieldsPlacedCount,
+        firstFailingPredicate: FIRST_FAILING_PLACEMENT_SKIP_PREDICATE,
+        reason: remount.reason,
+        idempotentSkipped: false,
+      });
+    }
+
     const bridge =
       bridgeHandoffSnapshotRef.current ??
       readDurableAgreementVs01Bridge(did) ??
@@ -678,83 +877,38 @@ export function Vs01Wizard({
       }
       return;
     }
-    writePaidProVs01PostSignHandoff(result.handoff);
-    setPacketHandoff(result.handoff);
-    clearVs01DraftState(did, "packet_ready_in_wizard");
-    const placedCount = senderPlacedFields.length + recipientPlacedFields.length;
+    const placedCount = countPlacedSigningFields({
+      senderPlacedCount: senderPlacedFields.length,
+      recipientPlacedCount: recipientPlacedFields.length,
+      portableFieldCount: result.portablePacket?.fields?.length ?? 0,
+      storedFieldsPlacedCount: readAgreementFieldsPlacedCount(linkedAgreementId),
+    });
     if (placedCount > 0) {
       markAgreementFieldsPlacedCount(linkedAgreementId, placedCount);
     }
-    // eslint-disable-next-line no-console
-    console.info("[vs01-packet-prepared]", {
-      agreementId: linkedAgreementId,
-      documentIdShort: did.slice(0, 8),
-      counterpartySignerCount: result.handoff.signers.length,
-      totalParticipantCount: result.handoff.signers.length + 1,
-      senderMustSignFirst: result.handoff.senderMustSignFirst ?? false,
-      fieldsPlacedCount: placedCount,
-    });
-    const roles = result.roles;
-    void (async () => {
-      let portablePacket = result.portablePacket;
-      if (portablePacket) {
-        try {
-          portablePacket = await sealPortablePacketEnvelopeProvenance({
-            documentId: did,
-            portable: portablePacket,
-            roles,
-          });
-        } catch (err) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Signing packet provenance could not be sealed against the accepted agreement.",
-          );
-          return;
-        }
-      }
-      if (!portablePacket) {
-        setError("The signing packet could not be built. Signing links were not sent.");
-        return;
-      }
-      const delivery = await dispatchSigningInvitesFromHandoff(result.handoff, roles, {
-        portablePacket,
-        documentId: did,
-        afterPayCeremony: true,
-      });
+    const landingStep = resolvePrepareStepAfterSeed({ fieldsPlacedCount: placedCount });
+    if (landingStep.step !== 3) {
       // eslint-disable-next-line no-console
-      console.info("[vs01-signing-invites-dispatched]", {
-        agreementIdShort: linkedAgreementId.slice(0, 16),
-        attempted: delivery.attempted,
-        ok: delivery.ok,
-        sentCount: delivery.sentCount,
-        skipReason: delivery.skipReason,
-        packetPersisted: delivery.packetPersisted,
-        packetDigestShort: portablePacket?.envelopeProvenance?.packetDigest?.slice(0, 16) ?? null,
-        acceptedSoTDigestShort:
-          portablePacket?.envelopeProvenance?.acceptedSoTDigest?.slice(0, 16) ?? null,
-      });
-      if (!delivery.ok || !delivery.packetPersisted) {
-        setError(
-          delivery.skipReason
-            ? `Signing links could not be persisted (${delivery.skipReason}).`
-            : "Signing links could not be persisted.",
-        );
-        return;
-      }
-      markAgreementPacketPrepared(linkedAgreementId);
-      clearAgreementVs01BridgeSession();
-      clearPaidProAgreementBridgeSkipMarker();
-      // eslint-disable-next-line no-console
-      console.info("[vs01-paid-pro-workspace-navigate]", {
+      console.info("[vs01-placement-before-links]", {
         agreementId: linkedAgreementId,
-        packetPrepareOnly: true,
-        signerCount: result.handoff.signers.length,
         vs01DocumentId: did,
-        destination: paidProPacketReadyDashboardPath(),
+        fieldsPlacedCount: placedCount,
+        firstFailingPredicate: FIRST_FAILING_PLACEMENT_SKIP_PREDICATE,
+        reason: landingStep.reason,
       });
-      navigate(paidProPacketReadyDashboardPath());
-    })();
+      return;
+    }
+    void persistBridgePreparePacketCeremony({
+      linkedAgreementId,
+      did,
+      handoff: result.handoff,
+      roles: result.roles,
+      portablePacket: result.portablePacket ?? null,
+    }).then((persisted) => {
+      if (persisted) {
+        stayOnPrivateSigningLinks(result.handoff, { fieldsPlacedCount: placedCount });
+      }
+    });
   }, [
     vs01LinkedAgreementId,
     documentId,
@@ -770,6 +924,8 @@ export function Vs01Wizard({
     receiptHashSha256,
     navigate,
     prepareCorpusText,
+    goToStep,
+    persistBridgePreparePacketCeremony,
   ]);
 
   useEffect(() => {
@@ -802,13 +958,116 @@ export function Vs01Wizard({
     if (shouldDeferVs01SeedDocumentLoad({ authEnabled, authLoading })) return;
     let cancelled = false;
     void (async () => {
+      // Persist Review first — do not await leftover GET /content inspect or
+      // vs01-signing-seed POST before leaving “Loading your document…”.
+      // Double-Continue minted doc_* remount hangs on that inspect; #185
+      // healthy remount still paints from the same certified Review SoT.
+      let persistReviewCorpus = "";
+      let remountAgreementId = "";
+      if (!sid.startsWith("local_doc_")) {
+        try {
+          const certified = await resolveCertifiedReviewForEsignRemount({ documentId: sid });
+          remountAgreementId = certified.agreementId.trim();
+          persistReviewCorpus = certified.persistReviewCorpus;
+          // Thin leftover-filtered persist must not hide accepted CRS bytes.
+          if (!remountPrepareShouldPaintBeforeContentInspect(persistReviewCorpus) && remountAgreementId) {
+            persistReviewCorpus = await resolveAcceptedCrsPlainForRemountPaint({
+              agreementId: remountAgreementId,
+              draft: certified.draft,
+              persistReviewCorpus,
+            });
+          }
+        } catch {
+          /* stay on placement; do not eject */
+        }
+        if (cancelled) return;
+      }
+
+      // Inspect / hard-refresh remount: leftover bind recovered Review body
+      // but skip/bridge may be gone. Reconstruct Prepare from frozen
+      // signing authority — do not land the empty self-sign Step-3 shell.
+      let remountPrepareRestored = false;
+      let restoredBridgeCorpus = "";
+      if (hideStepper && sid.startsWith("doc_")) {
+        try {
+          const restored = await restorePrepareFromFrozenSigningAuthority({
+            documentId: sid,
+            hideStepper,
+            reviewCorpus: persistReviewCorpus,
+            agreementId: remountAgreementId || undefined,
+          });
+          if (restored.ok) {
+            remountPrepareRestored = true;
+            remountAgreementId = restored.agreementId.trim() || remountAgreementId;
+            restoredBridgeCorpus = (restored.bridge.agreementCorpusText ?? "").trim();
+            persistReviewCorpus = persistReviewCorpus || restoredBridgeCorpus;
+          }
+        } catch {
+          /* stay on leftover body; do not eject */
+        }
+        if (cancelled) return;
+
+        // Durable Review for the packet model: GET canonical-review-snapshot
+        // (token-refreshed). If GET is OPTIONS-only / fails, keep the same
+        // certified Review the seed already used. Do not invent a second SoT.
+        try {
+          const agreementIdForCrs =
+            remountAgreementId ||
+            (resolveEsignEntryReviewBindContext(sid)?.agreementId ?? "").trim();
+          if (agreementIdForCrs) {
+            const remountReview = await fetchRemountCertifiedReviewCorpus({
+              agreementId: agreementIdForCrs,
+              fallbackCertifiedReview: persistReviewCorpus || restoredBridgeCorpus,
+            });
+            if (remountReview.corpus) persistReviewCorpus = remountReview.corpus;
+          }
+        } catch {
+          /* hard-fallback is persistReviewCorpus / restored bridge already in hand */
+        }
+        if (cancelled) return;
+
+        // Always set prepareCorpusText from accepted CRS / persist Review /
+        // restored bridge. When persist Review is missing/thin, paint from
+        // accepted CRS already resolved above, then optional GET /content
+        // bytes — never leftover inspect + vs01-signing-seed before paint.
+        const remountCorpus = await resolveRemountPrepareCorpusIncludingContent({
+          persistReviewCorpus,
+          restoredBridgeCorpus,
+          fetchDocumentContentPlain: () => fetchRemountPaintPlainFromDocumentContent(sid),
+        });
+        if (remountCorpus.ok) {
+          persistReviewCorpus = remountCorpus.corpus;
+          setPrepareCorpusText(remountCorpus.corpus);
+          setDocumentId(sid);
+          setContentSha256(`corpus:${fingerprintAgreementBody(remountCorpus.corpus)}`);
+          if (remountPrepareRestored) {
+            setPaidProAgreementBridgeSkip(true);
+            if (remountAgreementId) setVs01LinkedAgreementId(remountAgreementId);
+          }
+        } else if (
+          remountPrepareShouldFailClosedWithoutCertifiedCorpus({
+            hideStepper,
+            seedDocumentId: sid,
+            remountPrepareRestored,
+            corpus: remountCorpus,
+          })
+        ) {
+          setError("Could not load this document. Check the link or start a new packet.");
+          return;
+        }
+      }
+
       const hydrateLocalPaidProBridge = (): boolean => {
         if (bridgeHydratedSeedSid.current === sid) return true;
         const bridgeParams = new URLSearchParams(window.location.search);
         const agreementBridgeQuery = bridgeParams.get("agreement_bridge") === "1";
+        const remountSkipOrBridge =
+          sid.startsWith("doc_") &&
+          (readPaidProAgreementBridgeSkipMarker(sid) ||
+            readAgreementVs01BridgeSession()?.vs01DocumentId.trim() === sid);
         // Durable packet (localStorage / session / in-memory) — not first-SPA agreement_bridge=1 only.
         const allowBridgeCorpusHydrate =
-          sid.startsWith("local_doc_") || sid.startsWith("doc_");
+          sid.startsWith("local_doc_") || sid.startsWith("doc_") || remountSkipOrBridge;
         if (!allowBridgeCorpusHydrate) return false;
         const rawBridge = readDurableAgreementVs01Bridge(sid);
         const bridge: AgreementVs01BridgeSession | null =
@@ -822,12 +1081,13 @@ export function Vs01Wizard({
           hideStepper &&
           Boolean(sid) &&
           (readPaidProAgreementBridgeSkipMarker(sid) ||
+            remountSkipOrBridge ||
             (bridge !== null && bridge.vs01DocumentId.trim() === sid) ||
             (agreementBridgeQuery &&
               bridge !== null &&
               bridge.vs01DocumentId.trim() === sid));
         if (!paidProAgreementHandoff || !bridge || bridge.vs01DocumentId.trim() !== sid) return false;
-        const corpus = (bridge.agreementCorpusText ?? "").trim();
+        const corpus = persistReviewCorpus || (bridge.agreementCorpusText ?? "").trim();
         const hydrateMinLen = vs01PaidSessionWorkspaceHydrateMinCorpusLen({
           agreementBridge: allowBridgeCorpusHydrate || agreementBridgeQuery,
           paidProHandoff: paidProAgreementHandoff,
@@ -835,6 +1095,7 @@ export function Vs01Wizard({
         });
         if (corpus.length < hydrateMinLen) return false;
         if (cancelled) return false;
+        setPaidProAgreementBridgeSkip(true);
         setDocumentId(sid);
         setContentSha256(`corpus:${fingerprintAgreementBody(corpus)}`);
         bridgeHandoffSnapshotRef.current = bridge;
@@ -868,7 +1129,13 @@ export function Vs01Wizard({
             draft: null,
             bridge,
           });
-          setPrepareCorpusText(signingCorpus.corpus.trim() || corpus || null);
+          const bridgeChosenCorpus = signingCorpus.corpus.trim() || corpus || null;
+          const chosenCorpus = persistReviewCorpus || bridgeChosenCorpus || "";
+          setPrepareCorpusText(
+            chosenCorpus && !reviewCorpusLooksLikeLeftoverFusedNotices(chosenCorpus)
+              ? chosenCorpus
+              : persistReviewCorpus || null,
+          );
           setAgreementTitle(titleForUi);
           setCreatorName(cn);
           setCreatorEmail(ce);
@@ -900,14 +1167,76 @@ export function Vs01Wizard({
             ),
           );
         });
-        const nextStep: Vs01Step = saved ? saved.step : 2;
+        const savedFieldCount = saved
+          ? saved.senderPlacedFields.length + saved.recipientPlacedFields.length
+          : 0;
+        const nextStep: Vs01Step = saved && saved.step >= 3 && savedFieldCount <= 0
+          ? 2
+          : saved
+            ? saved.step
+            : 2;
         const fs = (saved ? Math.max(nextStep, saved.furthestStep) : nextStep) as Vs01Step;
         setFurthestStep((prev) => ((fs > prev ? fs : prev) as Vs01Step));
         goToStep(nextStep);
         return true;
       };
 
-      if (hydrateLocalPaidProBridge()) return;
+      const paintedFromPersistReview = remountPrepareShouldPaintBeforeContentInspect(
+        persistReviewCorpus,
+      );
+
+      if (hydrateLocalPaidProBridge()) {
+        if (!sid.startsWith("local_doc_")) {
+          void ensureReviewCorpusOnEsignEntry({
+            documentId: sid,
+            agreementId: remountAgreementId || undefined,
+            reviewCorpus: persistReviewCorpus || undefined,
+          });
+        }
+        return;
+      }
+
+      // Double-Continue minted remount already left Loading from persist
+      // Review. Do not await leftover GET /content / seed POST — that inspect
+      // is what kept fields=0 / hasCommercial=false for ≥30s.
+      if (paintedFromPersistReview && hideStepper && sid.startsWith("doc_")) {
+        void ensureReviewCorpusOnEsignEntry({
+          documentId: sid,
+          agreementId: remountAgreementId || undefined,
+          reviewCorpus: persistReviewCorpus || undefined,
+        });
+        return;
+      }
+
+      if (!sid.startsWith("local_doc_")) {
+        try {
+          const bound = await ensureReviewCorpusOnEsignEntry({
+            documentId: sid,
+            agreementId: remountAgreementId || undefined,
+            reviewCorpus: persistReviewCorpus || undefined,
+          });
+          if (bound && !("skipped" in bound)) {
+            if (bound.ok && (bound.reviewCorpus ?? "").trim()) {
+              persistReviewCorpus = bound.reviewCorpus!.trim();
+            } else if (!bound.ok) {
+              persistReviewCorpus = (bound.persistReviewCorpus ?? "").trim();
+            }
+          }
+          if (bound && !bound.ok) {
+            if (cancelled) return;
+            // Fail-closed toast only when persist Review truly does not exist
+            // (404/empty). Bind {ok:false} on leftover packet is not a toast.
+            if (leftoverRemountShouldFailClosedToast(persistReviewCorpus)) {
+              setError("Could not load this document. Check the link or start a new packet.");
+              return;
+            }
+            setError(null);
+          }
+        } catch {
+          /* stay on placement; do not eject */
+        }
+        if (cancelled) return;
+      }
 
       try {
         const remote = await fetchDocumentEsignHandoff(sid);
@@ -926,6 +1255,27 @@ export function Vs01Wizard({
       try {
         const blob = await fetchDocumentContent(sid);
         const buf = await blob.arrayBuffer();
+        const painted = extractPlainTextFromDocumentContent(new Uint8Array(buf));
+        const leftoverPacketNotPersistReview =
+          Boolean(persistReviewCorpus) &&
+          !packetPlainMatchesPersistReviewCorpus(painted, persistReviewCorpus);
+        if (leftoverPacketNotPersistReview || reviewCorpusLooksLikeLeftoverFusedNotices(painted)) {
+          if (persistReviewCorpus) {
+            if (cancelled) return;
+            setError(null);
+            setDocumentId(sid);
+            setContentSha256(`corpus:${fingerprintAgreementBody(persistReviewCorpus)}`);
+            setPrepareCorpusText(persistReviewCorpus);
+            if (hydrateLocalPaidProBridge()) return;
+            setFurthestStep((prev) => ((2 > prev ? 2 : prev) as Vs01Step));
+            goToStep(2);
+            return;
+          }
+          if (!cancelled) {
+            setError("Could not load this document. Check the link or start a new packet.");
+          }
+          return;
+        }
         const hex = (await sha256Bytes(buf)).toLowerCase();
         if (cancelled) return;
         setError(null);
@@ -952,11 +1302,13 @@ export function Vs01Wizard({
           Boolean(sid) &&
           (readPaidProAgreementBridgeSkipMarker(sid) ||
             (bridge !== null && bridge.vs01DocumentId.trim() === sid) ||
+            readAgreementVs01BridgeSession()?.vs01DocumentId.trim() === sid ||
             (agreementBridgeQuery &&
               bridge !== null &&
               bridge.vs01DocumentId.trim() === sid));
 
         if (paidProAgreementHandoff && bridge && bridge.vs01DocumentId.trim() === sid) {
+          setPaidProAgreementBridgeSkip(true);
           bridgeHandoffSnapshotRef.current = bridge;
           bridgeHydratedSeedSid.current = sid;
           // eslint-disable-next-line no-console
@@ -1005,8 +1357,13 @@ export function Vs01Wizard({
               draft: null,
               bridge,
             });
+            const bridgeChosenCorpus =
+              signingCorpus.corpus.trim() || (bridge.agreementCorpusText ?? "").trim() || null;
+            const chosenCorpus = persistReviewCorpus || bridgeChosenCorpus || "";
             setPrepareCorpusText(
-              signingCorpus.corpus.trim() || (bridge.agreementCorpusText ?? "").trim() || null,
+              chosenCorpus && !reviewCorpusLooksLikeLeftoverFusedNotices(chosenCorpus)
+                ? chosenCorpus
+                : persistReviewCorpus || null,
             );
             setAgreementTitle(titleForUi);
             setCreatorName(cn);
@@ -1050,7 +1407,14 @@ export function Vs01Wizard({
               );
             }
           });
-          const nextStep: Vs01Step = saved ? saved.step : 2;
+          const savedFieldCount = saved
+            ? saved.senderPlacedFields.length + saved.recipientPlacedFields.length
+            : 0;
+          const nextStep: Vs01Step = saved && saved.step >= 3 && savedFieldCount <= 0
+            ? 2
+            : saved
+              ? saved.step
+              : 2;
           // eslint-disable-next-line no-console
           console.info("[vs01-paid-pro-skip-details]", {
             seedDocumentId: sid,
@@ -1119,9 +1483,28 @@ export function Vs01Wizard({
           goToStep(1);
         }
       } catch (e) {
-        if (sid.startsWith("local_doc_") && hydrateLocalPaidProBridge()) return;
+        if (leftoverGetContentRefuseFromError(e) && persistReviewCorpus) {
+          if (cancelled) return;
+          setError(null);
+          setDocumentId(sid);
+          setContentSha256(`corpus:${fingerprintAgreementBody(persistReviewCorpus)}`);
+          setPrepareCorpusText(persistReviewCorpus);
+          if (hydrateLocalPaidProBridge()) return;
+          setFurthestStep((prev) => ((2 > prev ? 2 : prev) as Vs01Step));
+          goToStep(2);
+          return;
+        }
+        if (
+          sid.startsWith("local_doc_") &&
+          !leftoverGetContentRefuseFromError(e) &&
+          hydrateLocalPaidProBridge()
+        ) {
+          return;
+        }
         console.error("[Vs01Wizard] seed document load failed", e);
-        if (!cancelled) setError("Could not load this document");
+        if (!cancelled && leftoverRemountShouldFailClosedToast(persistReviewCorpus)) {
+          setError("Could not load this document. Check the link or start a new packet.");
+        }
       }
     })();
     return () => {

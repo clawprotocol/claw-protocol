@@ -205,7 +205,11 @@ async def post_verify_checkout_session(request: Request, body: VerifyCheckoutSes
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error") or "verify_failed")
     sub = eco.get_subscription_by_org(org_id)
-    return {"ok": True, "sync": result, "subscription": sub}
+    payload: Dict[str, Any] = {"ok": True, "sync": result, "subscription": sub}
+    # After-pay create-flow authority: Stripe metadata.agreement_id is the paid persist.
+    if session_agreement and session_agreement != CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
+        payload["agreement_id"] = session_agreement
+    return payload
 
 
 @router.get("/status")

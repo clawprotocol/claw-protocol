@@ -2,7 +2,11 @@ import { type FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { useDynamicConfig } from "../../config/dynamicConfig/useDynamicConfig";
 import { logProductEvent } from "../../lib/experimentation/productEvents";
 import { trackAgreementFunnelEvent } from "../../tracking/agreementFunnelAnalytics";
-import { CHECKOUT_STARTER_UPGRADE_SUBTITLE, resolveCheckoutFlowProgress } from "./checkoutFlowProgress";
+import {
+  CHECKOUT_STARTER_UPGRADE_SUBTITLE,
+  isCreateFlowAgreementCheckout,
+  resolveCheckoutFlowProgress,
+} from "./checkoutFlowProgress";
 import { CHECKOUT_LEGAL_DISCLAIMER } from "./checkoutTrustCopy";
 import { CheckoutTrustPanel } from "./CheckoutTrustPanel";
 import {
@@ -24,16 +28,17 @@ import {
 import { finalizeSettlementAndActivatePlan, finalizeSingleAgreementUnlock } from "../checkoutCompletion";
 import {
   appendReturnToQueryParam,
+  buildAfterPayStripeReturnTo,
+  buildConversionCheckoutReturnTo,
   extractAgreementIdFromSendReturnUrl,
   parseCadenceParam,
   parseTierIdParam,
   resolveCheckoutTier,
   safeReturnToForAgreement,
+  sanitizeConversionCheckoutDest,
+  sanitizeConversionCheckoutReturnTo,
 } from "../checkoutParams";
-import {
-  buildCreateReturnToWithStarterReviewRestore,
-  clearCheckoutBackRestoreSnapshot,
-} from "../../components/agreements/checkoutBackRestore";
+import { clearCheckoutBackRestoreSnapshot } from "../../components/agreements/checkoutBackRestore";
 import { checkoutInvoiceUsd, formatMoneyUsdWhole } from "../pricingKeyMath";
 import { CONTEXTUAL_ONE_TIME_UNLOCK_USD } from "../paywallMessaging";
 import { isSingleAgreementCheckoutIntent } from "../oneTimeAgreementUnlock";
@@ -80,6 +85,14 @@ import {
 import { syncDemoSubscriptionEntitlementIfApplicable } from "../billingCheckoutDemoSync";
 import { createDemoSessionUser, hasDemoSessionUser } from "../guestCheckoutAuthority";
 import { resetCheckoutEntryScroll } from "./checkoutEntryScroll";
+import { extractAgreementIdFromCheckoutPath } from "../../auth/safeRedirectResolver";
+import {
+  isRealCheckoutAgreementId,
+  pinCheckoutPathToPreAuthAgreement,
+  readKnownConversionAgreementId,
+  rememberPreAuthCheckoutAgreementId,
+} from "../../auth/preAuthCheckoutAgreement";
+import { readCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
 import { SimpleFlowShell } from "./SimpleFlowShell";
 import { SpaLink } from "../SpaLink";
 import {
@@ -241,10 +254,25 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   const cadenceFromUrl = parseCadenceParam(params.get("cadence"));
   const [cadence, setCadence] = useState<PricingCadence>(() => cadenceFromUrl ?? getPricingCadencePreference());
 
+  const persistAgreementId = useMemo(() => {
+    if (isRealCheckoutAgreementId(agreementId)) return agreementId;
+    return readKnownConversionAgreementId() || readCreateReviewAgreementResumeId();
+  }, [agreementId]);
+
   const returnTo = useMemo(
-    () => safeReturnToForAgreement(agreementId, params.get("returnTo")),
-    [agreementId, params],
+    () =>
+      sanitizeConversionCheckoutReturnTo({
+        returnTo: safeReturnToForAgreement(agreementId, params.get("returnTo")),
+        persistAgreementId,
+      }),
+    [agreementId, params, persistAgreementId],
   );
+
+  const isCreateAgreementCheckout = isCreateFlowAgreementCheckout({
+    agreementId,
+    isSingleAgreementCheckout,
+    returnTo,
+  });
 
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [checkoutRecoveryKind, setCheckoutRecoveryKind] = useState<string | null>(null);
@@ -286,11 +314,11 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
 
   /** Create-flow checkout: monthly is the paid-beta default when URL omits cadence. */
   useEffect(() => {
-    if (agreementId !== CREATE_FLOW_CHECKOUT_AGREEMENT_ID || isSingleAgreementCheckout) return;
+    if (!isCreateAgreementCheckout) return;
     if (cadenceFromUrl) return;
     setCadence("monthly");
     setPricingCadencePreference("monthly");
-  }, [agreementId, isSingleAgreementCheckout, cadenceFromUrl]);
+  }, [isCreateAgreementCheckout, cadenceFromUrl]);
 
   useEffect(() => {
     if (checkoutLogged.current) return;
@@ -304,6 +332,24 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   }, [agreementId, isSingleAgreementCheckout]);
 
   useLayoutEffect(() => {
+    const currentPath = `/app/checkout/${encodeURIComponent(agreementId)}${search || ""}`;
+    const persist =
+      readKnownConversionAgreementId() || readCreateReviewAgreementResumeId() || agreementId;
+    const pinned = pinCheckoutPathToPreAuthAgreement(currentPath, persist);
+    const cleaned = sanitizeConversionCheckoutDest({
+      dest: pinned,
+      persistAgreementId: persist,
+    });
+    const pinnedId = extractAgreementIdFromCheckoutPath(cleaned);
+    if (cleaned !== currentPath) {
+      navigate(cleaned);
+      return;
+    }
+    if (pinnedId && pinnedId !== agreementId) {
+      navigate(cleaned);
+      return;
+    }
+    rememberPreAuthCheckoutAgreementId(agreementId);
     resetCheckoutEntryScroll();
     const reduce =
       typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -315,7 +361,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       window.requestAnimationFrame(() => setCheckoutArrivalOn(true));
     });
     return () => window.cancelAnimationFrame(id);
-  }, [agreementId, search]);
+  }, [agreementId, search, navigate]);
 
   function fail(message: string, kind?: string | null): void {
     setPaymentError(message);
@@ -456,10 +502,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         fail("This referral link cannot be used for your own account.");
         return;
       }
-      const returnTarget =
-        agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID
-          ? appendReturnToQueryParam(returnTo, "premiumCompletion", "1")
-          : returnTo;
+      const returnTarget = buildAfterPayStripeReturnTo({ agreementId, returnTo });
       const session = await createBillingCheckoutSession({
         agreementId,
         cadence,
@@ -468,6 +511,8 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         referralCode: genesisHandoff.metadata.referral_code ?? affiliateCode ?? null,
         visitorId: genesisHandoff.metadata.visitor_id ?? null,
       });
+      // Same-tab grant so return does not require demo applyConfirmedSettlement.
+      markAdvancedFullDraftCheckoutGranted();
       window.location.assign(session.checkout_url);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not start Stripe checkout.";
@@ -624,7 +669,6 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
 
   const returnParsed = extractAgreementIdFromSendReturnUrl(returnTo);
 
-  const isCreateAgreementCheckout = agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID && !isSingleAgreementCheckout;
   const [genesisBetaAuth, setGenesisBetaAuth] = useState<GenesisBetaPaymentBypassAuth | undefined>(undefined);
   const devPaymentBypassState = useMemo(() => resolveDevPaymentBypassState(), []);
   const devPaymentBypassActive = isCreateAgreementCheckout && devPaymentBypassState.enabled;
@@ -636,7 +680,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   const localSmokeBypassBlocked =
     isCreateAgreementCheckout && isLocalBrowserOrigin() && !devPaymentBypassState.enabled;
   const [upgradeCheckoutSnap, setUpgradeCheckoutSnap] = useState<UpgradeCheckoutContextV1 | null>(() =>
-    agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID ? readUpgradeCheckoutContext() : null,
+    isCreateAgreementCheckout ? readUpgradeCheckoutContext() : null,
   );
 
   useEffect(() => {
@@ -1162,11 +1206,16 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
           className="text-sm font-medium text-slate-400 underline-offset-2 hover:text-slate-200 hover:underline"
           onClick={() => {
             if (isCreateAgreementCheckout) {
-              navigate(buildCreateReturnToWithStarterReviewRestore());
+              navigate(buildConversionCheckoutReturnTo(persistAgreementId));
               return;
             }
             if (returnTo.startsWith("/app/create")) {
-              navigate(appendReturnToQueryParam(returnTo, "restore", "starterReview"));
+              navigate(
+                sanitizeConversionCheckoutReturnTo({
+                  returnTo,
+                  persistAgreementId,
+                }),
+              );
               return;
             }
             window.history.back();

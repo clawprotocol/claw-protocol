@@ -67,12 +67,15 @@ export type AgreementDraft = {
    */
   vs01_signing_packet_v1?: Vs01SigningPacketDraftRecordV1 | null;
   /**
-   * Accepted review snapshot. Owner signed-view and lock binding read this
-   * corpus as-is — never placeholder-scrub already-accepted paper.
+   * Server accepted Review snapshot (corpus bytes). Owner signed-view and lock
+   * binding read this corpus as-is — never placeholder-scrub already-accepted
+   * paper, and do not drop on normalize.
    */
   accepted_review_snapshot_v1?: AcceptedReviewSnapshotDraftV1 | null;
   /** Creator/admin is coordinating only — not a legal party or signer. */
   creator_coordinator_only?: boolean;
+  /** Server Review snapshot registry. Do not drop on normalize. */
+  canonical_review_snapshots_v1?: Record<string, unknown> | null;
 };
 
 /** Server-persisted fully executed snapshot (snake_case API keys). */

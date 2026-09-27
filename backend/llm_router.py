@@ -137,15 +137,28 @@ def _user_content_with_minimized(original: Any, minimized: str) -> Union[str, Li
     return minimized
 
 
+# premium-refine user JSON includes the full current_document_text + instruction.
+# The default 4k minimize cap truncates the corpus and drops the trailing prompt,
+# which forces a template remint ([ORG_n]) instead of a surgical edit.
+_EXPLICIT_REVISION_MAX_MINIMIZED_CHARS: int = 300_000
+_EXPLICIT_REVISION_SKIP_REDACTION: tuple[str, ...] = ("org", "name")
+
+
 def _messages_after_user_airlock(
     messages: List[Dict[str, Any]],
     *,
     airlock_profile: AirlockPolicyProfile = "default",
     airlock_log_context: Optional[str] = None,
     identity_bindings: Optional[Dict[str, str]] = None,
+    call_purpose: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     user_idx = 0
+    purpose = (call_purpose or "").strip()
+    airlock_kwargs: Dict[str, Any] = {"policy_profile": airlock_profile}
+    if purpose == "explicit_revision":
+        airlock_kwargs["max_minimized_chars"] = _EXPLICIT_REVISION_MAX_MINIMIZED_CHARS
+        airlock_kwargs["skip_redaction_categories"] = _EXPLICIT_REVISION_SKIP_REDACTION
     for msg in messages:
         if (msg.get("role") or "") != "user":
             out.append(msg)
@@ -154,7 +167,7 @@ def _messages_after_user_airlock(
         if identity_bindings is not None and IDENTITY_TOKEN.search(raw):
             raise AgreementIdentityError("reserved_identity_token_in_input")
         airlock_result = run_ai_airlock(
-            raw, policy_profile=airlock_profile, identity_bindings=identity_bindings,
+            raw, identity_bindings=identity_bindings, **airlock_kwargs,
         )
         if airlock_result.blocked:
             codes = tuple(airlock_result.policy_decision.reason_codes)
@@ -304,6 +317,7 @@ def call_legal_llm(
         airlock_profile=profile,
         airlock_log_context=airlock_log_context,
         identity_bindings=identity_bindings,
+        call_purpose=call_purpose,
     )
     if identity_bindings is not None:
         # Bind only tokens actually sent after minimization, not omitted input.

@@ -28,7 +28,12 @@ import {
   paidProSignerMetadataPartiesFromFrozenManifest,
   readFrozenCanonicalManifestPartyNames,
 } from "./frozenCanonicalManifestAuthority";
-import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
+import {
+  resolveAuthoritativeSignerCount,
+  resolvePartyNamesPreferringCommercialCorpus,
+} from "./signerCountAuthority";
+import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
+import { resolveDeclaredExplicitPartyCount } from "./partySlotIdentityNormalize";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 import { resolveAuthoritativeLegalPartyIdentities } from "./legalPartyIdentityAuthority";
@@ -41,6 +46,8 @@ export type ResolvePaidProReviewRenderPartiesArgs = {
   liveSignerMetadataUi?: LiveSignerMetadataUiState | null;
   /** When true, run intake-authority sanitizer on post-finalize locked paint candidates. */
   postFinalizeIntakeReseal?: boolean;
+  /** Commercial 200 corpus — recovers Party 3/4 after leftover 2-party prep wipe. */
+  corpusPlain?: string | null;
 };
 
 function mergeCanonicalBundleWhenSignerMetadataPresent(
@@ -209,17 +216,25 @@ function resolvePartiesForReviewRenderCore(
   const intakeRaw = (args?.intakeText ?? "").trim();
   const draftPartyNames =
     args?.draft?.parties?.map((p) => String((p as { name?: string }).name ?? "").trim()) ?? null;
+  const corpusPlain =
+    String(args?.corpusPlain ?? "").trim() ||
+    (hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText() : "") ||
+    null;
+  const declared = resolveDeclaredExplicitPartyCount(intakeRaw) ?? 0;
   const slotCount = resolveAuthoritativeSignerCount({
     intakeText: intakeRaw || null,
     draftPartyNames: draftPartyNames ?? undefined,
     draftParties: args?.draft?.parties,
+    corpusPlain,
   }).count;
   const draftAuthoritative =
     args?.draft?.parties
       ?.map((p) => String((p as { name?: string }).name ?? "").trim())
       .filter((name) => name.length >= 2 && isAuthoritativeLegalEntityName(name)) ?? [];
+  const leftoverDraftTooThin = declared >= 3 && draftAuthoritative.length < declared;
 
   const partiesFromDraftAuthority = (): PaidProSignerMetadataParty[] | null => {
+    if (leftoverDraftTooThin) return null;
     if (draftAuthoritative.length < slotCount) return null;
     const acceptedCorpus = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText() : null;
     const legalEntities = draftAuthoritative.slice(0, slotCount);
@@ -305,8 +320,28 @@ function resolvePartiesForReviewRenderCore(
     return labeledAuthority;
   }
 
+  const commercialNames = resolvePartyNamesPreferringCommercialCorpus({
+    intakeText: intakeRaw,
+    corpusPlain,
+    leftoverNames: draftAuthoritative,
+  });
+  if (
+    commercialNames.length >= 3 &&
+    (leftoverDraftTooThin || labeledAuthority.length < commercialNames.length)
+  ) {
+    // Leftover 2-party labeled rows must not slot-merge back over recovered Party 3/4.
+    return commercialNames.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES).map((partyLegalName, partyIndex) => ({
+      partyIndex,
+      partyLegalName,
+      signerEmail: "",
+      signerName: "",
+      signerTitle: "",
+      partyAddress: "",
+    }));
+  }
+
   const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties;
-  if (consumed && consumed.length >= 2) {
+  if (consumed && consumed.length >= 2 && !(leftoverDraftTooThin && consumed.length < declared)) {
     const merged = mergeCanonicalBundleWhenSignerMetadataPresent(
       mergeLabeledPartyAuthorityIntoParties(
         mergeLiveSignerFieldsOntoParties(consumed, liveParties, preferLiveSignerFields),
@@ -325,7 +360,7 @@ function resolvePartiesForReviewRenderCore(
   if (liveParties && liveParties.length >= 2) {
     return mergeLabeledPartyAuthorityIntoParties(liveParties, intakeRaw);
   }
-  const acceptedCorpus = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText() : null;
+  const acceptedCorpus = corpusPlain || (hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText() : null);
   const records = acceptedCorpus
     ? resolveCanonicalPartyIdentitiesFromSources({
         rawIntake: intakeRaw || null,

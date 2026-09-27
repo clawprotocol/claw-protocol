@@ -9,6 +9,7 @@ from backend.billing.checkout_app_origin import (
     build_checkout_cancel_url,
     build_checkout_success_url,
     build_portal_return_url,
+    drop_starter_review_from_after_pay_return,
     resolve_checkout_app_origin,
 )
 
@@ -81,13 +82,33 @@ def test_unknown_environment_is_production_like_not_localhost():
 
 def test_success_url_preserves_draft_recovery_and_session_placeholder():
     url = build_checkout_success_url(
-        return_to="/app/create?restore=starterReview",
+        return_to="/app/create",
         origin=STAGING_CANONICAL_ORIGIN,
     )
-    assert url.startswith(f"{STAGING_CANONICAL_ORIGIN}/app/create?restore=starterReview")
+    assert url.startswith(f"{STAGING_CANONICAL_ORIGIN}/app/create?")
     assert "premiumCompletion=1" in url
     assert "checkout_session_id={CHECKOUT_SESSION_ID}" in url
     assert url.count("premiumCompletion=1") == 1
+    assert "restore=starterReview" not in url
+
+
+def test_success_url_drops_starter_review_and_keeps_last_good_premium_completion():
+    url = build_checkout_success_url(
+        return_to="/app/create?restore=starterReview",
+        origin=STAGING_CANONICAL_ORIGIN,
+    )
+    assert url.startswith(f"{STAGING_CANONICAL_ORIGIN}/app/create?")
+    assert "restore=starterReview" not in url
+    assert "restoreAgreementId=" not in url
+    assert "premiumCompletion=1" in url
+    assert "checkout_session_id={CHECKOUT_SESSION_ID}" in url
+
+
+def test_drop_starter_review_leaves_send_path_alone():
+    path = drop_starter_review_from_after_pay_return(
+        "/app/send/3405d65b-f4fc-4b33-81d8-84a0734b927b?phase=send"
+    )
+    assert path == "/app/send/3405d65b-f4fc-4b33-81d8-84a0734b927b?phase=send"
 
 
 def test_success_url_rejects_external_return_path():

@@ -314,7 +314,8 @@ def test_create_flow_checkout_sentinel_allows_verified_user_without_agreement_ro
     assert body["session_id"] == "cs_test_create_flow"
     assert body["checkout_url"].startswith("https://checkout.stripe.com/")
     assert body["org_id"] == "user-create-flow-buyer"
-    assert captured["success_url"].startswith("http://localhost:5173/app/create?restore=starterReview")
+    assert captured["success_url"].startswith("http://localhost:5173/app/create?premiumCompletion=1")
+    assert "restore=starterReview" not in captured["success_url"]
     assert "checkout_session_id={CHECKOUT_SESSION_ID}" in captured["success_url"]
     assert captured["cancel_url"].startswith("http://localhost:5173/app/checkout/__claw_create_checkout__")
 
@@ -357,8 +358,9 @@ def test_staging_checkout_ignores_localhost_origin_header(isolated_usage, monkey
     )
     assert res.status_code == 200, res.text
     assert captured["success_url"].startswith(
-        "https://believable-gentleness-staging.up.railway.app/app/create?restore=starterReview"
+        "https://believable-gentleness-staging.up.railway.app/app/create?premiumCompletion=1"
     )
+    assert "restore=starterReview" not in captured["success_url"]
     assert "localhost" not in captured["success_url"]
     assert "evil.example" not in captured["success_url"]
     assert "checkout_session_id={CHECKOUT_SESSION_ID}" in captured["success_url"]

@@ -37,6 +37,7 @@ import {
   buildPrepareBridgeCorpusGateArgs,
   resolveAgreementCorpusForPrepareHandoff,
 } from "../../vs01/vs01PrepareBridgeCorpus";
+import { bindReviewCorpusOntoSeededVs01Document } from "../../vs01/vs01ReviewCorpusServerContent";
 import {
   resolveFinalVs01CorpusOrBlock,
   VS01_SIGNING_CORPUS_MIN_LEN,
@@ -52,6 +53,10 @@ import {
 import { isPlausibleEmail } from "../../vs01/detailsStepValidation";
 import type { Vs01Counterparty } from "../../vs01/types";
 import { resolveApiBase } from "../../lib/clawApi";
+import {
+  readPaidProVs01PostSignHandoff,
+  writePaidProVs01PostSignHandoff,
+} from "../../vs01/vs01PaidProPostSignHandoff";
 
 const BRIDGE_SESSION_KEY = "claw_agreement_vs01_bridge_handoff_v1";
 /** Per-document durable copy — survives sessionStorage death, new tab, later visit. */
@@ -985,15 +990,31 @@ export async function fetchAgreementVs01SigningSeed(
   draft?: AgreementDraft | null,
   signingCorpusPlain?: string | null,
   signingCorpusSource?: string | null,
-  options?: { includeShortSigningCorpus?: boolean; esignHandoff?: Record<string, unknown> | null },
+  replaceDocumentIdOrOptions?:
+    | string
+    | null
+    | {
+        includeShortSigningCorpus?: boolean;
+        esignHandoff?: Record<string, unknown> | null;
+        replaceDocumentId?: string | null;
+      },
 ): Promise<AgreementVs01SigningSeedResult> {
   const id = agreementId.trim();
   if (!id) return { ok: false, reason: "missing_agreement_id" };
   logVs01SigningSeedPreflight(id, draft ?? null, signingCorpusPlain, signingCorpusSource);
   const corpusPayload = (signingCorpusPlain ?? "").trim();
+  const options =
+    replaceDocumentIdOrOptions && typeof replaceDocumentIdOrOptions === "object"
+      ? replaceDocumentIdOrOptions
+      : undefined;
   const includeCorpus =
     corpusPayload.length >= VS01_SIGNING_CORPUS_MIN_LEN ||
     (Boolean(options?.includeShortSigningCorpus) && corpusPayload.length > 0);
+  const replaceId = (
+    typeof replaceDocumentIdOrOptions === "string"
+      ? replaceDocumentIdOrOptions
+      : options?.replaceDocumentId ?? ""
+  ).trim();
   try {
     const res = await fetch(
       `${resolveApiBase().replace(/\/$/, "")}/api/agreements/${encodeURIComponent(id)}/vs01-signing-seed`,
@@ -1003,6 +1024,7 @@ export async function fetchAgreementVs01SigningSeed(
         body: JSON.stringify({
           ...(includeCorpus ? { signing_corpus_plain: corpusPayload } : {}),
           ...(options?.esignHandoff ? { esign_handoff: options.esignHandoff } : {}),
+          ...(replaceId.startsWith("doc_") ? { document_id: replaceId } : {}),
         }),
       },
     );
@@ -1122,6 +1144,85 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
         ? handoffText
         : "";
   if (!corpusForSeed) return false;
+
+  const existingBridge = readAgreementVs01BridgeSession();
+  const existingBridgeDoc =
+    existingBridge?.agreementId === id ? existingBridge.vs01DocumentId.trim() : "";
+  const existingHandoffDoc = (readPaidProVs01PostSignHandoff(id)?.vs01DocumentId || "").trim();
+  const existingDoc =
+    existingBridgeDoc && existingBridgeDoc !== "pending"
+      ? existingBridgeDoc
+      : existingHandoffDoc || "";
+  if (existingDoc) {
+    // First failing predicate after #142: esign_paints_get_content_not_client_seed.
+    // Client seed refresh stays as a helper; GET /content is the paint SoT.
+    // POST vs01-signing-seed with Review corpus (prefer same vs01 id).
+    const server = await bindReviewCorpusOntoSeededVs01Document({
+      agreementId: id,
+      existingDocumentId: existingDoc,
+      reviewCorpus: corpusResolution.corpus,
+      existingBridgeCorpus: existingBridge?.agreementCorpusText,
+      seed: fetchAgreementVs01SigningSeed,
+      draft: mergedWithCorpus,
+      signingCorpusSource: handoff?.source ?? corpusResolution.source,
+    });
+    if (!server.ok) {
+      // Leftover / stale seed bind failed. Seed a new packet for this persist
+      // Review — do not open leftover esign or fail into the intake quiz.
+      // eslint-disable-next-line no-console
+      console.warn("[agreement-vs01-existing-bind-failed]", {
+        agreementId: id,
+        existingDocumentId: existingDoc,
+        reason: server.reason,
+      });
+    } else {
+      const boundDoc = server.documentId;
+      if (boundDoc !== existingDoc) {
+        const priorHandoff = readPaidProVs01PostSignHandoff(id);
+        if (priorHandoff) {
+          writePaidProVs01PostSignHandoff({
+            ...priorHandoff,
+            vs01DocumentId: boundDoc,
+            signers: priorHandoff.signers.map((row) => ({
+              ...row,
+              signingUrl: (row.signingUrl || "").replace(existingDoc, boundDoc),
+            })),
+            ownerSigningUrl: priorHandoff.ownerSigningUrl
+              ? priorHandoff.ownerSigningUrl.replace(existingDoc, boundDoc)
+              : priorHandoff.ownerSigningUrl,
+          });
+        }
+      }
+      logSignerMetadataBeforeVs01Bridge(merged, resolvedSetup);
+      logAgreementVs01RecipientEmailMergeDiagnostics(merged, recipientSetupPlausibleInputFlags(resolvedSetup));
+      const reusedBridge = buildAgreementVs01BridgeSession({
+        agreementId: id,
+        vs01DocumentId: boundDoc,
+        draft: mergedWithCorpus,
+        senderFirstLawdogHandoff: true,
+        reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
+        agreementCorpusText: corpusResolution.corpus,
+        recipientSetup: resolvedSetup,
+      });
+      logAgreementVs01BridgePreflight(reusedBridge);
+      logVs01BridgeSignerMetadata(reusedBridge);
+      writeAgreementVs01BridgeSession(reusedBridge);
+      setPaidProAgreementBridgeSkipMarker(boundDoc);
+      const route = `/app/esign/${encodeURIComponent(boundDoc)}?agreement_bridge=1`;
+      logAgreementToVs01EsignRoute({
+        agreementId: id,
+        seedDocumentId: boundDoc,
+        route,
+        reason: server.reason,
+        replacedServerContent: server.replaced,
+        fetchedWasTemplate: server.fetchedWasTemplate,
+        agreementBridgeMode: reusedBridge.agreementBridgeMode ?? null,
+        ownerIsPreparingPacket: reusedBridge.ownerIsPreparingPacket ?? null,
+      });
+      void options.navigate(route);
+      return true;
+    }
+  }
 
   const vs01Seed = await fetchAgreementVs01SigningSeed(
     id,

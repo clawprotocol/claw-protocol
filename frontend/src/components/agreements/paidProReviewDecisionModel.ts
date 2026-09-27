@@ -52,6 +52,22 @@ export function shouldShowPaidProReviewDecisionChrome(phase: PaidProReviewDecisi
   return phase === "decision_1" || phase === "decision_2";
 }
 
+/**
+ * Hide on-card Choose-your-next-step chrome only while the dashboard resume signer form
+ * is still the primary surface. After accept remounts review (signers finalized, form
+ * unmounted), this must be false — otherwise the chooser is suppressed and the sticky
+ * Continue is already hidden (`review_decision`).
+ */
+export function shouldHidePaidProReviewDecisionChromeForDashboardResume(args: {
+  dashboardSignerSetupResumeUiActive: boolean;
+  inlineSignerSetupMounted: boolean;
+  signerMetadataFinalized: boolean;
+}): boolean {
+  if (args.signerMetadataFinalized) return false;
+  if (!args.dashboardSignerSetupResumeUiActive) return false;
+  return args.inlineSignerSetupMounted;
+}
+
 export function resolvePaidProPrepareSignaturesHandler(args: {
   phase: PaidProReviewDecisionPhase;
   onDecision1: () => void;
@@ -61,4 +77,27 @@ export function resolvePaidProPrepareSignaturesHandler(args: {
   if (args.phase === "decision_1") return args.onDecision1;
   if (args.phase === "decision_2") return args.onDecision2;
   return args.onFallback;
+}
+
+export type Decision2AcceptedPrepareAction =
+  | "enter_esign_track"
+  | "remount_signer_setup"
+  | "fail_closed"
+  | "fallback";
+
+/**
+ * Decision-2 / already-accepted Prepare must enter the signature track — never
+ * remount Decision-1 signer setup (TEST570). Empty/invalid signers stay closed.
+ */
+export function resolveDecision2AcceptedPrepareAction(args: {
+  phase: PaidProReviewDecisionPhase;
+  acceptedSnapshotEnabled: boolean;
+  signerDetailsComplete: boolean;
+}): Decision2AcceptedPrepareAction {
+  if (args.phase === "decision_2" || args.acceptedSnapshotEnabled) {
+    if (!args.signerDetailsComplete) return "fail_closed";
+    return "enter_esign_track";
+  }
+  if (args.phase === "decision_1") return "remount_signer_setup";
+  return "fallback";
 }

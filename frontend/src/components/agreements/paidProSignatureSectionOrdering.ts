@@ -154,7 +154,21 @@ export function repairPaidProSignatureSectionOrdering(text: string): PaidProSign
 
   prefixBlocks = [...prefixBlocks, ...blocksToInsert];
 
+  const firstNumberedIdx = prefixLines.findIndex((line) => NUMBERED_HEADING_RE.test(line.trim()));
+  const leadingUnnumbered =
+    firstNumberedIdx < 0
+      ? prefixLines
+      : firstNumberedIdx > 0
+        ? prefixLines.slice(0, firstNumberedIdx)
+        : [];
+
   const rebuiltPrefix: string[] = [];
+  if (leadingUnnumbered.length > 0) {
+    rebuiltPrefix.push(...leadingUnnumbered);
+    if (leadingUnnumbered[leadingUnnumbered.length - 1]?.trim()) {
+      rebuiltPrefix.push("");
+    }
+  }
   for (const block of prefixBlocks) {
     rebuiltPrefix.push(block.headingLine);
     rebuiltPrefix.push(...block.bodyLines);

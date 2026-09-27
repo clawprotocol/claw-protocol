@@ -9,6 +9,9 @@ import re
 from typing import Optional
 from urllib.parse import parse_qsl, unquote, urlencode
 
+# Frontend create-flow sentinel — no workspace row exists yet.
+CREATE_FLOW_CHECKOUT_AGREEMENT_ID = "__claw_create_checkout__"
+
 CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 ALLOWED_EXACT_PATHS = frozenset(
@@ -249,10 +252,43 @@ def resolve_safe_redirect_path(candidate: Optional[str], fallback: str = "/app")
     return fallback
 
 
+def extract_agreement_id_from_app_path(path: str) -> Optional[str]:
+    """Return a real checkout/create agreement id from an allowlisted app path."""
+    raw = (path or "").strip()
+    no_query = raw.split("?", 1)[0]
+    checkout_prefix = "/app/checkout/"
+    if no_query.startswith(checkout_prefix):
+        aid = unquote(no_query[len(checkout_prefix) :].split("/", 1)[0]).strip()
+        if aid and aid != CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
+            return aid
+    if no_query == "/app/create" or no_query.startswith("/app/create"):
+        try:
+            from urllib.parse import parse_qs, urlparse
+
+            parsed = urlparse(raw)
+            aid = (parse_qs(parsed.query).get("agreementId") or [""])[0].strip()
+            if aid and aid != CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
+                return aid
+        except Exception:
+            return None
+    return None
+
+
 def build_destination_with_agreement(*, destination_path: str, agreement_id: Optional[str]) -> str:
     dest = resolve_server_auth_destination(destination_path, "/app")
     aid = (agreement_id or "").strip()
-    if aid and dest.startswith("/app/create") and "agreementId=" not in dest:
+    if not aid or aid == CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
+        return dest
+    if dest.startswith("/app/create") and "agreementId=" not in dest:
         sep = "&" if "?" in dest else "?"
         return f"{dest}{sep}{urlencode({'agreementId': aid})}"
+    checkout_prefix = "/app/checkout/"
+    if dest.startswith(checkout_prefix):
+        rest = dest[len(checkout_prefix) :]
+        path_id, _sep, query = rest.partition("?")
+        current = unquote(path_id).strip()
+        # Restore the pre-auth conversion id. A later remint/stale UUID must not win.
+        if current != aid:
+            suffix = f"?{query}" if query else ""
+            return f"{checkout_prefix}{aid}{suffix}"
     return dest

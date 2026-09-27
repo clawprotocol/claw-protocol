@@ -33,6 +33,9 @@ def test_cors_allow_request_headers_includes_paid_pro_perf_trace_case_insensitiv
     assert cors_allow_request_header_allowed("x-claw-admin-reason")
     assert cors_allow_request_header_allowed("x-claw-user-id")
     assert cors_allow_request_header_allowed("X-CLAW-ORG-ID")
+    assert cors_allow_request_header_allowed("x-claw-entitlement-repair-org")
+    assert cors_allow_request_header_allowed("X-Claw-Entitlement-Repair-Org")
+    assert "X-Claw-Entitlement-Repair-Org" in CORS_ALLOW_REQUEST_HEADERS
     assert cors_allow_request_header_allowed("content-type")
     assert not cors_allow_request_header_allowed("x-claw-unknown-header")
 
@@ -468,3 +471,37 @@ def test_options_agreements_draft_preflight_allows_entitlement_repair_org_header
     assert res.headers.get("access-control-allow-origin") == origin
     allow_headers = (res.headers.get("access-control-allow-headers") or "").lower()
     assert "x-claw-entitlement-repair-org" in allow_headers
+
+
+def test_verify_checkout_session_preflight_allows_entitlement_repair_header_from_staging_frontend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    """After-pay verify uses clawAgreementHeaders (X-Claw-Entitlement-Repair-Org)."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
+    monkeypatch.setenv(
+        "CLAW_CORS_ALLOW_ORIGINS",
+        "https://believable-gentleness-staging.up.railway.app",
+    )
+    from backend.main import app
+
+    client = TestClient(app)
+    origin = "https://believable-gentleness-staging.up.railway.app"
+    res = client.options(
+        "/v1/billing/verify-checkout-session",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": (
+                "authorization, content-type, x-claw-org-id, x-claw-entitlement-repair-org"
+            ),
+        },
+    )
+    assert res.status_code in (200, 204)
+    assert res.headers.get("access-control-allow-origin") == origin
+    assert res.headers.get("access-control-allow-credentials") == "true"
+    allow_headers = (res.headers.get("access-control-allow-headers") or "").lower()
+    assert "x-claw-entitlement-repair-org" in allow_headers
+    assert "authorization" in allow_headers
+    assert "content-type" in allow_headers

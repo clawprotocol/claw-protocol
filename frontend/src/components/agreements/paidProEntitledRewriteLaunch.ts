@@ -11,6 +11,7 @@ import {
   authoritativePremiumPipelineResultForUiApply,
   hasUsablePremiumBodyText,
 } from "./premiumPostCheckoutApplyEligible";
+import { shouldSettleProReviewAfterPremiumFullDraft } from "./multiPartyCreateReviewSettle";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import type {
   PaidProGenerationTerminalOutcome,
@@ -86,6 +87,8 @@ export function shouldTreatEntitledRewritePipelineResultAsGenerationFailure(
   result: PremiumCompletionResult | null | undefined,
 ): boolean {
   if (!result) return true;
+  // 200 + usable server corpus must settle Review — do not fail-close on success.
+  if (shouldSettleProReviewAfterPremiumFullDraft(result)) return false;
   if (!authoritativePremiumPipelineResultForUiApply(result)) return true;
   const winning = (result.winningPremiumBodyText || "").trim();
   if (!hasUsablePremiumBodyText(winning)) return true;

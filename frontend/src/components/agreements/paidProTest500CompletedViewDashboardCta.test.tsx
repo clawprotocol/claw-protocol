@@ -52,6 +52,7 @@ function mockLoadedPreview() {
     corpusText: corpusPlain,
     usesPremiumDocument: false,
     corpusSource: "fully_executed_snapshot",
+    pdfAvailable: true,
   });
   vi.spyOn(agreementPublicVerify, "fetchPublicAgreementVerify").mockResolvedValue({
     agreement_id: AG,

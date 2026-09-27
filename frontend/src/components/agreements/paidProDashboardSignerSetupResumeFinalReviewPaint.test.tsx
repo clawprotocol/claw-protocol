@@ -169,6 +169,7 @@ describe("dashboard signer-setup resume → Continue paints finalized signer cor
   it("resume paint requires verified GET; persist failure stays a paid retry", () => {
     expect(intakeSrc).toContain("hasVerifiedCommercialDisplayCorpus");
     expect(intakeSrc).toContain("prepareCommercialReviewSnapshotAuthority({");
+    expect(intakeSrc).toContain("paintedPersistPlain: readPaintedSequentialPersistReviewPlain()");
     expect(intakeSrc).toContain("persistFrozenSigningAuthorityToBackendDetailed");
     expect(intakeSrc).toContain("Could not persist the finalized agreement snapshot");
     expect(intakeSrc).toContain("Could not persist frozen signing authority");

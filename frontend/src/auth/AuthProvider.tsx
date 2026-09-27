@@ -22,6 +22,16 @@ import { readE2eAuthSessionForDev } from "./e2eAuthSessionBridge";
 import { clearLawdogUserSessionState } from "./userSessionState";
 import { bindResolvedAuthLifecycle } from "../account/currentUser";
 
+/** Same-user auth events after a successful finalize must not POST bind-user-org again. */
+export function isAlreadyFinalizedWorkspaceUser(
+  finalizedUserId: string | null,
+  nextUserId: string | undefined | null,
+): boolean {
+  const finalized = (finalizedUserId || "").trim();
+  const next = (nextUserId || "").trim();
+  return Boolean(finalized && next && finalized === next);
+}
+
 export type AuthSignInOpts = {
   returningSignIn?: boolean;
   stagingDirectOnly?: boolean;
@@ -29,6 +39,8 @@ export type AuthSignInOpts = {
   destinationPath?: string;
   /** Server continuation purpose. ``quick_pdf_return`` is the only way into Quick. */
   authPurpose?: string;
+  /** Pre-auth checkout / persist agreement id — claimed on return, never reminted. */
+  agreementId?: string;
 };
 
 export type AuthContextValue = {
@@ -60,26 +72,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(enabled);
   const [session, setSession] = useState<Session | null>(e2eSession);
   const finalizedUserRef = useRef<string | null>(null);
+  const finalizeInFlightRef = useRef<string | null>(null);
 
   const finalizeUser = useCallback(async (user: User, claimMethod: "magic_link" | "google" | "session_restore") => {
-    if (finalizedUserRef.current === user.id) {
-      // Idempotent identity upsert so Admin Console can find returning sessions by email.
-      try {
-        const s = await getAuthSession();
-        await bindAuthenticatedUserToWorkspace({
-          userId: user.id,
-          email: user.email,
-          displayName: displayNameFromUser(user) || undefined,
-          claimMethod: "session_restore",
-          accessToken: s?.access_token,
-        });
-      } catch {
-        // Non-blocking — full finalize already succeeded for this session.
-      }
+    if (isAlreadyFinalizedWorkspaceUser(finalizedUserRef.current, user.id)) {
       return;
     }
-    finalizedUserRef.current = user.id;
-    await finalizeAuthenticatedSession({ user, claimMethod });
+    if (finalizeInFlightRef.current === user.id) {
+      return;
+    }
+    finalizeInFlightRef.current = user.id;
+    try {
+      await finalizeAuthenticatedSession({ user, claimMethod });
+      finalizedUserRef.current = user.id;
+    } catch {
+      // Allow a later auth event to retry the first bind / claim finalize.
+    } finally {
+      if (finalizeInFlightRef.current === user.id) {
+        finalizeInFlightRef.current = null;
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -150,6 +162,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
         destinationPath: resolveSignInDestination(opts),
         authPurpose: opts?.authPurpose,
+        agreementId: opts?.agreementId,
         provider: "email",
       });
       return signInWithEmailMagicLink(email, buildAuthCallbackUrl(undefined, continuationId), {
@@ -166,6 +179,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
         destinationPath: resolveSignInDestination(opts),
         authPurpose: opts?.authPurpose,
+        agreementId: opts?.agreementId,
         provider: "google",
       });
       await signInWithGoogle(buildAuthCallbackUrl(undefined, continuationId));
@@ -179,6 +193,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setSession(null);
       finalizedUserRef.current = null;
+      finalizeInFlightRef.current = null;
+      clearCachedAccessToken();
       bindResolvedAuthLifecycle({ status: "signed_out" });
       clearLawdogUserSessionState();
     }

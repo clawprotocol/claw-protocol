@@ -77,6 +77,44 @@ export function writePaidProVs01PostSignHandoff(payload: PaidProVs01PostSignHand
   }
 }
 
+/** Session handoff for the active persist — no agreement id required. */
+export function readActivePaidProVs01PostSignHandoff(): PaidProVs01PostSignHandoffV1 | null {
+  try {
+    const raw = sessionStorage.getItem(PAID_PRO_VS01_POST_SIGN_SESSION_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw) as Partial<PaidProVs01PostSignHandoffV1>;
+    const id = String(o?.agreementId || "").trim();
+    if (o?.v !== 1 || !id) return null;
+    return readPaidProVs01PostSignHandoff(id);
+  } catch {
+    return null;
+  }
+}
+
+/** Newest localStorage packet handoff — hard-refresh / new-tab fallback. */
+export function readLatestLocalPaidProVs01PostSignHandoff(): PaidProVs01PostSignHandoffV1 | null {
+  if (typeof localStorage === "undefined") return null;
+  let best: PaidProVs01PostSignHandoffV1 | null = null;
+  let bestAt = -1;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(PAID_PRO_VS01_POST_SIGN_LS_PREFIX)) continue;
+      const id = key.slice(PAID_PRO_VS01_POST_SIGN_LS_PREFIX.length).trim();
+      const parsed = readLocalPaidProVs01PostSignHandoff(id);
+      if (!parsed) continue;
+      const at = Date.parse(parsed.savedAt) || 0;
+      if (at >= bestAt) {
+        best = parsed;
+        bestAt = at;
+      }
+    }
+  } catch {
+    return best;
+  }
+  return best;
+}
+
 export function readPaidProVs01PostSignHandoff(agreementId: string): PaidProVs01PostSignHandoffV1 | null {
   const id = (agreementId || "").trim();
   if (!id) return null;

@@ -423,10 +423,11 @@ def assert_agreement_full_draft_read_allowed(
     from backend.security.request_identity import resolve_verified_subject_from_request, resolve_workspace_identity
 
     if commercial:
-        if _is_demo_checkout_session(request):
-            identity = resolve_workspace_identity(request)
-            subject = identity.subject_ref
-            if not _agreement_owned_by_subject(aid, subject):
+        identity = resolve_workspace_identity(request)
+        if _is_demo_checkout_session(request) or identity.kind == "anonymous":
+            # Same guest session that persisted the temporary draft may reload it.
+            # A different anonymous session still fails ownership.
+            if not _agreement_owned_by_subject(aid, identity.subject_ref):
                 _deny_agreement_read()
             return
         require_commercial_owner_principal(request)

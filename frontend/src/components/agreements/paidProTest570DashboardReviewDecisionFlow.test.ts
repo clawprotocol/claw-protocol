@@ -158,6 +158,14 @@ describe("TEST570 dashboard paid-create review decision precedes signer setup", 
         deliveryTrackDecisionActive: false,
       }),
     ).toBe(false);
+    // Decision-1 still mounts inline signer setup (TEST570 latch). Decision-2 / already-accepted
+    // Prepare enters the esign track first and does not remount.
+    const prepareStart = intakeSrc.indexOf("const handlePaidProPrepareSignaturesFromFirstReview");
+    const prepareBlock = intakeSrc.slice(prepareStart, prepareStart + 8000);
+    expect(prepareBlock).toContain("resolveDecision2AcceptedPrepareAction");
+    expect(prepareBlock).toContain('prepareAction === "enter_esign_track"');
+    expect(prepareBlock).toContain("setPaidProInlineSignerSetupLatched(true)");
+    expect(prepareBlock).toContain("canMountPaidProInlineSignerSetupFromFirstReview");
   });
 });
 

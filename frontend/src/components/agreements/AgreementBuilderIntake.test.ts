@@ -595,7 +595,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const tryOpen = intake.indexOf("try {", handoff);
     expect(tryOpen).toBeGreaterThan(handoff);
     const slice = intake.slice(tryOpen, tryOpen + 320);
-    expect(slice).toMatch(/setHardError\(null\);[\s\S]*?const existingId = reviewAgreementIdRef/);
+    expect(slice).toMatch(/setHardError\(null\);[\s\S]*?const existingId = resolveExistingConversionAgreementId/);
     const hydrateOk = intake.indexOf('console.log("[AgreementIntake] persistence + hydrate OK');
     expect(hydrateOk).toBeGreaterThan(0);
     expect(intake).toContain("reviewAgreementIdRef.current = id");
@@ -909,7 +909,14 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("adding_signature_fields");
     expect(intake).toContain("signing_packet_ready");
     const sendIdx = intake.indexOf("const handleProSendForSignature = React.useCallback");
-    const sendBlock = intake.slice(sendIdx, sendIdx + 9500);
+    const sendEnd = intake.indexOf(
+      "const handlePaidProPrepareSignaturesFromFirstReview = React.useCallback",
+      sendIdx,
+    );
+    const sendBlock = intake.slice(
+      sendIdx,
+      sendEnd > sendIdx ? sendEnd : sendIdx + 9500,
+    );
     expect(sendBlock).toContain('continueGuidedFinalReviewToSigning({ intent: "signature" })');
     expect(sendBlock).toContain("canProceedGuidedFinalReviewToSigning");
     expect(sendBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
@@ -1191,7 +1198,7 @@ describe("paid Pro runtime authority establishment (intake wiring)", () => {
     expect(frag).toContain("canEnableCommercialPrepareFromServerSnapshot(agreementIdForAccept)");
     // Empty id must return before accept/prepare progress — no silent bypass.
     const emptyIdx = frag.indexOf("if (!agreementIdForAccept)");
-    const acceptIdx = frag.indexOf("acceptDisplayedCommercialReviewSnapshot");
+    const acceptIdx = frag.indexOf("ensureAcceptedCommercialReviewForEsignHandoff");
     expect(emptyIdx).toBeGreaterThanOrEqual(0);
     expect(acceptIdx).toBeGreaterThan(emptyIdx);
   });

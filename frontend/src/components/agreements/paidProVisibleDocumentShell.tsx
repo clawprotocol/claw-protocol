@@ -26,6 +26,10 @@ import {
   isDashboardResumeSurfaceActive,
   selectDashboardResumePaint,
 } from "./paidProDashboardResumeAuthoritySelection";
+import { resolvePaidProNoticeAuthorityPartiesForFreeze } from "./paidProNoticeContactAuthority";
+import { restoreSequentialTopLevelSectionOrder } from "./paidProOrphanSectionNumberRepair";
+import { ensureOperativeIfToNoticeDelivery } from "./paidProPartyNoticeDetails";
+import { repairReviewPlainSectionContinuity } from "./reviewPlainSectionContinuity";
 import {
   auditPaidProPostFinalizeVisibleSurface,
   logPaidProPostFinalizeVisibleSurfaceMismatch,
@@ -35,6 +39,8 @@ import { resolvePaidProPostFinalizeUserVisiblePlain } from "./paidProDisplayPlai
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import type { VisibleProPaperDiagnosticsTrace } from "./visibleProPaperRenderBoundary";
 import { readAcceptedPipelineReviewCorpusPlain } from "./paidProAcceptedPipelineReviewCorpus";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
+import { latchPaintedSequentialPersistReview } from "./paidProPaintedSequentialPersistReview";
 import {
   getPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
@@ -63,6 +69,117 @@ const mountedLogKeys = new Set<string>();
 
 function trimOrEmpty(s: string | null | undefined): string {
   return (s || "").trim();
+}
+
+/**
+ * Last-good address-boundary + entity-only If-to on the buyer-visible paint corpus.
+ * Persist / canonical-review-snapshot bytes do not go through
+ * projectPaidProFrozenSoTDisplayPlain (consumed-metadata-only) or
+ * resolvePaidProReviewRenderPlain. Display-only — does not rewrite SoT.
+ */
+const WITNESS_LINE_RE = /^(IN WITNESS WHEREOF|EXECUTED AS OF|EXECUTION PAGE|SIGNATURES?)\b/im;
+const TOP_LEVEL_SECTION_HEADING_RE = /^(?:#{1,4}\s+)?\d{1,2}\.\s+(?!\d)[A-Z].+$/m;
+const NOTICES_SECTION_HEADING_RE =
+  /^(?:#{1,4}\s+)?(?:\d+\.)+\s+(?:NOTICES|Notices|Notice)\b[^\n]*$/im;
+
+function nextTopLevelSectionCut(tail: string): number | null {
+  const nxt = tail.match(TOP_LEVEL_SECTION_HEADING_RE);
+  const wit = tail.match(/^\s*(IN WITNESS WHEREOF|EXECUTED AS OF|EXECUTION PAGE|SIGNATURES?)\b/im);
+  const cuts = [nxt, wit]
+    .map((m) => (m && m.index !== undefined ? m.index : null))
+    .filter((n): n is number => n !== null);
+  return cuts.length ? Math.min(...cuts) : null;
+}
+
+function isPreservableCommittedPaintParagraph(paragraph: string): boolean {
+  const t = paragraph.trim();
+  if (t.length < 16 || t.length > 800) return false;
+  // Only standalone refine sentences — never re-hydrate a persist heading/If-to block
+  // that display projection already split or dropped (fused Agreement12. NOTICES).
+  if (/\n/.test(t)) return false;
+  if (/^(?:#{1,4}\s+)?\d{1,2}\.\s+(?!\d)/.test(t)) return false;
+  if (/\d+\.\s+NOTICES\b/i.test(t) || /Agreement\d+\.\s+NOTICES/i.test(t)) return false;
+  if (/^(IN WITNESS WHEREOF|CLIENT\s*:|SERVICE PROVIDER\s*:|PARTY\s+\d+|If to\s+)/i.test(t)) {
+    return false;
+  }
+  if (/^(By|Name|Title|Date|Address|Email)\s*:/i.test(t)) return false;
+  return /[A-Za-z]/.test(t);
+}
+
+/**
+ * Display projection (If-to / section-order) can drop a trailing refine paragraph
+ * that sits after the last numbered heading. Splice those committed sentences
+ * back into Notices (or the last rendered section body) so forced-route paint
+ * matches CRS / SoT.
+ */
+export function reattachMissingCommittedPaintParagraphs(source: string, projected: string): string {
+  const src = (source || "").replace(/\r\n/g, "\n");
+  const out = (projected || "").replace(/\r\n/g, "\n");
+  if (!src.trim() || !out.trim()) return projected;
+  const missing = src
+    .split(/\n\n+/)
+    .map((p) => p.trim())
+    .filter((p) => isPreservableCommittedPaintParagraph(p) && !out.includes(p));
+  if (!missing.length) return projected;
+
+  const block = `\n\n${missing.join("\n\n")}\n\n`;
+  const notices = NOTICES_SECTION_HEADING_RE.exec(out);
+  const spliceAtHeading = (headingIndex: number, headingLength: number): string => {
+    const after = headingIndex + headingLength;
+    const cut = nextTopLevelSectionCut(out.slice(after));
+    const insertAt = after + (cut !== null ? cut : out.slice(after).trimEnd().length);
+    return `${out.slice(0, insertAt).replace(/\s+$/, "")}${block}${out.slice(insertAt).replace(/^\n+/, "")}`;
+  };
+  if (notices && notices.index !== undefined) {
+    return spliceAtHeading(notices.index, notices[0].length);
+  }
+  const headingRe = /^(?:#{1,4}\s+)?\d{1,2}\.\s+(?!\d)[A-Z].+$/gm;
+  let last: RegExpExecArray | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = headingRe.exec(out)) !== null) last = m;
+  if (last && last.index !== undefined) {
+    return spliceAtHeading(last.index, last[0].length);
+  }
+  const wit = WITNESS_LINE_RE.exec(out);
+  if (wit && wit.index !== undefined) {
+    return `${out.slice(0, wit.index).replace(/\s+$/, "")}${block}${out.slice(wit.index)}`;
+  }
+  return `${out.replace(/\s+$/, "")}${block}`;
+}
+
+function projectLastGoodIfToOnPaintPlain(
+  plain: string,
+  args?: PaidProFirstReviewVisibleDisplayArgs,
+): string {
+  const body = (plain || "").replace(/\r\n/g, "\n").trimEnd();
+  if (!body) return body;
+  const parties = resolvePaidProNoticeAuthorityPartiesForFreeze({
+    draft: args?.draft ?? null,
+    intakeText: args?.intakeText ?? null,
+    acceptedCorpus: body,
+  });
+  let afterIfTo = body;
+  if (parties.length >= 2) {
+    const noticed = ensureOperativeIfToNoticeDelivery(body, parties, {
+      intakeText: args?.intakeText ?? null,
+      draftPartyNames: (args?.draft?.parties ?? [])
+        .map((p) => String(p?.name ?? "").trim())
+        .filter(Boolean),
+      acceptedCorpus: body,
+    });
+    if (noticed.repairs.length > 0) afterIfTo = noticed.text;
+  }
+  // Notices splice / persist bytes can keep 12/13 ahead of the original 11. Governing Law.
+  // Restore last-good sequential identity order (10 then 11 then 12 then 13) on paint.
+  const ordered = restoreSequentialTopLevelSectionOrder(afterIfTo);
+  const afterOrder = ordered.repairs.length > 0 ? ordered.text : afterIfTo;
+  // Fill unused late-section holes (12 then 14 / 10 then 12) and restore a supplied
+  // governing-law term. Does not remint leftover 1..8 into 10/11/12/13.
+  const continued = repairReviewPlainSectionContinuity(afterOrder, {
+    intakeText: args?.intakeText,
+    jurisdiction: args?.draft?.jurisdiction,
+  });
+  return continued.repairs.length > 0 ? continued.text : afterOrder;
 }
 
 export function resetPaidProVisibleDocumentShellLogsForTests(): void {
@@ -106,7 +223,7 @@ export function resolveCanonicalPlainForVisibleShell(
     isPaidProPostFinalizeHydratedCorpusLocked() ||
     resolution.source === "paid_session_intake_rebuild" ||
     (!hasPaidProSourceOfTruth() && paidSessionActive);
-  const projectedPlain =
+  const titledPlain =
     resolution.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN && !skipTitleProjection
       ? projectPaidProVisibleTitleDisplayPlain(resolution.plain, {
           fallbackTitle: args.draft?.title,
@@ -114,6 +231,16 @@ export function resolveCanonicalPlainForVisibleShell(
           family: args.draft?.agreement_family,
         })
       : resolution.plain;
+  // First failing live-paint predicates: persist / canonical-review-snapshot corpus
+  // reached the preview without last-good If-to or sequential 10/11/12/13 order.
+  // Display-only; does not rewrite SoT.
+  const projectedPlain =
+    titledPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+      ? reattachMissingCommittedPaintParagraphs(
+          titledPlain,
+          projectLastGoodIfToOnPaintPlain(titledPlain, args),
+        )
+      : titledPlain;
   // Strip leaked user prompt prose that appears as numbered sections (e.g. "11. Mesa Realty
   // Group LLC / said", "12. Don't / count", "13. 12 month deal") and meta lines like
   // "Commercial detail carried forward from user notes". Live leak from Harbor retest.
@@ -127,7 +254,11 @@ export function resolveCanonicalPlainForVisibleShell(
   if (!mayPaintPaidPaper) {
     return { plain: "", source: resolution.source || "none" };
   }
-  if (strippedPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
+  const paintEligible =
+    strippedPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN ||
+    (titledPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN &&
+      strippedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN);
+  if (paintEligible) {
     if (strippedPlain.length >= 80) {
       logTest310BlockClassification(strippedPlain);
     }
@@ -319,14 +450,17 @@ export function PaidProVisibleDocumentShell({
       : canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
         ? canonicalPlain.plain
         : !resumeActive && authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
-          ? authoritativePlain
+          ? reattachMissingCommittedPaintParagraphs(
+              authoritativePlain,
+              projectLastGoodIfToOnPaintPlain(authoritativePlain, displayContextWithCanonical),
+            )
           : !resumeActive && paidSessionFallbackActive
             ? canonicalPlain.plain
             : "";
   const paintSource =
     canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
       ? canonicalPlain.source
-      : authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN && paintPlain === authoritativePlain
+      : !resumeActive && authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN && paintPlain
         ? hasSoT
           ? "paid_pro_accepted_canonical_source_of_truth"
           : "pipeline_accepted_corpus"
@@ -388,6 +522,12 @@ export function PaidProVisibleDocumentShell({
     (authorityLen > 0 ? hashPaidProCorpus(liveSot!.text) : "");
   const paintPlainHash =
     renderPlain.trim().length > 0 ? hashPaidProCorpus(renderPlain.trim()) : "";
+  if (branch === "canonical_plain_forced" && renderPlain.trim().length >= 500) {
+    latchPaintedSequentialPersistReview({
+      paintedPlain: renderPlain,
+      authorityPlain: liveSot?.text || authoritativePlain,
+    });
+  }
 
   return (
     <div className="w-full max-w-full min-w-0">

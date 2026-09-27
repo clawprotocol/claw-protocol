@@ -55,6 +55,19 @@ describe("labeledPartyBlockParse", () => {
     ]);
   });
 
+  it("parses party-prep upsert lines Party N: Legal Name (N≥3)", () => {
+    const intake = `Three-party services agreement for $24,000. Governing law: Texas.
+
+Party 1: Cedar Ridge LLC
+Party 2: Harbor Point Inc
+Party 3: Summit Mesa LP`;
+    expect(labeledPartyLegalEntities(intake)).toEqual([
+      "Cedar Ridge LLC",
+      "Harbor Point Inc",
+      "Summit Mesa LP",
+    ]);
+  });
+
   it("parses stacked unlabeled Party N blocks (entity, signer, title, email lines)", () => {
     const blocks = parseLabeledPartyBlocks(STACKED_UNLABELED);
     expect(blocks).toHaveLength(2);

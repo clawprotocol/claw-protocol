@@ -1,3 +1,8 @@
+import {
+  extractAgreementEntityCandidates,
+  repairKnownPartyPlaceholders,
+  textContainsUnresolvedIdentityPlaceholders,
+} from "../../agreement/partyPlaceholderDisplay";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { PAID_PRO_REFINE_INSTRUCTION_PLACEHOLDER } from "./reviewRefineUserCopy";
 import { PRO_REFINE_UNAVAILABLE_USER_MESSAGE } from "./premiumRefineApi";
@@ -187,6 +192,57 @@ export function scanPremiumRefinePlaceholderCorruption(text: string): { count: n
 
 export function premiumRefineTextContainsPlaceholderCorruption(text: string): boolean {
   return scanPremiumRefinePlaceholderCorruption(text).count > 0;
+}
+
+function isUsableResolvedPartyName(name: string): boolean {
+  const t = name.replace(/\s+/g, " ").trim();
+  if (t.length < 3 || t.length > 160) return false;
+  if (textContainsUnresolvedIdentityPlaceholders(t)) return false;
+  if (/^(you|i|we|they|counterparty|party|parties|the|a|an|client|vendor|provider)\b/i.test(t)) {
+    return false;
+  }
+  return t.split(/\s+/).length >= 2;
+}
+
+/**
+ * True when the painted SoT already has real party names and no identity slots.
+ * Hollow / template starters that still carry [ORG_n] must keep failing closed.
+ */
+export function premiumRefineBaselineIsResolvedNamedCorpus(text: string): boolean {
+  const t = text || "";
+  if (!t.trim()) return false;
+  if (textContainsUnresolvedIdentityPlaceholders(t)) return false;
+  if (premiumRefineTextContainsPlaceholderCorruption(t)) return false;
+  return extractAgreementEntityCandidates(t).filter(isUsableResolvedPartyName).length >= 2;
+}
+
+/**
+ * If a refine candidate rewrote resolved names to [ORG_n], restore those slots from the
+ * pre-refine corpus. Does not invent names for hollow placeholder-only starters.
+ */
+export function restorePremiumRefinePlaceholdersFromResolvedBaseline(
+  candidate: string,
+  baseline: string,
+): { text: string; restored: boolean } {
+  const cand = candidate || "";
+  const base = baseline || "";
+  if (!cand.trim() || !base.trim()) return { text: cand, restored: false };
+  if (!premiumRefineTextContainsPlaceholderCorruption(cand) && !textContainsUnresolvedIdentityPlaceholders(cand)) {
+    return { text: cand, restored: false };
+  }
+  if (!premiumRefineBaselineIsResolvedNamedCorpus(base)) {
+    return { text: cand, restored: false };
+  }
+  const names = extractAgreementEntityCandidates(base).filter(isUsableResolvedPartyName);
+  if (names.length < 2) return { text: cand, restored: false };
+  const repair = repairKnownPartyPlaceholders(cand, names, base);
+  if (!repair.repaired || repair.hasRemainingIdentityPlaceholder) {
+    return { text: cand, restored: false };
+  }
+  if (premiumRefineTextContainsPlaceholderCorruption(repair.text)) {
+    return { text: cand, restored: false };
+  }
+  return { text: repair.text, restored: true };
 }
 
 const ADVISORY_SANITIZE_MIN_RETAIN_CHARS = 8;

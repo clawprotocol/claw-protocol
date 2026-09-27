@@ -4,8 +4,10 @@
  */
 
 import {
+  bindUnusedFilledPartyNamesIntoLeftoverOrgSlots,
   extractAgreementEntityCandidates,
   substitutePartyPlaceholdersInUserFacingText,
+  textContainsUnresolvedIdentityPlaceholders,
 } from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { resolveIntakeEmailForContactSlot } from "./paidProIntakeContactSubstitution";
@@ -45,6 +47,7 @@ import { runCachedCorpusScan } from "./paidProCorpusScanCache";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import { resolveDeterministicQuadPartyNames } from "./deterministicQuadPartyProFallback";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { extractAuthoritativeLegalNamesFromCommercialCorpus } from "./signerCountAuthority";
 
 const LOG_PREFIX_SCAN = "[placeholder-scan]";
 const LOG_PREFIX_REPAIR = "[placeholder-repair]";
@@ -78,8 +81,13 @@ export type PlaceholderTokenDecision = {
   isExecutionContext?: boolean;
 };
 
-/** Paid Pro bodies below this length do not get signature-only fatal demotion. */
-export const PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN = 18_000;
+/**
+ * Signature-only fatal demotion floor for commercially usable Pro corpora.
+ * Aligns with the BE N≥3 accept floor (~8.5k). Salvaged multiparty drafts are
+ * routinely ~9–16k (live sfd_len≈15k) — the old 18k floor false-rejected those.
+ * Hollow / insert / mustache junk still stays fatal.
+ */
+export const PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN = 8_500;
 
 export type PlaceholderPartyResolution = {
   names: string[];
@@ -383,6 +391,8 @@ function normPartyNames(partyNames?: readonly (string | null | undefined)[] | nu
 function pushUniqueParty(out: string[], seen: Set<string>, name: string) {
   const t = name.replace(/\s+/g, " ").trim();
   if (t.length < 2) return;
+  // Leftover [ORG_n] / [PARTY_n] in an among-clause is not a named party.
+  if (/^\s*\[/.test(t) || textContainsUnresolvedIdentityPlaceholders(t)) return;
   const low = t.toLowerCase();
   if (seen.has(low)) return;
   seen.add(low);
@@ -437,6 +447,14 @@ export function resolvePlaceholderPartyNamesWithMeta(
     const before = seen.size;
     pushUniqueParty(names, seen, n);
     if (seen.size > before) corpusBetween += 1;
+  }
+  // Leftover 2-party opening hides Party 3/4 in the between-clause; notices /
+  // signatures on the same 200 corpus still name them.
+  const fromCorpusEntities = corpusText
+    ? extractAuthoritativeLegalNamesFromCommercialCorpus(corpusText)
+    : [];
+  for (const n of fromCorpusEntities) {
+    pushUniqueParty(names, seen, n);
   }
   const corpusAmong = 0;
   const anchorsFound = corpusHasResolvedPartyAnchors(corpusText || "", names, ctx.intakeRaw);
@@ -559,6 +577,8 @@ export function isSignatureOnlyFatalToken(token: string): boolean {
   const inner = bracketInner(token);
   if (/^CLIENT[\s_]*LEGAL[\s_]*NAME$/i.test(inner)) return false;
   if (/^CLIENT[\s_]*NAME$/i.test(inner)) return false;
+  // Leftover [ORG_n]/[PARTY_n] are identity slots, not signature field stubs.
+  if (/\b(?:ORG|PARTY)_\d+\b/i.test(token)) return false;
   if (isNumberedSignatureContactToken(token)) return true;
   if (isAllowlistedSignatureToken(token)) return true;
   if (isSignatureLineBracketToken(token)) return true;
@@ -611,7 +631,9 @@ export function demotePaidProSignatureOnlyFatals(
     return { decisions, demoted: false, demotedCount: 0 };
   }
   const fatals = decisions.filter((d) => d.fatal);
-  if (fatals.length === 0 || fatals.length > 24) {
+  // N=4 notice+signature field stubs are routinely 28 tokens; the old 24 cap
+  // demoted N=3 (~21) and false-rejected N=4 leftover-overlay 200 corpora.
+  if (fatals.length === 0 || fatals.length > 48) {
     return { decisions, demoted: false, demotedCount: 0 };
   }
   if (!fatals.every((d) => isSignatureOnlyFatalToken(d.token))) {
@@ -692,6 +714,106 @@ export function remainingFatalsAreNoticeSignerSetupScaffoldingOnly(
   return fatals.every((d) => isNoticeSignerSetupDraftingToken(d.token, d.contextSnippet));
 }
 
+/**
+ * Notice / signature field stubs that signer setup fills later.
+ * Not insert / mustache / hollow drafting junk.
+ */
+export function isPaidProCommercialFieldStubToken(token: string): boolean {
+  const t = String(token || "").trim();
+  if (!t) return false;
+  if (/insert|mustache|\{\{|<\s*insert/i.test(t) && !isSignatureOnlyFatalToken(t)) {
+    if (/\[\s*INSERT\b/i.test(t) || /\{\{/.test(t) || /<\s*insert/i.test(t)) return false;
+  }
+  if (isSignatureOnlyFatalToken(t)) return true;
+  if (isAllowlistedSignatureToken(t)) return true;
+  if (isSignatureLineBracketToken(t)) return true;
+  const n = normalizePlaceholderToken(t);
+  return /^(?:(?:SIGNER|PARTY|CONTACT|ORG)_)?(?:EMAIL|ADDRESS|PARTY_ADDRESS|NAME|TITLE|DATE|SIGNATURE|INITIALS?|PARTY_NAME|SIGNER_NAME)(?:_\d+)?$/.test(
+    n,
+  );
+}
+
+export function remainingFatalsAreCommercialFieldStubsOnly(
+  remainingDetail: readonly PlaceholderTokenDecision[],
+): boolean {
+  const fatals = remainingDetail.filter((d) => d.fatal);
+  if (fatals.length === 0) return false;
+  if (fatals.length > 48) return false;
+  return fatals.every((d) => isPaidProCommercialFieldStubToken(d.token));
+}
+
+/** Leftover 2-party overlay identity slots — not insert/mustache/hollow junk. */
+export function isLeftoverOverlayIdentitySlotToken(token: string): boolean {
+  const n = normalizePlaceholderToken(token);
+  if (/^(?:ORG|PARTY|ENTITY|CLIENT|COMPANY|ORGANIZATION|PERSON)_\d+$/i.test(n)) return true;
+  if (/^(?:ORG|PARTY|ENTITY|CLIENT|COMPANY|ORGANIZATION|PERSON)\d+$/i.test(n)) return true;
+  if (/^PARTY_[AB]\d*$/i.test(n)) return true;
+  // Leftover 2-party role / alias slots. Finalize already rewrites [CLIENT]/[PROVIDER].
+  // [ENTITY NAME] is the leftover counterpart of allowlisted [PARTY NAME].
+  // Unnumbered [ORG]/[PARTY]/[ENTITY] is leftover identity, not insert/mustache.
+  if (/^(?:CLIENT|PROVIDER|VENDOR|SERVICE_PROVIDER|CUSTOMER)$/i.test(n)) return true;
+  if (/^(?:ORG|PARTY|ENTITY|COMPANY|ORGANIZATION|PERSON)$/i.test(n)) return true;
+  return /^ENTITY_NAME$/i.test(n);
+}
+
+export function isAcceptablePaidProPfd200LeftoverToken(
+  token: string,
+  commerciallyNamed: boolean,
+): boolean {
+  if (isPaidProCommercialFieldStubToken(token)) return true;
+  return commerciallyNamed && isLeftoverOverlayIdentitySlotToken(token);
+}
+
+export function remainingFatalsAreCommercialOrLeftoverOverlayOnly(
+  remainingDetail: readonly PlaceholderTokenDecision[],
+  commerciallyNamed: boolean,
+): boolean {
+  const fatals = remainingDetail.filter((d) => d.fatal);
+  if (fatals.length === 0) return false;
+  // Do not cap allowlisted leftover [ORG_n] + N=4 notice/signature stubs.
+  // Live leftover 2-party overlay repeats [ORG_1]/[ORG_2] through the body;
+  // the old 48 cap accepted the token type but still fail-closed N=4.
+  return fatals.every((d) => isAcceptablePaidProPfd200LeftoverToken(d.token, commerciallyNamed));
+}
+
+/**
+ * Live premium-full-draft 200: a commercially usable N≥3 corpus must not fail-close
+ * solely because notice/signature field stubs remain (signer setup owns those).
+ */
+export function shouldAcceptPaidProCommercialFieldStubsAfterPfd200(args: {
+  text: string;
+  intakeRaw?: string | null;
+  remainingDetail?: readonly PlaceholderTokenDecision[];
+}): boolean {
+  const text = String(args.text || "").trim();
+  if (text.length < PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN) return false;
+  const intake = String(args.intakeRaw ?? "").trim();
+  const intakeNames = extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName);
+  const corpusBetween = extractPartyNamesFromCorpusBetween(text);
+  const corpusLegalNames = extractAuthoritativeLegalNamesFromCommercialCorpus(text);
+  const commerciallyNamed =
+    intakeNames.length >= 3 || corpusBetween.length >= 3 || corpusLegalNames.length >= 3;
+  if (args.remainingDetail && args.remainingDetail.length > 0) {
+    const fatals = args.remainingDetail.filter((d) => d.fatal);
+    if (
+      fatals.length > 0 &&
+      !remainingFatalsAreCommercialOrLeftoverOverlayOnly(args.remainingDetail, commerciallyNamed)
+    ) {
+      return false;
+    }
+  }
+  const tokens = scanUnresolvedRenderTokens(text);
+  if (
+    tokens.length > 0 &&
+    !tokens.every((m) => isAcceptablePaidProPfd200LeftoverToken(m.token, commerciallyNamed))
+  ) {
+    return false;
+  }
+  if (commerciallyNamed) return true;
+  if (/(?:^|\n)\s*Party\s*[3-9]\s*:/im.test(intake)) return true;
+  return /\b(?:by and among|entered into by and among)\b/i.test(text) && intakeNames.length >= 2;
+}
+
 function contextSnippet(text: string, index: number, radius = 60): string {
   const start = Math.max(0, index - radius);
   const end = Math.min(text.length, index + radius);
@@ -760,6 +882,7 @@ function isSignatureFieldLabel(inner: string): boolean {
 }
 
 export function isSignatureLineBracketToken(token: string): boolean {
+  if (/\b(?:ORG|PARTY)_\d+\b/i.test(token)) return false;
   SIGNATURE_LINE_BRACKET_RE.lastIndex = 0;
   if (SIGNATURE_LINE_BRACKET_RE.test(token)) return true;
   SIGNATURE_PARTY_LABEL_BRACKET_RE.lastIndex = 0;
@@ -1140,6 +1263,19 @@ function repairAgreementTemplatePlaceholdersUncached(
   }
   const resolution = resolvePlaceholderPartyNamesWithMeta(ctx, prepared);
   const names = resolution.names;
+  const leftoverBind = bindUnusedFilledPartyNamesIntoLeftoverOrgSlots(
+    out,
+    names,
+    ctx.intakeRaw,
+  );
+  if (leftoverBind.bound) {
+    out = leftoverBind.text;
+    repaired.push(
+      ...leftoverBind.boundTokens.map(
+        (tok, i) => `${tok}→${leftoverBind.unusedNamesBound[i] ?? "filled_party"}`,
+      ),
+    );
+  }
   const partyLine = [String(ctx.intakeRaw || ""), ...names].join("\n");
 
   if (/\[CASE_ID_\d+\]/i.test(out)) {
@@ -1445,10 +1581,21 @@ export function analyzeTemplatePlaceholderFragments(
   ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames">,
 ): PlaceholderTokenDecision[] {
   const prepared = prepareAgreementTextForPlaceholderScan(text);
-  const partyNames = resolvePlaceholderPartyNames(ctx, prepared);
-  return scanTemplatePlaceholderMatches(prepared, ctx.intakeRaw).map(({ token, index }) =>
-    classifyTemplateFragment(token, prepared, index, { partyNames, intakeRaw: ctx.intakeRaw }),
+  const partyResolution = resolvePlaceholderPartyNamesWithMeta(ctx, prepared);
+  const classified = scanTemplatePlaceholderMatches(prepared, ctx.intakeRaw).map(({ token, index }) =>
+    classifyTemplateFragment(token, prepared, index, {
+      partyNames: partyResolution.names,
+      intakeRaw: ctx.intakeRaw,
+    }),
   );
+  // Same demotion as finalize / rejectPremiumBody — N≥3 ~15k corpora with
+  // notice/signature field stubs must not false-reject after premium-full-draft 200.
+  const signatureDemotion = demotePaidProSignatureOnlyFatals(
+    classified,
+    prepared.length,
+    partyResolution,
+  );
+  return demoteNoticeSignerSetupDraftingFatals(signatureDemotion.decisions).decisions;
 }
 
 /** Scan-only placeholder gate for starter/free surfaces — never mutates document text. */
@@ -1608,8 +1755,27 @@ function finalizeUserVisibleAgreementPlainTextCore(
   });
   let finalText = postTokenAuthority.text;
   const survivorTokens = scanUnresolvedRenderTokens(finalText).map((m) => m.token);
-  const fatalFromSurvivors = survivorTokens.filter((t) => !remainingFatal.includes(t));
-  const remainingFatalAll = [...remainingFatal, ...fatalFromSurvivors];
+  const acceptCommercialFieldStubs = shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+    text: finalText,
+    intakeRaw,
+    remainingDetail,
+  });
+  const remainingFatalKept = acceptCommercialFieldStubs
+    ? remainingFatal.filter(
+        (t) => !isPaidProCommercialFieldStubToken(t) && !isLeftoverOverlayIdentitySlotToken(t),
+      )
+    : remainingFatal;
+  const fatalFromSurvivors = survivorTokens.filter((t) => {
+    if (remainingFatalKept.includes(t)) return false;
+    if (
+      acceptCommercialFieldStubs &&
+      (isPaidProCommercialFieldStubToken(t) || isLeftoverOverlayIdentitySlotToken(t))
+    ) {
+      return false;
+    }
+    return true;
+  });
+  const remainingFatalAll = [...remainingFatalKept, ...fatalFromSurvivors];
   // Fail closed when polish/notice rebuild silently drops hard unresolved identity slots.
   for (const tok of hardUnresolvedFromInput) {
     const norm = tok.replace(/\s+/g, "").toUpperCase();

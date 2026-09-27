@@ -17,6 +17,7 @@ export type CheckoutSessionResponse = {
 
 export type VerifyCheckoutSessionResponse = {
   ok: boolean;
+  agreement_id?: string;
   subscription?: {
     plan_code?: string;
     status?: string;

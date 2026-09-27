@@ -19,8 +19,8 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toContain("writePaidProVs01PostSignHandoff");
     expect(s).toContain("vs01_packet_ready=1");
     expect(s).toContain("[vs01-packet-prepared]");
-    expect(s).toContain("[vs01-paid-pro-workspace-navigate]");
-    expect(s).toContain("paidProPacketReadyDashboardPath");
+    expect(s).toContain("[vs01-private-signing-links-stay]");
+    expect(s).toContain("resolvePostPrepareBuyerSurface");
     expect(s).toContain("vs01_saved=1");
     expect(s).toContain("[vs01-recipient-route-guard]");
     expect(s).toContain("onStepChange");
@@ -45,5 +45,36 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toContain("shouldDeferVs01SeedDocumentLoad");
     expect(s).toContain("authLoading");
     expect(s).toMatch(/\[seedDocumentId,\s*goToStep,\s*hideStepper,\s*authEnabled,\s*authLoading\]/);
+  });
+
+  it("remount of leftover esign binds Review corpus before paint", () => {
+    const s = readFileSync(join(__dirname, "Vs01Wizard.tsx"), "utf8");
+    expect(s).toContain("ensureReviewCorpusOnEsignEntry");
+    expect(s).toContain("resolveCertifiedReviewForEsignRemount");
+    expect(s).toContain("resolveAcceptedCrsPlainForRemountPaint");
+    expect(s).toContain("remountPrepareShouldPaintBeforeContentInspect");
+    expect(s).toContain('from "./vs01EsignRemountReviewBind"');
+    const start = s.indexOf("/** Deep link: /app/esign/:documentId");
+    const hydrateAt = s.indexOf("const hydrateLocalPaidProBridge", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(hydrateAt).toBeGreaterThan(start);
+    expect(s.slice(start, hydrateAt)).toContain("resolveCertifiedReviewForEsignRemount");
+    expect(s.slice(start, hydrateAt)).not.toContain("fetchDocumentContent(sid)");
+    expect(s).toContain("reviewCorpusLooksLikeLeftoverFusedNotices");
+    expect(s).toContain("packetPlainMatchesPersistReviewCorpus");
+    expect(s).toContain("leftoverRemountShouldFailClosedToast");
+    expect(s).toContain("leftoverGetContentRefuseFromError");
+    expect(s).toContain("persistReviewCorpus");
+    expect(s).toContain("bound.persistReviewCorpus");
+    expect(s).toContain("resolveRemountPrepareCorpusIncludingContent");
+    expect(s).toContain("fetchRemountCertifiedReviewCorpus");
+    expect(s).toContain("remountPrepareShouldFailClosedWithoutCertifiedCorpus");
+    expect(s).toContain("leftoverGetContentRefuseFromError(e) && persistReviewCorpus");
+    expect(s).toMatch(/leftoverPacketNotPersistReview[\s\S]*if \(persistReviewCorpus\)/);
+    expect(s).toMatch(
+      /if \(bound && !bound\.ok\)[\s\S]*leftoverRemountShouldFailClosedToast\(persistReviewCorpus\)/,
+    );
+    expect(s).toContain("leftoverRemountShouldFailClosedToast");
+    expect(s).toContain("Fail-closed toast only when persist Review truly does not exist");
   });
 });

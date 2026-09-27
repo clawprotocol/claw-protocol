@@ -8,6 +8,7 @@ import {
   getOrInitSessionAgreementGenerationId,
   getSessionAgreementGenerationId,
 } from "../../lib/agreementGenerationId";
+import { clearPremiumGenerateLedgerPreservingLiveFlight } from "./paidProPremiumGenerationCallAudit";
 
 const FREE_STARTER_SESSION_KEY = "claw_free_starter_session_v1";
 const PRO_INTENT_SESSION_KEY = "claw_pro_intent_session_v1";
@@ -84,6 +85,11 @@ export function clearCurrentSessionProEntitlementMarkers(): void {
 }
 
 export function bumpAgreementGenerationIdForFreshSession(): string {
+  // Drop leftover generate-invoke rows so dump 2 is not duplicate-blocked.
+  // Do not clear a live entitled flight — #230's full audit reset mid-rewrite
+  // let home auto-gen + rewrite effect dual-start and aborted the first pfd
+  // as OPTIONS-only (run1 FAIL / run2 PASS oscillation).
+  clearPremiumGenerateLedgerPreservingLiveFlight();
   return bumpAgreementGenerationId();
 }
 

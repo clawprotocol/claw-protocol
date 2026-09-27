@@ -4,6 +4,7 @@
  */
 
 import { clearAgreementCreatorIntakeStorage, clearCreateReviewAgreementResumeId, clearCreateReviewDraftReadyMarker, readCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
+import { clearPreAuthCheckoutAgreementId, PRE_AUTH_CHECKOUT_AGREEMENT_STORAGE_KEY } from "../auth/preAuthCheckoutAgreement";
 import { clearAuthoritativeSigningSnapshot } from "../components/agreements/authoritativeSigningSnapshot";
 import { clearFrozenCanonicalAgreementCorpus } from "../components/agreements/canonicalAgreementSnapshot";
 import { clearPaidProPinnedSignerAppliedCorpus } from "../components/agreements/paidProFinalHydratedCorpus";
@@ -20,6 +21,7 @@ import {
   hasPremiumCheckoutReturnInUrl,
 } from "../components/agreements/premiumCompletionStorage";
 import { hasPaidProSourceOfTruth } from "../components/agreements/paidProSourceOfTruthState";
+import { readCheckoutSessionIdFromUrl } from "./checkoutReturnEntitlement";
 import { readSignedInAuthenticatedWorkspaceSession } from "./completedAgreementViewContext";
 import {
   hasPaidDashboardCreateContextActive,
@@ -29,6 +31,7 @@ import {
   markDirectAuthenticatedCreateBootstrapAttempted,
 } from "./paidDashboardCreateContext";
 import { clearHomeAnonymousCreateOrigin } from "./homeAnonymousCreateOrigin";
+import { clearAcceptedServerFullDraftLatchAndSessionFrozenBodies } from "../components/agreements/premiumAcceptancePolicy";
 import { clearPaidProPipelineAcceptedCorpusHash } from "../components/agreements/paidProPipelineAcceptedCorpus";
 import { clearPaidProPostAcceptanceValidatorCache } from "../components/agreements/paidProPostAcceptanceValidatorCache";
 import { clearPaidProPremiumRecipientHandoffReadGate } from "../components/agreements/paidProPremiumRecipientHandoffReadGate";
@@ -78,6 +81,7 @@ const SESSION_PREFIXES_TO_CLEAR = [
   "lawdog_entry_context",
   "lawdog_focus_create_intake",
   REVIEW_DELIVERY_HANDOFF_NOTICE_KEY,
+  PRE_AUTH_CHECKOUT_AGREEMENT_STORAGE_KEY,
 ] as const;
 
 function clearMatchingSessionStoragePrefixes(prefixes: readonly string[]): string[] {
@@ -144,6 +148,8 @@ export function clearStalePaidProAuthorityForFreshFreeStarter(opts?: {
   clearPersistedGuidedSession();
   clearPaidProPipelineAcceptedCorpusHash();
   clearPaidProPostAcceptanceValidatorCache();
+  // Leftover 2-party FREEZE-PASS latch must not skip the next N-party generate.
+  clearAcceptedServerFullDraftLatchAndSessionFrozenBodies();
 }
 
 /**
@@ -167,6 +173,7 @@ export function initializeNewAgreementSession(opts?: {
   const clearedSessionKeys = clearMatchingSessionStoragePrefixes(SESSION_PREFIXES_TO_CLEAR);
   clearAgreementCreatorIntakeStorage();
   clearCreateReviewAgreementResumeId();
+  clearPreAuthCheckoutAgreementId();
   clearCreateReviewDraftReadyMarker();
   // Prior "Complete signer details" arms this latch; Create new must never inherit it.
   clearCreatorDashboardSignerSetupResume();
@@ -250,6 +257,7 @@ export function bootstrapDirectAuthenticatedCreateEntryIfNeeded(): DirectAuthent
   }
   // Never reset an in-progress / resumed / post-checkout flow.
   if (hasPremiumCheckoutReturnInUrl()) return { bootstrapped: false, reason: "checkout_return" };
+  if (readCheckoutSessionIdFromUrl()) return { bootstrapped: false, reason: "checkout_return" };
   if (hasPaidPremiumCompletionSession()) return { bootstrapped: false, reason: "premium_session_active" };
   if (hasPaidProSourceOfTruth()) return { bootstrapped: false, reason: "sot_active" };
   if (readCreateReviewAgreementResumeId()) return { bootstrapped: false, reason: "resume_active" };

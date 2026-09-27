@@ -1,3 +1,14 @@
+import {
+  isRealCheckoutAgreementId,
+  pinCheckoutPathToPreAuthAgreement,
+  readKnownConversionAgreementId,
+  readPreAuthCheckoutAgreementId,
+  rememberPreAuthCheckoutAgreementId,
+  resolveContinueWithProCheckoutAgreementId,
+} from "../auth/preAuthCheckoutAgreement";
+import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
+import { readCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
+import { readSessionAgreementGenerationId } from "../lib/agreementGenerationId";
 import type { PricingCadence } from "./pricingCadenceStorage";
 import type { LaunchPricingTier } from "./pricingTiersData";
 import { LAUNCH_PRICING_TIERS } from "./pricingTiersData";
@@ -74,4 +85,126 @@ export function appendReturnToQueryParam(returnTo: string, key: string, value: s
     if (!returnTo.includes("?")) return `${returnTo}?${key}=${enc}`;
     return `${returnTo}&${key}=${enc}`;
   }
+}
+
+/** Drop restore=starterReview so Stripe success is not unpaid checkout-Back. */
+export function dropStarterReviewRestoreParam(returnTo: string): string {
+  const base = "http://localhost";
+  try {
+    const u = new URL(returnTo, base);
+    if (u.searchParams.get("restore") === "starterReview") {
+      u.searchParams.delete("restore");
+    }
+    const out = `${u.pathname}${u.search}${u.hash}`;
+    return out || returnTo;
+  } catch {
+    return returnTo;
+  }
+}
+
+/**
+ * Conversion create returnTo.
+ * When a canonical persist/resume agreement ID already exists, do not inject
+ * restore=starterReview (pre-pay decoy for after-pay remint / Retry Pro draft).
+ * Unpaid checkout-Back without a persist still uses the starterReview snapshot.
+ */
+export function buildConversionCheckoutReturnTo(persistAgreementId?: string | null): string {
+  if (isRealCheckoutAgreementId(persistAgreementId)) return "/app/create";
+  return appendReturnToQueryParam("/app/create", "restore", "starterReview");
+}
+
+/**
+ * Continue-with-Pro first hop.
+ * Pre-auth already claimed stays. Else the active generation UUID is the hop
+ * (a later reminted resume/review must not replace it). Sync pre-auth to that
+ * same id. Unpaid Back without any AID still uses restore=starterReview.
+ */
+export function buildCreateFlowCheckoutHref(args: {
+  cadence: PricingCadence;
+  persistAgreementId?: string | null;
+  tier?: string;
+}): string {
+  const persist = resolveContinueWithProCheckoutAgreementId({
+    reviewAgreementId: args.persistAgreementId,
+    resumeId: readCreateReviewAgreementResumeId(),
+    preAuthId: readPreAuthCheckoutAgreementId(),
+    activeGenerationId: readSessionAgreementGenerationId(),
+  });
+  if (persist) rememberPreAuthCheckoutAgreementId(persist);
+  const agreementId = persist || CREATE_FLOW_CHECKOUT_AGREEMENT_ID;
+  const returnTo = buildConversionCheckoutReturnTo(persist);
+  const tier = (args.tier || "pro").trim() || "pro";
+  return `/app/checkout/${encodeURIComponent(agreementId)}?tier=${encodeURIComponent(
+    tier,
+  )}&cadence=${encodeURIComponent(args.cadence)}&returnTo=${encodeURIComponent(returnTo)}`;
+}
+
+/** Strip starterReview restore from a create returnTo when persist/resume exists. */
+export function sanitizeConversionCheckoutReturnTo(args: {
+  returnTo: string;
+  persistAgreementId?: string | null;
+}): string {
+  const dest = (args.returnTo || "").trim();
+  if (!dest) return dest;
+  if (!isRealCheckoutAgreementId(args.persistAgreementId)) return dest;
+  if (!dest.startsWith("/app/create")) return dest;
+  return dropStarterReviewRestoreParam(dest);
+}
+
+function realAgreementIdFromCheckoutDest(dest: string): string | null {
+  const noQuery = dest.split("?")[0] || "";
+  const prefix = "/app/checkout/";
+  if (!noQuery.startsWith(prefix)) return null;
+  let id = noQuery.slice(prefix.length).split("/")[0] || "";
+  try {
+    id = decodeURIComponent(id).trim();
+  } catch {
+    id = id.trim();
+  }
+  return isRealCheckoutAgreementId(id) ? id : null;
+}
+
+/**
+ * Checkout / OAuth dest: drop returnTo restore=starterReview when the conversion
+ * persist ID is already in the path or supplied (session resume / pre-auth).
+ */
+export function sanitizeConversionCheckoutDest(args: {
+  dest: string;
+  persistAgreementId?: string | null;
+}): string {
+  const dest = (args.dest || "").trim();
+  const persist =
+    (isRealCheckoutAgreementId(args.persistAgreementId) ? args.persistAgreementId!.trim() : null) ||
+    realAgreementIdFromCheckoutDest(dest) ||
+    readKnownConversionAgreementId();
+  if (!isRealCheckoutAgreementId(persist)) return dest;
+  rememberPreAuthCheckoutAgreementId(persist);
+  const pinned = pinCheckoutPathToPreAuthAgreement(dest, persist);
+  try {
+    const u = new URL(pinned, "http://localhost");
+    const rt = u.searchParams.get("returnTo");
+    if (!rt) return pinned;
+    const cleaned = sanitizeConversionCheckoutReturnTo({
+      returnTo: rt,
+      persistAgreementId: persist,
+    });
+    if (cleaned === rt) return pinned;
+    if (cleaned) u.searchParams.set("returnTo", cleaned);
+    else u.searchParams.delete("returnTo");
+    const out = `${u.pathname}${u.search}${u.hash}`;
+    return out || pinned;
+  } catch {
+    return pinned;
+  }
+}
+
+/**
+ * Last-good after-pay return: /app/create?premiumCompletion=1
+ * Persist identity stays in session (resume / pre-auth). Send-path returnTo is unchanged.
+ */
+export function buildAfterPayStripeReturnTo(args: { agreementId: string; returnTo: string }): string {
+  let dest = (args.returnTo || "").trim() || "/app/create";
+  if (!dest.startsWith("/app/create")) return dest;
+  dest = dropStarterReviewRestoreParam(dest);
+  return appendReturnToQueryParam(dest, "premiumCompletion", "1");
 }

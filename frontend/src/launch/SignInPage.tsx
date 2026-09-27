@@ -19,7 +19,9 @@ import { resolveSignInNextDestination } from "./genesisReferral/genesisReferralC
 import {
   CHECKOUT_SIGN_IN_BODY,
   CHECKOUT_SIGN_IN_HEADING,
+  extractAgreementIdFromCheckoutPath,
   isSecureCheckoutPath,
+  resolveSignInContinuationOpts,
   sanitizeVisibleSignInUrl,
 } from "../auth/safeRedirectResolver";
 import {
@@ -27,6 +29,11 @@ import {
   QUICK_PDF_RETURN_PATH,
   QUICK_PDF_SIGN_IN_INTENT,
 } from "./quickPdfReturnAuthority";
+import {
+  pinCheckoutPathToPreAuthAgreement,
+  readKnownConversionAgreementId,
+} from "../auth/preAuthCheckoutAgreement";
+import { sanitizeConversionCheckoutDest } from "./checkoutParams";
 import { getGenesisReferralCode } from "./genesisReferral/genesisReferralCapture";
 import { isPublicProductionHostname } from "./devPaymentBypass";
 
@@ -39,7 +46,7 @@ function productionHostnameHidesStagingControls(): boolean {
   }
 }
 
-/** Returning-user sign-in — lands on dashboard, or `?next=` (e.g. referral create return). */
+/** Sign-in — dashboard for returning users; checkout `?next=` claims the pre-auth agreement. */
 export function SignInPage() {
   const { navigate, search } = useLaunchNav();
   const { enabled, loading, user, signInEmail, signInGoogle } = useAuth();
@@ -64,11 +71,14 @@ export function SignInPage() {
   const checkoutContinuation = isSecureCheckoutPath(destinationPath);
   const referralCode = useMemo(() => getGenesisReferralCode(), []);
   const signInOpts = useMemo(
-    () => ({
-      returningSignIn: true as const,
-      destinationPath,
-      ...(quickPdfReturn ? { authPurpose: QUICK_PDF_AUTH_PURPOSE } : {}),
-    }),
+    () =>
+      quickPdfReturn
+        ? {
+            returningSignIn: true as const,
+            destinationPath,
+            authPurpose: QUICK_PDF_AUTH_PURPOSE,
+          }
+        : resolveSignInContinuationOpts(destinationPath),
     [destinationPath, quickPdfReturn],
   );
 
@@ -78,8 +88,19 @@ export function SignInPage() {
 
   useEffect(() => {
     if (!enabled || loading || !user) return;
-    navigate(destinationPath);
-  }, [destinationPath, enabled, loading, navigate, user]);
+    if (quickPdfReturn) {
+      navigate(destinationPath);
+      return;
+    }
+    const pinned = pinCheckoutPathToPreAuthAgreement(destinationPath);
+    navigate(
+      sanitizeConversionCheckoutDest({
+        dest: pinned,
+        persistAgreementId:
+          extractAgreementIdFromCheckoutPath(pinned) || readKnownConversionAgreementId(),
+      }),
+    );
+  }, [destinationPath, enabled, loading, navigate, quickPdfReturn, user]);
 
   if (!enabled) {
     return (

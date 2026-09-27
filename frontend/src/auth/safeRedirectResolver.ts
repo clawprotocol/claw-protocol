@@ -8,7 +8,17 @@ import {
   APPROVED_QUICK_ATTRIBUTION_KEYS,
   QUICK_PDF_RETURN_PATH,
 } from "../launch/quickPdfReturnAuthority";
+import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
+import {
+  sanitizeConversionCheckoutDest,
+  sanitizeConversionCheckoutReturnTo,
+} from "../launch/checkoutParams";
 import type { AuthContinuationContextV1 } from "./authContinuationContext";
+import {
+  pinCheckoutPathToPreAuthAgreement,
+  readKnownConversionAgreementId,
+  rememberPreAuthCheckoutAgreementId,
+} from "./preAuthCheckoutAgreement";
 
 const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
 
@@ -244,9 +254,60 @@ export function isSecureCheckoutPath(path: string): boolean {
   return parsed.pathname === "/app/checkout" || parsed.pathname.startsWith("/app/checkout/");
 }
 
+/** Real checkout agreement id — never the create-flow sentinel. */
+export function extractAgreementIdFromCheckoutPath(path: string): string | null {
+  const raw = (path || "").trim();
+  const noQuery = raw.split("?")[0] || "";
+  const prefix = "/app/checkout/";
+  if (!noQuery.startsWith(prefix)) return null;
+  let id = noQuery.slice(prefix.length).split("/")[0] || "";
+  try {
+    id = decodeURIComponent(id).trim();
+  } catch {
+    id = id.trim();
+  }
+  if (!id || id === CREATE_FLOW_CHECKOUT_AGREEMENT_ID) return null;
+  return id;
+}
+
+export type SignInContinuationOpts = {
+  returningSignIn: boolean;
+  destinationPath: string;
+  agreementId?: string;
+};
+
+/**
+ * Homepage / dashboard sign-in stays returning.
+ * Checkout continuation is a claim: keep the pre-auth agreement through Google.
+ */
+export function resolveSignInContinuationOpts(destinationPath: string): SignInContinuationOpts {
+  const dest = (destinationPath || "/app").trim() || "/app";
+  const checkout = isSecureCheckoutPath(dest);
+  const fromPath = extractAgreementIdFromCheckoutPath(dest) ?? undefined;
+  if (fromPath) rememberPreAuthCheckoutAgreementId(fromPath);
+  const agreementId = checkout
+    ? readKnownConversionAgreementId() || fromPath || undefined
+    : fromPath;
+  const pinned = agreementId ? pinCheckoutPathToPreAuthAgreement(dest, agreementId) : dest;
+  const destinationPathOut = sanitizeConversionCheckoutDest({
+    dest: pinned,
+    persistAgreementId: agreementId,
+  });
+  return {
+    returningSignIn: !checkout,
+    destinationPath: destinationPathOut,
+    ...(agreementId ? { agreementId } : {}),
+  };
+}
+
 export function buildSignInContinuationPath(pathname: string, search = ""): string {
   const dest = `${(pathname || "").trim()}${(search || "").trim()}`;
-  const safe = resolveSafeRedirectPath(dest, "/app");
+  const persist = extractAgreementIdFromCheckoutPath(dest) ?? readKnownConversionAgreementId();
+  const sanitized = sanitizeConversionCheckoutDest({
+    dest,
+    persistAgreementId: persist,
+  });
+  const safe = resolveSafeRedirectPath(sanitized, "/app");
   return `/app/sign-in?next=${encodeURIComponent(safe)}`;
 }
 
@@ -264,9 +325,21 @@ export function resolveSignInContinuationDestination(search: string, fallback = 
 export function resolvePostAuthDestination(ctx: AuthContinuationContextV1 | null): string {
   if (!ctx) return "/app";
   const dest = resolveSafeRedirectPath(ctx.destinationPath, "/app");
-  if (ctx.agreementId && dest.startsWith("/app/create") && !dest.includes("agreementId=")) {
-    const sep = dest.includes("?") ? "&" : "?";
-    return `${dest}${sep}agreementId=${encodeURIComponent(ctx.agreementId)}`;
+  const aid = (ctx.agreementId || "").trim();
+  if (aid && dest.startsWith("/app/create") && !dest.includes("agreementId=")) {
+    const cleaned = sanitizeConversionCheckoutReturnTo({
+      returnTo: dest,
+      persistAgreementId: aid,
+    });
+    const sep = cleaned.includes("?") ? "&" : "?";
+    return `${cleaned}${sep}agreementId=${encodeURIComponent(aid)}`;
+  }
+  if (aid && aid !== CREATE_FLOW_CHECKOUT_AGREEMENT_ID && dest.startsWith("/app/checkout/")) {
+    rememberPreAuthCheckoutAgreementId(aid);
+    return sanitizeConversionCheckoutDest({
+      dest: pinCheckoutPathToPreAuthAgreement(dest, aid),
+      persistAgreementId: aid,
+    });
   }
   return dest;
 }

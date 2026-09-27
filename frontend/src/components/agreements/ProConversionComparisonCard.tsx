@@ -97,7 +97,11 @@ export function ProConversionComparisonCard(props: Props) {
 
       <ProTransformationPreview className="mt-4" />
 
-      <div className="mt-5 flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
+      <p className="mt-4 text-center text-sm font-semibold text-amber-200/90 sm:text-left">
+        LawDog Pro: $49/month
+      </p>
+
+      <div className="mt-4 flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
         <button
           type="button"
           disabled={primaryDisabled}

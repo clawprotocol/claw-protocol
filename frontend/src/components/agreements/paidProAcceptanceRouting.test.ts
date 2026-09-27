@@ -453,13 +453,14 @@ describe("paidProAcceptanceRouting", () => {
       expect(start).toBeGreaterThan(-1);
       const stickyIdx = intake.indexOf("if (paidProCanonicalStickyCta)", start);
       expect(stickyIdx).toBeGreaterThan(-1);
-      expect(intake.slice(stickyIdx, stickyIdx + 900)).toContain(
+      expect(intake.slice(stickyIdx, stickyIdx + 1800)).toContain(
         "const mapped = mapPaidProStickyCtaToPrimaryCta(paidProCanonicalStickyCta)",
       );
       expect(intake.slice(stickyIdx, stickyIdx + 500)).toMatch(
         /!paidProCanonicalStickyCta\.showStickyBar/,
       );
-      expect(intake.slice(stickyIdx, stickyIdx + 900)).toContain("assertCanonicalPaidProSignerCtaReason");
+      expect(intake.slice(stickyIdx, stickyIdx + 1800)).toContain("resolvePostAcceptReviewHandoffCta");
+      expect(intake.slice(stickyIdx, stickyIdx + 1800)).toContain("assertCanonicalPaidProSignerCtaReason");
       const canonicalReviewDecisionIdx = intake.indexOf(
         "paid_pro_review_decision_on_card",
         stickyIdx,

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 from typing import Optional
-from urllib.parse import parse_qsl, urlencode, urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 from backend.config.deployment_runtime import claw_environment
 from backend.security.safe_redirect import is_allowlisted_internal_path, resolve_safe_redirect_path
@@ -69,11 +69,25 @@ def resolve_checkout_app_origin(
     return PRODUCTION_CANONICAL_ORIGIN
 
 
+def drop_starter_review_from_after_pay_return(path: str) -> str:
+    """Stripe success is after-pay, not unpaid Back. Last-good return is /app/create?premiumCompletion=1."""
+    parts = urlsplit(path)
+    if parts.path != "/app/create" and not parts.path.startswith("/app/create/"):
+        return path
+    pairs = [
+        (k, v)
+        for k, v in parse_qsl(parts.query, keep_blank_values=True)
+        if not (k == "restore" and v == "starterReview")
+    ]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(pairs), parts.fragment))
+
+
 def build_checkout_success_url(*, return_to: str, origin: Optional[str] = None) -> str:
     app_origin = _normalize_origin(origin or resolve_checkout_app_origin())
     path = resolve_safe_redirect_path(return_to, "/app/create")
     if not is_allowlisted_internal_path(path):
         path = "/app/create"
+    path = drop_starter_review_from_after_pay_return(path)
     extras = []
     if "premiumCompletion=" not in path:
         extras.append("premiumCompletion=1")

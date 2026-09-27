@@ -73,6 +73,9 @@ function partiesDisplayFromModel(raw: string, model: LivePreviewModel): string {
     const head = structured.parties.slice(0, -1).join(", ");
     return `${head}, and ${structured.parties[structured.parties.length - 1]}`;
   }
+  if (model.partiesLine && /,\s*and\s+/.test(model.partiesLine)) {
+    return model.partiesLine.trim();
+  }
   if (model.partiesStructured) {
     return `${model.partiesStructured.party_1} and ${model.partiesStructured.party_2}`;
   }
@@ -96,9 +99,10 @@ function provenanceFor(args: {
 export function buildWhatWeUnderstoodBullets(model: LivePreviewModel): UnderstoodBullet[] {
   const slots: UnderstoodBullet[] = [];
 
-  const partiesFull = model.partiesStructured
-    ? `${model.partiesStructured.party_1} and ${model.partiesStructured.party_2}`
-    : (model.partiesLine || "").trim();
+  const partiesFull = (model.partiesLine || "").trim()
+    || (model.partiesStructured
+      ? `${model.partiesStructured.party_1} and ${model.partiesStructured.party_2}`
+      : "");
   if (partiesFull) {
     slots.push({
       kind: "parties",

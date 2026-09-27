@@ -1,4 +1,5 @@
-const SESSION_KEY = "claw_active_agreement_generation_id_v1";
+export const ACTIVE_AGREEMENT_GENERATION_STORAGE_KEY = "claw_active_agreement_generation_id_v1";
+const SESSION_KEY = ACTIVE_AGREEMENT_GENERATION_STORAGE_KEY;
 
 function randomId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -7,15 +8,19 @@ function randomId(): string {
   return `gen_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-export function getSessionAgreementGenerationId(): string {
-  if (typeof sessionStorage === "undefined") return randomId();
+/** Peek only — never mint. Empty session must not invent a persist identity. */
+export function readSessionAgreementGenerationId(): string | null {
+  if (typeof sessionStorage === "undefined") return null;
   try {
-    const s = sessionStorage.getItem(SESSION_KEY);
-    if (s) return s;
+    const s = sessionStorage.getItem(SESSION_KEY)?.trim() || "";
+    return s || null;
   } catch {
-    /* ignore */
+    return null;
   }
-  return randomId();
+}
+
+export function getSessionAgreementGenerationId(): string {
+  return readSessionAgreementGenerationId() || randomId();
 }
 
 export function setSessionAgreementGenerationId(id: string): void {

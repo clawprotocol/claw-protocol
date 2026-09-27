@@ -609,6 +609,66 @@ function resolveCanonicalNoticeAuthorityParties(
   return preserveSlotIndexedSignerMetadataParties(merged, base, maxParties).slice(0, maxParties);
 }
 
+function noticeHeadingContainsForeignPartyResidue(
+  headingEntity: string,
+  partyLegalName: string,
+  otherPartyNames: readonly string[] = [],
+): boolean {
+  const heading = headingEntity.replace(/\s+/g, " ").trim();
+  const legal = partyLegalName.replace(/\s+/g, " ").trim();
+  if (!heading || !legal || heading.length < 3) return false;
+  if (heading.toLowerCase() === legal.toLowerCase()) return false;
+  const others = otherPartyNames
+    .map((n) => n.replace(/\s+/g, " ").trim())
+    .filter((n) => n.length >= 3 && n.toLowerCase() !== legal.toLowerCase());
+  if (others.some((other) => heading.toLowerCase().includes(other.toLowerCase()))) {
+    return true;
+  }
+  if (!heading.toLowerCase().includes(legal.toLowerCase())) return false;
+  const remainder = heading
+    .replace(new RegExp(escapeRegExp(legal), "ig"), " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return remainder.length >= 3;
+}
+
+function authorityPartyLegalNames(parties: readonly PaidProSignerMetadataParty[]): string[] {
+  return parties.map((p) => p.partyLegalName.trim()).filter((n) => n.length >= 3);
+}
+
+/**
+ * True when an If-to heading concatenates another known legal party (live two-stanza regen).
+ * Must not treat a clean single-party heading as fused: checking residue against *every*
+ * authority name would see the heading's own party in the other-names list.
+ */
+function noticesRegionHasFusedPartyIfToHeading(
+  region: string,
+  authorityParties: readonly PaidProSignerMetadataParty[],
+): boolean {
+  const names = authorityPartyLegalNames(authorityParties);
+  if (names.length < 2) return false;
+  const longestFirst = [...names].sort((a, b) => b.length - a.length);
+  return (region || "")
+    .split(/\n(?=If to\s+)/i)
+    .slice(1)
+    .some((stanza) => {
+      const heading = noticeStanzaHeadingLegalEntity(stanza);
+      if (!heading) return false;
+      let remainder = heading;
+      let hits = 0;
+      for (const legal of longestFirst) {
+        if (!remainder.toLowerCase().includes(legal.toLowerCase())) continue;
+        hits += 1;
+        remainder = remainder
+          .replace(new RegExp(escapeRegExp(legal), "ig"), " ")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+      return hits >= 2 || (hits === 1 && remainder.length >= 3);
+    });
+}
+
+
 function enrichNoticeAuthorityParties(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
@@ -618,7 +678,13 @@ function enrichNoticeAuthorityParties(
   const resolved = ensureNoticeAuthorityPartyLegalEntities(
     resolveCanonicalNoticeAuthorityParties(cappedSource, roleContext),
     roleContext,
-  );
+  ).map((party) => ({
+    ...party,
+    partyAddress: sanitizeCanonicalPartyAddress(party.partyAddress, {
+      slot: party.partyIndex,
+      source: "enrichNoticeAuthorityParties",
+    }),
+  }));
   if (intakePartyManifestIsAuthoritative(roleContext?.intakeText)) {
     return resolved.slice(0, cap);
   }
@@ -732,7 +798,8 @@ export function formatUsNoticeAddressForDisplay(address: string): string[] {
 
 /** Optional-contact display: omit missing email/address; never emit placeholder tokens. */
 export function formatNoticeAddressLines(address: string): string[] {
-  const trimmed = address.trim();
+  const sanitized = sanitizeCanonicalPartyAddress(address, { source: "formatNoticeAddressLines" });
+  const trimmed = sanitized.trim();
   if (!trimmed) return [];
   // Never re-emit pre-signer notice placeholders into finalized notice stanzas.
   if (/provided during signer setup/i.test(trimmed)) return [];
@@ -745,6 +812,23 @@ export function formatNoticeAddressLines(address: string): string[] {
 }
 
 const NOTICE_ADDRESS_HEADER_RE = /^Address(?:\s+for\s+Notice)?\s*:\s*(.*)$/i;
+const NOTICE_INLINE_ADDRESS_ON_IF_TO_RE =
+  /^(If to\s+.+?)\s+Address(?:\s+for\s+Notice)?\s*:\s*(.*)$/i;
+
+function noticeAddressHeaderMatch(
+  line: string,
+): { headingPrefix: string | null; body: string } | null {
+  const trimmed = String(line ?? "").trim();
+  const headerMatch = trimmed.match(NOTICE_ADDRESS_HEADER_RE);
+  if (headerMatch) {
+    return { headingPrefix: null, body: (headerMatch[1] ?? "").trim() };
+  }
+  const inlineMatch = trimmed.match(NOTICE_INLINE_ADDRESS_ON_IF_TO_RE);
+  if (inlineMatch) {
+    return { headingPrefix: (inlineMatch[1] ?? "").trim(), body: (inlineMatch[2] ?? "").trim() };
+  }
+  return null;
+}
 
 const NOTICE_ADDRESS_EXECUTION_LINE_RE =
   /^(?:By|Name|Title|Date|CLIENT|SERVICE\s+PROVIDER)\s*:/i;
@@ -793,9 +877,9 @@ export function extractNoticeAddressFromStanza(stanza: string): string {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    const headerMatch = trimmed.match(NOTICE_ADDRESS_HEADER_RE);
+    const headerMatch = noticeAddressHeaderMatch(trimmed);
     if (headerMatch) {
-      const inlineBody = (headerMatch[1] ?? "").trim();
+      const inlineBody = headerMatch.body;
       if (inlineBody) {
         const sanitizedInline = sanitizeNoticeStanzaAddress(inlineBody);
         if (sanitizedInline) captured.push(sanitizedInline);
@@ -837,9 +921,9 @@ export function noticeStanzaHasAddressPollution(stanza: string): boolean {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    const headerMatch = trimmed.match(NOTICE_ADDRESS_HEADER_RE);
+    const headerMatch = noticeAddressHeaderMatch(trimmed);
     if (headerMatch) {
-      const inlineBody = (headerMatch[1] ?? "").trim();
+      const inlineBody = headerMatch.body;
       if (inlineBody) rawParts.push(inlineBody);
       else capturing = true;
       continue;
@@ -875,6 +959,29 @@ export function sanitizeNoticeStanzaAddressContent(stanza: string): { stanza: st
 
   for (const line of lines) {
     const trimmed = line.trim();
+    const inlineIfTo = noticeAddressHeaderMatch(trimmed);
+    if (inlineIfTo?.headingPrefix) {
+      // Collapsed `If to … Address:` — last-good boundary omits non-postal Address.
+      if (formatted.length === 0) {
+        if (trimmed !== inlineIfTo.headingPrefix) repaired = true;
+        out.push(inlineIfTo.headingPrefix);
+        inAddress = false;
+        continue;
+      }
+      const nextValue = formatted.length === 1 ? (formatted[0] ?? sanitized) : "";
+      out.push(inlineIfTo.headingPrefix);
+      if (formatted.length <= 1) {
+        out.push(`Address: ${nextValue}`);
+      } else {
+        out.push("Address:");
+        out.push(...formatted);
+      }
+      if (trimmed !== `${inlineIfTo.headingPrefix} Address: ${formatted.join(" ")}`) {
+        repaired = true;
+      }
+      inAddress = false;
+      continue;
+    }
     const headerMatch = trimmed.match(NOTICE_ADDRESS_HEADER_RE);
     if (headerMatch) {
       // Empty sanitize result covers bare `Address:` and placeholder-only bodies
@@ -1088,7 +1195,18 @@ function resolveNoticeStanzaLegalEntity(
   roleContext?: PaidProPartyRoleContext | null,
 ): string {
   const direct = party.partyLegalName.trim();
-  if (direct.length >= 2 && isAuthoritativeLegalEntityName(direct)) return direct;
+  const otherAuthorityNames = authorityParties
+    .filter((p) => p.partyIndex !== party.partyIndex)
+    .map((p) => p.partyLegalName.trim())
+    .filter((n) => n.length >= 2);
+  const directIsConcatenated = otherAuthorityNames.some(
+    (other) =>
+      direct.toLowerCase().includes(other.toLowerCase()) &&
+      direct.toLowerCase() !== other.toLowerCase(),
+  );
+  if (direct.length >= 2 && isAuthoritativeLegalEntityName(direct) && !directIsConcatenated) {
+    return direct;
+  }
 
   // TEST539 — the immutable intake manifest is the authority for party identity. Once it resolves the
   // real legal entity for this slot, notice validation must use it and must NEVER degrade to a
@@ -1184,6 +1302,15 @@ function ensureNoticeAuthorityPartyLegalEntities(
 
 function noticeIntroAlreadyHasDeliveryLanguage(intro: string): boolean {
   return /notices?\s+(?:under|for)\s+this\s+agreement\s+must\s+be\s+in\s+writing/i.test(intro);
+}
+
+/** Keep a section break when splicing Notices after a prior clause (`Agreement` + `12. NOTICES`). */
+function joinCorpusBeforeNoticesRegion(before: string, notices: string): string {
+  const head = (before || "").replace(/\s+$/g, "");
+  const body = (notices || "").replace(/^\s+/g, "");
+  if (!head) return body;
+  if (!body) return head;
+  return `${head}\n\n${body}`;
 }
 
 function expandFusedIfToNoticeStanza(stanza: string): string {
@@ -1406,6 +1533,14 @@ function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty
   if (noticeStanzaHasExecutionPollution(trimmed)) return false;
   if (noticeStanzaHasAddressPollution(trimmed)) return false;
   if (noticeStanzaHasRoleLabelCorruption(trimmed)) return false;
+  const headingEntity = noticeStanzaHeadingLegalEntity(trimmed);
+  if (
+    headingEntity &&
+    party?.partyLegalName &&
+    noticeHeadingContainsForeignPartyResidue(headingEntity, party.partyLegalName)
+  ) {
+    return false;
+  }
   if (DANGLING_IF_TO_RE.test(`\n${trimmed}`)) return false;
   if (/^If to\s*:\s*$/i.test(trimmed)) return false;
   // Attn/Email must be real field lines — not fused into the If-to header ("If to Alex Rivera Attn:").
@@ -1417,7 +1552,9 @@ function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty
     if (!hasEmailLine) return false;
     if (!trimmed.toLowerCase().includes(requiredEmail.toLowerCase())) return false;
   }
-  const requiredAddress = party?.partyAddress?.trim() ?? "";
+  const requiredAddress = sanitizeCanonicalPartyAddress(party?.partyAddress, {
+    source: "noticeStanzaComplete",
+  });
   if (requiredAddress) {
     if (!/Address(?:\s+for\s+Notice)?\s*:/i.test(trimmed)) return false;
     if (!trimmed.toLowerCase().includes(requiredAddress.toLowerCase().slice(0, 12))) return false;
@@ -1930,7 +2067,9 @@ export function resolveOperativeNoticesFamilyEnd(text: string, noticesStart: num
 
 function noticeStanzaHeadingLegalEntity(stanza: string): string {
   const header = stanza.trim().split("\n")[0]?.trim() ?? "";
-  const match = header.match(/^If to\s+(.+?)\s*:\s*$/i);
+  // Live regen can collapse Attn/Email/Address onto the If-to line. The legal
+  // name is still the token before the first colon — require that, not EOL.
+  const match = header.match(/^If to\s+(.+?)\s*:/i);
   const raw = match?.[1]?.trim() ?? "";
   if (!raw) return "";
   const stripped = stripTrailingPartyMetadataLabel(raw).trim();
@@ -1957,6 +2096,15 @@ function findExistingNoticeStanzaForParty(
       const stanza = existingStanzas[j] ?? "";
       const headingEntity = noticeStanzaHeadingLegalEntity(stanza);
       if (headingEntity.length >= 2 && partyLegalNamesMatch(headingEntity, legal)) {
+        if (
+          noticeHeadingContainsForeignPartyResidue(
+            headingEntity,
+            legal,
+            authorityParties.map((p) => p.partyLegalName),
+          )
+        ) {
+          continue;
+        }
         consumedStanzaIndexes.add(j);
         if (noticeStanzaHasLegalEntityLine(stanza)) {
           return stanza.trim();
@@ -2189,6 +2337,11 @@ export function repairIncompleteIfToNoticeStanzas(
   const repairs: string[] = [];
   let text = repairGluedSectionHeadingsInText(corpus.replace(/\r\n/g, "\n"));
   if (text !== corpus) repairs.push("notice:split_glued_section_headings");
+  const fusedNoticesHeading = repairFusedNoticesHeadingToPriorClause(text);
+  if (fusedNoticesHeading.repairs.length > 0) {
+    text = fusedNoticesHeading.text;
+    repairs.push(...fusedNoticesHeading.repairs);
+  }
 
   const noticesIdxEarly = findNoticesSectionStart(text);
   if (noticesIdxEarly >= 0) {
@@ -2253,7 +2406,8 @@ export function repairIncompleteIfToNoticeStanzas(
       allCompleteEarly &&
       !NOTICE_PLACEHOLDER_TOKEN_RE.test(fullNoticesRegionEarly) &&
       !noticesRegionHasExecutionPollution(fullNoticesRegionEarly) &&
-      !hasInlineMalformedNoticeStanzas(fullNoticesRegionEarly)
+      !hasInlineMalformedNoticeStanzas(fullNoticesRegionEarly) &&
+      !noticesRegionHasFusedPartyIfToHeading(fullNoticesRegionEarly, authorityParties)
     ) {
       const addressRepair = repairNoticeStanzaAddressBoundariesInCorpus(text);
       if (addressRepair.repairs.length > 0) {
@@ -2453,9 +2607,10 @@ export function repairIncompleteIfToNoticeStanzas(
     repairs.push("notice:preserve_notices_section_heading");
   }
   const afterNotices = [middleClean, after.trimStart()].filter(Boolean).join("\n\n");
+  const joinedNotices = joinCorpusBeforeNoticesRegion(before, mergedNotices);
   text = afterNotices
-    ? `${before}${mergedNotices}\n\n${afterNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd()
-    : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+    ? `${joinedNotices}\n\n${afterNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd()
+    : joinedNotices.replace(/\n{3,}/g, "\n\n").trimEnd();
   logPaidProNoticeSectionIntegrity({ repairs, partyCount: authorityParties.length, stanzaCount });
   const dedupedHeadings = dedupeDuplicateStandaloneNoticesHeadings(text);
   if (dedupedHeadings.repairs.length > 0) {
@@ -2632,6 +2787,10 @@ export function ensureOperativeIfToNoticeDelivery(
   opts?: { allowEntityOnlyNoticesAtFreeze?: boolean },
 ): { text: string; repairs: string[] } {
   const allowEntityOnlyNoticesAtFreeze = Boolean(opts?.allowEntityOnlyNoticesAtFreeze);
+  const fusedNoticesHeading = repairFusedNoticesHeadingToPriorClause(corpus);
+  if (fusedNoticesHeading.repairs.length > 0) {
+    corpus = fusedNoticesHeading.text;
+  }
   if (
     allowEntityOnlyNoticesAtFreeze &&
     findNoticesSectionStart(corpus) < 0 &&
@@ -2696,6 +2855,17 @@ export function ensureOperativeIfToNoticeDelivery(
         consumedStanzaIndexes,
         { manifestAuthoritative: manifestRepairRequired },
       ) ?? (manifestRepairRequired ? "" : stanzaBlocks[index] ?? "");
+    const headingEntity = noticeStanzaHeadingLegalEntity(stanza);
+    if (
+      headingEntity &&
+      noticeHeadingContainsForeignPartyResidue(
+        headingEntity,
+        party.partyLegalName,
+        authorityPartyLegalNames(authorityParties),
+      )
+    ) {
+      return true;
+    }
     const email = party.signerEmail.trim();
     if (email && !noticeStanzaComplete(stanza, party)) return true;
     const addr = party.partyAddress.trim();
@@ -2731,6 +2901,12 @@ export function ensureOperativeIfToNoticeDelivery(
   const hasMetadataLabelContamination = stanzaBlocks.some((stanza) =>
     isContaminatedIfToNoticeStanza(stanza),
   );
+  const hasFusedIfToHeading = noticesRegionHasFusedPartyIfToHeading(noticesRegion, authorityParties);
+  // Rebuild only when Address is entirely non-postal (intake/commercial blob).
+  // Postal + instructional tail stays on the in-place boundary repair (TEST486).
+  const hasNonPostalAddressPollution = stanzaBlocks.some(
+    (stanza) => noticeStanzaHasAddressPollution(stanza) && !extractNoticeAddressFromStanza(stanza),
+  );
   if (
     !missing &&
     !stanzaCountMismatch &&
@@ -2738,7 +2914,9 @@ export function ensureOperativeIfToNoticeDelivery(
     !hasExecutionPollution &&
     !hasInlineMalformedNotices &&
     !hasBareNoticeStanzas &&
-    !hasMetadataLabelContamination
+    !hasMetadataLabelContamination &&
+    !hasFusedIfToHeading &&
+    !hasNonPostalAddressPollution
   ) {
     const addressRepair = repairNoticeStanzaAddressBoundariesInCorpus(corpus);
     const baseText = addressRepair.repairs.length > 0 ? addressRepair.text : corpus;

@@ -148,14 +148,110 @@ def validate_payment_timing_pause_document(*, original: str, updated: str) -> bo
     return True
 
 
+_QUOTED_INSERT_CUE_RE = re.compile(
+    r"\badd\s+this\s+exact\s+sentence\b|\badd\s+the\s+exact\s+sentence\b|"
+    r"\badd\s+this\s+exact\b|\badd\s+the\s+following\s+sentence\b|"
+    r"\badd\s+this\s+sentence\s+as\b",
+    re.IGNORECASE,
+)
+_QUOTED_SPAN_RE = re.compile(r"[\"“”](.{16,800}?)[\"“”]", re.DOTALL)
+_SECTION_IN_RE = re.compile(r"\bin\s+the\s+([A-Za-z][A-Za-z0-9\s]{1,40}?)\s+section\b", re.IGNORECASE)
+
+
+def parse_quoted_sentence_insert(prompt: str) -> Optional[Tuple[str, Optional[str]]]:
+    """Return ``(sentence, optional_section)`` for an exact-sentence surgical insert."""
+    raw = prompt or ""
+    if not _QUOTED_INSERT_CUE_RE.search(raw):
+        return None
+    qm = _QUOTED_SPAN_RE.search(raw)
+    if not qm:
+        return None
+    sentence = " ".join((qm.group(1) or "").split()).strip()
+    if len(sentence) < 16:
+        return None
+    sm = _SECTION_IN_RE.search(raw)
+    section = " ".join((sm.group(1) or "").split()).strip() if sm else None
+    if section and len(section) > 48:
+        section = None
+    return sentence, section or None
+
+
+def _next_section_cut(tail: str) -> Optional[int]:
+    """Next top-level heading or witness — subsections stay inside the current section."""
+    nxt = re.search(r"(?m)^(?:#{1,4}\s+)?\d{1,2}\.\s+(?!\d)[A-Z].+$", tail)
+    md = re.search(r"(?m)^#{1,4}\s+(?!\d)[A-Z].+$", tail)
+    wit = re.search(r"(?im)^\s*(IN WITNESS WHEREOF|EXECUTED AS OF|EXECUTION PAGE|SIGNATURES?)\b", tail)
+    cuts = [m.start() for m in (nxt, md, wit) if m]
+    return min(cuts) if cuts else None
+
+
+def _find_named_section_heading(doc: str, section: str) -> Optional[re.Match[str]]:
+    sec = re.escape(section)
+    patterns = [
+        rf"(?im)^(?:#{{1,4}}\s+)?(?:\d+\.)+\s+{sec}\b[^\n]*$",
+        rf"(?im)^#{{1,4}}\s+{sec}\b[^\n]*$",
+        rf"(?im)^(?:#{{1,4}}\s+)?(?:\d+\.)+\s+[A-Z][^\n]{{0,60}}\b{sec}\b[^\n]*$",
+        rf"(?im)(?<=[a-z.])((?:\d+\.)+\s+{sec}\b[^\n]*)$",
+    ]
+    if section.lower() == "notices":
+        patterns.append(r"(?im)^(?:#{1,4}\s+)?(?:\d+\.)+\s+Notice\b(?!\s+shall)[^\n]*$")
+    for pat in patterns:
+        heading = re.search(pat, doc)
+        if heading:
+            return heading
+    return None
+
+
+def _last_top_level_section_body_end(doc: str) -> Optional[int]:
+    last = None
+    for m in re.finditer(r"(?m)^(?:#{1,4}\s+)?\d{1,2}\.\s+(?!\d)[A-Z].+$", doc):
+        last = m
+    if last is None:
+        return None
+    after = last.end()
+    cut = _next_section_cut(doc[after:])
+    return after + (cut if cut is not None else len(doc[after:].rstrip()))
+
+
+def _insert_quoted_sentence(doc: str, sentence: str, section: Optional[str]) -> Optional[str]:
+    """Insert ``sentence`` as its own paragraph inside the named section when possible."""
+    if not doc or not sentence:
+        return None
+    if sentence in doc:
+        return None
+    block = "\n\n" + sentence + "\n\n"
+
+    def apply_at(insert_at: int) -> str:
+        return doc[:insert_at].rstrip() + block + doc[insert_at:].lstrip("\n")
+
+    if section:
+        heading = _find_named_section_heading(doc, section)
+        if heading:
+            after = heading.end()
+            tail = doc[after:]
+            cut = _next_section_cut(tail)
+            insert_at = after + (cut if cut is not None else len(tail.rstrip()))
+            return apply_at(insert_at)
+        last_body_end = _last_top_level_section_body_end(doc)
+        if last_body_end is not None:
+            return apply_at(last_body_end)
+    wit = re.search(r"(?im)^\s*(IN WITNESS WHEREOF|EXECUTED AS OF|EXECUTION PAGE|SIGNATURES?)\b", doc)
+    if wit:
+        return apply_at(wit.start())
+    return doc.rstrip() + block
+
+
 def classify_narrow_amendment_prompt(prompt: str) -> Optional[str]:
     """
     Map a user refinement prompt to a narrow amendment kind, or None for generic refine.
 
-    Kinds: payment_timing_pause, late_fee, governing_law, delivery_acceptance, support_period,
-    termination, client_deliverables_final_payment.
+    Kinds: quoted_sentence_insert, payment_timing_pause, late_fee, governing_law,
+    delivery_acceptance, support_period, termination, client_deliverables_final_payment.
     """
-    p = (prompt or "").strip().lower()
+    raw = prompt or ""
+    if parse_quoted_sentence_insert(raw):
+        return "quoted_sentence_insert"
+    p = raw.strip().lower()
     if not p or len(p) < 8:
         return None
     if _classify_payment_timing_pause(p):
@@ -272,7 +368,9 @@ def validate_narrow_refined_document(*, original: str, updated: str, kind: str) 
         return False
     if lu > int(lo * 1.35):
         return False
-    if not _anchors_preserved(original, updated):
+    # A mid-section insert can split a sampled 52-char window. Quoted-sentence
+    # inserts only add a paragraph, so require growth instead of window anchors.
+    if kind != "quoted_sentence_insert" and not _anchors_preserved(original, updated):
         return False
     low = updated.lower()
     if kind == "late_fee":
@@ -297,6 +395,9 @@ def validate_narrow_refined_document(*, original: str, updated: str, kind: str) 
         if "deliverables" not in low or "final payment" not in low:
             return False
         if not re.search(r"(?i)\b(approval|approve|acceptance)\b", updated):
+            return False
+    elif kind == "quoted_sentence_insert":
+        if lu < lo:
             return False
     return True
 
@@ -479,6 +580,7 @@ _SUMMARY_FOR_KIND: Dict[str, List[str]] = {
     "payment_timing_pause": [
         "Localized payment timing (net days) and a narrow pause-for-nonpayment sentence; preserved the rest verbatim."
     ],
+    "quoted_sentence_insert": ["Inserted the requested sentence without rewriting other sections."],
 }
 
 
@@ -506,6 +608,18 @@ def try_apply_narrow_amendment(
             "readiness_score": 82,
             "suggested_next_step": "review",
         }
+
+    if kind == "quoted_sentence_insert":
+        parsed = parse_quoted_sentence_insert(user_refinement_prompt)
+        if not parsed:
+            return None
+        sentence, section = parsed
+        patched = _insert_quoted_sentence(doc, sentence, section)
+        if patched and sentence in patched and validate_narrow_refined_document(
+            original=doc, updated=patched, kind="quoted_sentence_insert"
+        ):
+            return ok_response(patched, _SUMMARY_FOR_KIND["quoted_sentence_insert"])
+        return None
 
     if kind == "client_deliverables_final_payment":
         patched = _insert_client_deliverables_final_payment_clause(doc)
@@ -564,6 +678,7 @@ __all__ = [
     "LATE_FEE_PARAGRAPH_DEFAULT",
     "classify_narrow_amendment_prompt",
     "document_has_late_fee_language",
+    "parse_quoted_sentence_insert",
     "try_apply_narrow_amendment",
     "validate_narrow_refined_document",
 ]

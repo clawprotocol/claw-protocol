@@ -78,6 +78,17 @@ describe("dashboard Complete signer details → create resume", () => {
     ).toBe(true);
   });
 
+  it("resume UI ends after authorized signers are finalized so review-decision can paint", () => {
+    expect(
+      isDashboardSignerSetupResumeUiActive({
+        openSignerSetupOnResume: true,
+        createFlowPhase: "draft_ready_for_review",
+        paidProInlineSignerSetupLatched: false,
+        signerMetadataFinalized: true,
+      }),
+    ).toBe(false);
+  });
+
   it("Create new agreement clears leftover signer-setup arm so create cannot auto-resume", () => {
     armCreatorDashboardSignerSetupResume(AGREEMENT_ID);
     writeCreateReviewAgreementResumeId(AGREEMENT_ID);

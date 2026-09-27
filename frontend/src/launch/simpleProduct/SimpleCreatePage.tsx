@@ -24,6 +24,11 @@ import {
   readCheckoutBackRestoreSnapshot,
 } from "../../components/agreements/checkoutBackRestore";
 import { shouldSkipHomeAutoGenerateForStoredReview } from "../../components/agreements/createReviewRefreshRestore";
+import { isEntitledPremiumRewriteProcessInFlight } from "../../components/agreements/paidProPremiumGenerationCallAudit";
+import {
+  resolveCreateFlowEntitlementSyncForSubmit,
+  shouldStartCreateFromPaidProShell,
+} from "../../components/agreements/createFlowEntitlementTransition";
 import { setJoyFlash, emitActionCompleted } from "../../joy/joyTelemetry";
 import {
   clearHeroIntakeHandoffAfterApply,
@@ -86,7 +91,12 @@ import {
   CREATE_ACCESS_CHOICE_HEADING,
   formatGenesisAllowanceStatusCopy,
   formatProAllowanceStatusCopy,
+  resolveStableCreateIntakeMountKey,
   shouldGateCreateEditorUntilEntitlementReady,
+  shouldHideAgreementEditor,
+  shouldKeepCreateEditorMountedAcrossAuthRefresh,
+  shouldReplaceCreatePageWithAuthWorkspaceSettling,
+  shouldResetCommercialEntitlementReadyOnAuthRefresh,
   shouldShowCreateAccessChoiceScreen,
 } from "./createEntitlementUi";
 import { useFirstSessionHint } from "../../conversion/firstExposureHints";
@@ -337,7 +347,13 @@ export function SimpleCreatePage() {
 
   // Create entitlement gating must use real Supabase auth — never the monetization mock default.
   const createAuthAuthenticated = isReallyAuthenticated;
-  const [workspaceProEntitled, setWorkspaceProEntitled] = useState(false);
+  // Already-paid Pro: start from sync cache so the first paint is paid_pro —
+  // do not enter a remount window that dual-fires home-create-submit.
+  const [workspaceProEntitled, setWorkspaceProEntitled] = useState(() =>
+    shouldStartCreateFromPaidProShell({
+      workspaceAlreadyEntitled: resolveCreateFlowEntitlementSyncForSubmit({}),
+    }),
+  );
   const [commercialEntitlement, setCommercialEntitlement] =
     useState<CommercialEntitlementDecision | null>(null);
   const [commercialEntitlementReady, setCommercialEntitlementReady] = useState(false);
@@ -383,11 +399,25 @@ export function SimpleCreatePage() {
   );
   const isResumingOwnedAgreement = Boolean(readCreateReviewAgreementResumeId() || resumeAgreementIdFromQuery);
   const hasCheckoutPendingMarker = Boolean(readCreateComplexityResume()?.awaitingProCheckout);
+  const createEditorHasBeenShownRef = useRef(false);
+  const alreadyEntitledPro = resolveCreateFlowEntitlementSyncForSubmit({
+    workspaceProEntitledState: workspaceProEntitled,
+    tier: access.tier,
+  });
+  const keepEditorMountedAcrossAuthRefresh = shouldKeepCreateEditorMountedAcrossAuthRefresh({
+    homeHeroAutoGenerate,
+    editorHasBeenShown: createEditorHasBeenShownRef.current,
+    entitledRewriteInFlight: isEntitledPremiumRewriteProcessInFlight(),
+    alreadyEntitledPro,
+  });
+  const keepEditorMountedRef = useRef(keepEditorMountedAcrossAuthRefresh);
+  keepEditorMountedRef.current = keepEditorMountedAcrossAuthRefresh;
   const editorGatedUntilEntitlement = shouldGateCreateEditorUntilEntitlementReady({
     isAuthenticated: createAuthAuthenticated,
     commercialEntitlementReady,
     isResumingOwnedAgreement,
     hasCheckoutPendingMarker,
+    keepEditorMounted: keepEditorMountedAcrossAuthRefresh,
   });
   const showAccessChoiceScreen =
     commercialEntitlementReady &&
@@ -407,11 +437,16 @@ export function SimpleCreatePage() {
     probesReady &&
     commercialEntitlementReady &&
     createAccessVerdict.showEntitlementProbeError;
-  const hideAgreementEditor =
-    editorGatedUntilEntitlement ||
-    showAccessChoiceScreen ||
-    entitlementProbeBlocked ||
-    awaitingAuthWorkspace;
+  const hideAgreementEditor = shouldHideAgreementEditor({
+    editorGatedUntilEntitlement,
+    showAccessChoiceScreen,
+    entitlementProbeBlocked,
+    awaitingAuthWorkspace,
+    keepEditorMounted: keepEditorMountedAcrossAuthRefresh,
+  });
+  if (!hideAgreementEditor) {
+    createEditorHasBeenShownRef.current = true;
+  }
   const intakeInteractionBlocked =
     !premiumCompletionReturn &&
     !paidDemoPremiumSession &&
@@ -483,7 +518,17 @@ export function SimpleCreatePage() {
     if (isReallyAuthenticated && !isUserWorkspaceOrgId(getOrgId())) return;
     if (authSession?.access_token) setCachedAccessToken(authSession.access_token);
     let cancelled = false;
-    setCommercialEntitlementReady(false);
+    // Mid-dump TOKEN_REFRESHED remounted intake and dual-submitted (OPTIONS-only).
+    // Keep the painted editor / in-flight generate mounted — do not reset ready.
+    // Read keep from a ref so entitlement-ready ticks do not re-run this effect
+    // and remount ABI (keep_mounted_on_path was false when keep was in deps).
+    if (
+      shouldResetCommercialEntitlementReadyOnAuthRefresh({
+        keepEditorMounted: keepEditorMountedRef.current,
+      })
+    ) {
+      setCommercialEntitlementReady(false);
+    }
     void fetchWorkspaceProEntitlement().then((ok) => {
       if (!cancelled) setWorkspaceProEntitled(ok);
     });
@@ -495,7 +540,12 @@ export function SimpleCreatePage() {
     return () => {
       cancelled = true;
     };
-  }, [probesReady, isReallyAuthenticated, workspaceOrgId, authSession?.access_token]);
+  }, [
+    probesReady,
+    isReallyAuthenticated,
+    workspaceOrgId,
+    authSession?.access_token,
+  ]);
 
   useEffect(() => {
     if (!consumeLawdogFocusCreateIntake()) return;
@@ -574,13 +624,24 @@ export function SimpleCreatePage() {
       .finally(() => setGenesisRequestBusy(false));
   }, []);
 
-  const intakeKey = usingTemplate
-    ? "tmpl"
-    : pasteOnly
-      ? "paste"
-      : heroHandoff
-        ? `free-hp-${heroHandoff.text.length}-${heroHandoff.voiceFinalize ? "v" : "t"}`
-        : "free";
+  const computedIntakeKey = resolveStableCreateIntakeMountKey({
+    usingTemplate,
+    pasteOnly,
+    heroHandoff,
+    alreadyEntitledPro,
+    homeHeroAutoGenerate,
+  });
+  const stableIntakeKeyRef = useRef(computedIntakeKey);
+  // Latch the first mount key. Entitlement / handoff / commercialEntitlementReady
+  // ticks must not change the React key mid-generate / mid-pfd.
+  if (
+    !keepEditorMountedAcrossAuthRefresh &&
+    !homeHeroAutoGenerate &&
+    !alreadyEntitledPro
+  ) {
+    stableIntakeKeyRef.current = computedIntakeKey;
+  }
+  const intakeKey = stableIntakeKeyRef.current;
   const checkoutRestoreSnapshot = useMemo(
     () => (checkoutBackRestoreActive ? readCheckoutBackRestoreSnapshot() : null),
     [checkoutBackRestoreActive],
@@ -745,6 +806,14 @@ export function SimpleCreatePage() {
         </SimpleFlowShell>
       );
     }
+  }
+
+  if (
+    shouldReplaceCreatePageWithAuthWorkspaceSettling({
+      awaitingAuthWorkspace,
+      keepEditorMounted: keepEditorMountedAcrossAuthRefresh,
+    })
+  ) {
     // Already-signed-in create/resume must not flash OAuth "Finishing sign-in".
     // When signer-setup resume is armed, keep that chrome so the settle does not
     // look like a create-prompt hop before the agreement preview mounts.

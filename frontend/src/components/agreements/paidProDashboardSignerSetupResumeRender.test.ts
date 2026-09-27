@@ -47,6 +47,14 @@ describe("dashboard signer-setup resume render authority", () => {
         paidProInlineSignerSetupLatched: true,
       }),
     ).toBe(true);
+    expect(
+      isDashboardSignerSetupResumeUiActive({
+        openSignerSetupOnResume: true,
+        createFlowPhase: "draft_ready_for_review",
+        paidProInlineSignerSetupLatched: false,
+        signerMetadataFinalized: true,
+      }),
+    ).toBe(false);
   });
 
   it("review-refresh-restore is skipped (not restored:true) on signer-setup resume", () => {

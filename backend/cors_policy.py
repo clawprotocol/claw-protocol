@@ -26,6 +26,10 @@ CORS_ALLOW_REQUEST_HEADERS: List[str] = [
     "X-Claw-Anon-Session",
     "X-Claw-Agreement-Id",
     "X-Claw-Affiliate-Code",
+    # After-pay verify-checkout-session uses clawAgreementHeaders, which sends
+    # this when premiumCompletion=1 is on the Stripe success URL.
+    "X-Claw-Entitlement-Repair-Org",
+    "X-Claw-Entitlement-Repair-Orgs",
     "X-Claw-Paid-Pro-Perf-Trace",
     "X-Claw-Review-First-Persist",
     # Review-ready draft idempotency (Genesis/Pro first-review persist; FE always sends).

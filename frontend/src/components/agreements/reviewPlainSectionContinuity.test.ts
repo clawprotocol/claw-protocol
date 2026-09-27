@@ -1,0 +1,610 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  clearAcceptedReviewSnapshotRef,
+  clearDisplayReviewSnapshotAuthority,
+  persistCanonicalReviewSnapshot,
+  sha256CorpusDigest,
+} from "../../agreement/canonicalReviewSnapshotApi";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import {
+  clearPaintedSequentialPersistReviewForTests,
+  latchPaintedSequentialPersistReview,
+} from "./paidProPaintedSequentialPersistReview";
+import {
+  PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN,
+  resetPaidProVisibleDocumentShellLogsForTests,
+  resolveCanonicalPlainForVisibleShell,
+} from "./paidProVisibleDocumentShell";
+import {
+  clearPaidProReviewSessionAuthorityForTests,
+  establishPaidProReviewSessionAuthority,
+} from "./paidProReviewSessionAuthority";
+import { clearPaidProSourceOfTruth, hashPaidProCorpus } from "./paidProSourceOfTruth";
+import { replacePaidProSourceOfTruth } from "./paidProSourceOfTruthState";
+import {
+  collectReviewPlainTopLevelSectionNumbers,
+  extractSuppliedGoverningLaw,
+  repairReviewPlainSectionContinuity,
+  reviewPlainHasLateSkippedSectionNumbers,
+  reviewPlainHasOperativeGoverningLaw,
+  reviewPlainHasSkippedSectionNumbers,
+} from "./reviewPlainSectionContinuity";
+
+function twoPartyIntake(args: { client: string; provider: string; law: string }): string {
+  return (
+    `${args.client} is hiring ${args.provider} to design a logo and brand kit for $2,400, ` +
+    `term 30 days, governing law ${args.law}.`
+  );
+}
+
+function servicesBody(args: {
+  client: string;
+  provider: string;
+  headings: Array<[number, string]>;
+}): string {
+  const lines = [
+    "SERVICES AGREEMENT",
+    "",
+    `This Services Agreement (this "Agreement") is entered into as of the Effective Date by and between ${args.client} ("Client") and ${args.provider} ("Service Provider").`,
+    "",
+  ];
+  for (const [num, title] of args.headings) {
+    lines.push(`${num}. ${title}`);
+    if (/Force Majeure/i.test(title)) {
+      lines.push("Neither party is liable for delay caused by events beyond its reasonable control.");
+    } else if (/Notices/i.test(title)) {
+      lines.push("Any notice under this Agreement must be in writing and delivered as set forth below.");
+      lines.push(`If to ${args.client}: ${args.client} Email: notices-client@example.com`);
+      lines.push(`If to ${args.provider}: ${args.provider} Email: notices-provider@example.com`);
+    } else if (/Independent Contractor/i.test(title)) {
+      lines.push("Designer is an independent contractor and may not assign this Agreement without consent.");
+    } else {
+      lines.push(`The parties agree to the ${title.toLowerCase()} terms of this Agreement.`);
+    }
+    lines.push("");
+  }
+  lines.push(
+    "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.",
+    "",
+    `CLIENT: ${args.client}`,
+    "By: ____________________",
+    "",
+    `SERVICE PROVIDER: ${args.provider}`,
+    "By: ____________________",
+  );
+  return lines.join("\n");
+}
+
+const LATE_TITLES: Record<number, string> = {
+  1: "Services and Deliverables",
+  2: "Client Materials, Cooperation, and Approvals",
+  3: "Fees and Payment",
+  4: "Term and Termination",
+  5: "Intellectual Property",
+  6: "Confidentiality",
+  7: "Representations and Warranties",
+  8: "Limitation of Liability",
+  9: "Indemnification",
+  10: "Miscellaneous",
+  11: "Independent Contractor and Assignment",
+  12: "Force Majeure",
+  13: "Governing Law",
+  14: "Notices",
+};
+
+function sequentialThrough(n: number, client: string, provider: string): string {
+  const headings: Array<[number, string]> = [];
+  for (let i = 1; i <= n; i += 1) {
+    headings.push([i, LATE_TITLES[i] ?? `Section ${i}`]);
+  }
+  return servicesBody({ client, provider, headings });
+}
+
+function twelveThenFourteen(client: string, provider: string): string {
+  const headings: Array<[number, string]> = (
+    [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14] as const
+  ).map((n) => [n, LATE_TITLES[n] ?? `Section ${n}`]);
+  return servicesBody({ client, provider, headings });
+}
+
+function tenThenTwelve(client: string, provider: string): string {
+  const headings: Array<[number, string]> = [
+    [1, "Services and Deliverables"],
+    [2, "Fees and Payment"],
+    [3, "Term and Termination"],
+    [4, "Intellectual Property"],
+    [5, "Confidentiality"],
+    [6, "Limitation of Liability"],
+    [7, "Indemnification"],
+    [8, "Independent Contractor and Assignment"],
+    [9, "Force Majeure"],
+    [10, "Miscellaneous"],
+    [12, "Notices"],
+  ];
+  return servicesBody({ client, provider, headings });
+}
+
+function sequentialThrough12WrappedNotices(args: {
+  client: string;
+  provider: string;
+  law: string;
+  attnA: string;
+  attnB: string;
+}): string {
+  return [
+    "SERVICES AGREEMENT",
+    "",
+    `This Services Agreement (this "Agreement") is entered into as of the Effective Date by and between ${args.client} ("Client") and ${args.provider} ("Service Provider").`,
+    "",
+    "1. Services and Deliverables",
+    `${args.provider} will provide design services for a logo and brand kit.`,
+    "(a) primary mark",
+    "(b) color system",
+    "(c) usage guide",
+    "",
+    "2. Revisions,",
+    "Client Input, and Changes",
+    "The flat fee in this Agreement includes up to two rounds of reasonable revisions.",
+    "",
+    "3. Fees and Payment",
+    "Fees are due as stated in this Agreement.",
+    "",
+    "4. Term and Termination",
+    "The engagement continues until the deliverables are complete.",
+    "4.1 Early Termination",
+    "Either party may terminate for material breach after written notice.",
+    "",
+    "5. Intellectual Property",
+    "Client owns final deliverables upon payment.",
+    "5.1 Portfolio License",
+    `${args.provider} retains a limited portfolio license.`,
+    "",
+    "6. Confidentiality",
+    "Each party keeps non-public information confidential.",
+    "",
+    "7. Representations and Warranties",
+    "Each party represents it has authority to enter this Agreement.",
+    "",
+    "8. Indemnification",
+    "Each party indemnifies the other for third-party claims arising from its breach.",
+    "",
+    "9. Liability Allocation",
+    "Mutual indemnification applies. Liability for indirect damages is excluded. Total liability is capped at fees paid.",
+    "",
+    "10. Independent Contractor and Assignment",
+    "This Agreement cannot be assigned without prior written consent, except for a merger or sale.",
+    "",
+    "11. Governing Law",
+    `This Agreement is governed by the laws of ${args.law}, without regard to conflict-of-laws principles.`,
+    "",
+    "12. Notices",
+    "Any notice under this Agreement must be in writing and delivered via email, personal delivery, or overnight courier.",
+    "Notices may be delivered by:",
+    "1. Email",
+    "2. Personal delivery",
+    "3. Overnight courier",
+    "",
+    `If to ${args.client}:`,
+    args.client,
+    `Attn: ${args.attnA}`,
+    `Email: notices-${args.client.split(" ")[0]!.toLowerCase()}@example.test`,
+    "10. Main Street",
+    "",
+    `If to ${args.provider}:`,
+    args.provider,
+    `Attn: ${args.attnB}`,
+    `Email: notices-${args.provider.split(" ")[0]!.toLowerCase()}@example.test`,
+    "1. If to leftover wrap should not count",
+    "",
+    "2. Revisions,",
+    "Client Input, and Changes",
+    "",
+    "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.",
+    "",
+    `CLIENT: ${args.client}`,
+    "By: ____________________",
+    "",
+    `SERVICE PROVIDER: ${args.provider}`,
+    "By: ____________________",
+  ].join("\n");
+}
+
+const PERSIST_HEADING_TITLE_MARKERS = [
+  "Services",
+  "Revisions",
+  "Fees",
+  "Term",
+  "Intellectual",
+  "Confidentiality",
+  "Representations",
+  "Indemnification",
+  "Liability",
+  "Independent",
+  "Governing",
+  "Notices",
+  "Force Majeure",
+  "Miscellaneous",
+  "Client Materials",
+] as const;
+
+function asPersistReviewHtml(plain: string): string {
+  return plain
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (
+        trimmed &&
+        !/^\d+\.\d+/.test(trimmed) &&
+        /^\d{1,2}\.\s+/.test(trimmed) &&
+        PERSIST_HEADING_TITLE_MARKERS.some((marker) => trimmed.includes(marker))
+      ) {
+        return `<h2 class="premium-doc-section-heading">${trimmed}</h2>`;
+      }
+      return trimmed ? `<p>${trimmed}</p>` : "";
+    })
+    .join("\n");
+}
+
+function asPersistReviewMarkup(plain: string): string {
+  return plain
+    .replace("2. Revisions,", '<h2 class="premium-doc-section-heading">2. Revisions,</h2>')
+    .replace("12. Notices", "<strong>12. Notices</strong>")
+    .replace(
+      "1. Email\n2. Personal delivery\n3. Overnight courier",
+      "1. Email<br />2. Personal delivery<br />3. Overnight courier",
+    );
+}
+
+function leftoverEightSection(client: string, provider: string): string {
+  return servicesBody({
+    client,
+    provider,
+    headings: [
+      [1, "Services and Deliverables"],
+      [2, "Fees and Payment"],
+      [3, "Term and Termination"],
+      [4, "Intellectual Property"],
+      [5, "Confidentiality"],
+      [6, "Limitation of Liability"],
+      [7, "Governing Law"],
+      [8, "Notices"],
+    ],
+  }).replace(
+    "The parties agree to the governing law terms of this Agreement.",
+    "This Agreement is governed by the laws of the jurisdiction named in the intake.",
+  );
+}
+
+function assertSequentialIntegers(plain: string): void {
+  const nums = collectReviewPlainTopLevelSectionNumbers(plain);
+  expect(reviewPlainHasSkippedSectionNumbers(plain)).toBe(false);
+  for (let i = 1; i < nums.length; i += 1) {
+    expect(nums[i]).toBe(nums[i - 1]! + 1);
+  }
+}
+
+describe("Review/plain skipped section numbering", () => {
+  const cases = [
+    { law: "Oklahoma", client: "Cedar Ridge LLC", provider: "Maple Grove Inc" },
+    { law: "Colorado", client: "Riverbend Studio", provider: "Oak Point LLC" },
+    { law: "New York", client: "Summit Craft Co", provider: "Harborline Design LLC" },
+  ] as const;
+
+  it.each(cases)("FAILs 12-then-14 and 10-then-12; PASSES sequential ($law)", ({ law, client, provider }) => {
+    const skipped1214 = twelveThenFourteen(client, provider);
+    const skipped1012 = tenThenTwelve(client, provider);
+    const sequential = sequentialThrough(14, client, provider);
+
+    expect(reviewPlainHasSkippedSectionNumbers(skipped1214)).toBe(true);
+    expect(reviewPlainHasLateSkippedSectionNumbers(skipped1214)).toBe(true);
+    expect(collectReviewPlainTopLevelSectionNumbers(skipped1214)).toContain(12);
+    expect(collectReviewPlainTopLevelSectionNumbers(skipped1214)).toContain(14);
+    expect(collectReviewPlainTopLevelSectionNumbers(skipped1214)).not.toContain(13);
+
+    expect(reviewPlainHasSkippedSectionNumbers(skipped1012)).toBe(true);
+    expect(reviewPlainHasLateSkippedSectionNumbers(skipped1012)).toBe(true);
+    expect(collectReviewPlainTopLevelSectionNumbers(skipped1012)).toEqual(
+      expect.arrayContaining([10, 12]),
+    );
+    expect(collectReviewPlainTopLevelSectionNumbers(skipped1012)).not.toContain(11);
+
+    expect(reviewPlainHasSkippedSectionNumbers(sequential)).toBe(false);
+    expect(collectReviewPlainTopLevelSectionNumbers(sequential)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+    ]);
+    expect(extractSuppliedGoverningLaw(twoPartyIntake({ client, provider, law }))).toBe(law);
+  });
+
+  it.each(cases)(
+    "PASSES sequential wrapped-heading 1..12 with Notices Attn; still FAILs 12-then-14 ($law)",
+    ({ law, client, provider }) => {
+      const attn =
+        law === "Oklahoma"
+          ? { attnA: "Jordan Hale", attnB: "Morgan Ellis" }
+          : law === "Colorado"
+            ? { attnA: "Casey Quinn", attnB: "Riley Chen" }
+            : { attnA: "Avery Cole", attnB: "Sam Ortiz" };
+      const sequential = sequentialThrough12WrappedNotices({
+        client,
+        provider,
+        law,
+        ...attn,
+      });
+      expect(collectReviewPlainTopLevelSectionNumbers(sequential)).toEqual([
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+      ]);
+      expect(reviewPlainHasSkippedSectionNumbers(sequential)).toBe(false);
+      expect(reviewPlainHasLateSkippedSectionNumbers(sequential)).toBe(false);
+      expect(sequential).toMatch(new RegExp(law, "i"));
+      expect(sequential).not.toMatch(/Texas/);
+      expect(sequential).not.toMatch(/Northline/);
+      expect(sequential).not.toMatch(/Priya|Diego/);
+
+      const skipped1214 = twelveThenFourteen(client, provider);
+      expect(reviewPlainHasLateSkippedSectionNumbers(skipped1214)).toBe(true);
+      expect(collectReviewPlainTopLevelSectionNumbers(skipped1214)).toContain(14);
+      expect(collectReviewPlainTopLevelSectionNumbers(skipped1214)).not.toContain(13);
+    },
+  );
+
+  it.each(cases)(
+    "PASSES persist-time HTML/markup 1..12; still FAILs HTML 12-then-14 ($law)",
+    ({ law, client, provider }) => {
+      const attn =
+        law === "Oklahoma"
+          ? { attnA: "Jordan Hale", attnB: "Morgan Ellis" }
+          : law === "Colorado"
+            ? { attnA: "Casey Quinn", attnB: "Riley Chen" }
+            : { attnA: "Avery Cole", attnB: "Sam Ortiz" };
+      const sequential = sequentialThrough12WrappedNotices({
+        client,
+        provider,
+        law,
+        ...attn,
+      });
+      const htmlCorpus = asPersistReviewHtml(sequential);
+      const markupCorpus = asPersistReviewMarkup(sequential);
+      const entityCorpus = sequential
+        .replace("12. Notices", "12.&nbsp;Notices")
+        .replace("2. Revisions,", '<h2 class="premium-doc-section-heading">2. Revisions,</h2>');
+      for (const corpus of [htmlCorpus, markupCorpus, entityCorpus]) {
+        expect(collectReviewPlainTopLevelSectionNumbers(corpus)).toEqual([
+          1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+        ]);
+        expect(reviewPlainHasSkippedSectionNumbers(corpus)).toBe(false);
+        expect(reviewPlainHasLateSkippedSectionNumbers(corpus)).toBe(false);
+        expect(corpus).not.toMatch(/Texas/);
+        expect(corpus).not.toMatch(/Northline/);
+        expect(corpus).not.toMatch(/Priya|Diego/);
+      }
+
+      const skippedHtml = asPersistReviewHtml(twelveThenFourteen(client, provider));
+      const skipped10Html = asPersistReviewHtml(tenThenTwelve(client, provider));
+      expect(reviewPlainHasLateSkippedSectionNumbers(skippedHtml)).toBe(true);
+      expect(collectReviewPlainTopLevelSectionNumbers(skippedHtml)).toContain(14);
+      expect(collectReviewPlainTopLevelSectionNumbers(skippedHtml)).not.toContain(13);
+      expect(reviewPlainHasLateSkippedSectionNumbers(skipped10Html)).toBe(true);
+      expect(collectReviewPlainTopLevelSectionNumbers(skipped10Html)).not.toContain(11);
+    },
+  );
+
+  it("repairs 12-then-14 and keeps intake governing law (not a hard-coded venue)", () => {
+    const client = "Cedar Ridge LLC";
+    const provider = "Maple Grove Inc";
+    const law = "Oklahoma";
+    const raw = twelveThenFourteen(client, provider);
+    expect(reviewPlainHasSkippedSectionNumbers(raw)).toBe(true);
+    expect(reviewPlainHasOperativeGoverningLaw(raw, law)).toBe(false);
+
+    const { text } = repairReviewPlainSectionContinuity(raw, {
+      intakeText: twoPartyIntake({ client, provider, law }),
+    });
+    assertSequentialIntegers(text);
+    expect(reviewPlainHasOperativeGoverningLaw(text, law)).toBe(true);
+    expect(text).toMatch(new RegExp(law, "i"));
+    expect(text).not.toMatch(/Texas/);
+    expect(text).not.toMatch(/Northline/);
+    expect(text).not.toMatch(/Harbor Marks/);
+    expect(text).not.toMatch(/Priya|Diego/);
+  });
+
+  it("repairs 10-then-12 and keeps a different supplied governing law", () => {
+    const client = "Riverbend Studio";
+    const provider = "Oak Point LLC";
+    const law = "Colorado";
+    const raw = tenThenTwelve(client, provider);
+    expect(reviewPlainHasSkippedSectionNumbers(raw)).toBe(true);
+
+    const { text } = repairReviewPlainSectionContinuity(raw, {
+      intakeText: twoPartyIntake({ client, provider, law }),
+    });
+    assertSequentialIntegers(text);
+    expect(reviewPlainHasOperativeGoverningLaw(text, law)).toBe(true);
+    expect(text).toMatch(/Colorado/i);
+  });
+
+  it("does not collapse 12-then-14 when governing law is still missing and no intake was supplied", () => {
+    const raw = twelveThenFourteen("Cedar Ridge LLC", "Maple Grove Inc");
+    const { text, repairs } = repairReviewPlainSectionContinuity(raw);
+    expect(reviewPlainHasSkippedSectionNumbers(text)).toBe(true);
+    expect(collectReviewPlainTopLevelSectionNumbers(text)).toContain(14);
+    expect(repairs).toEqual([]);
+  });
+
+  it("does not remint leftover 8-section into 10/11/12/13", () => {
+    const client = "Summit Craft Co";
+    const provider = "Harborline Design LLC";
+    const leftover = leftoverEightSection(client, provider);
+    expect(collectReviewPlainTopLevelSectionNumbers(leftover)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(reviewPlainHasSkippedSectionNumbers(leftover)).toBe(false);
+
+    const { text } = repairReviewPlainSectionContinuity(leftover, {
+      intakeText: twoPartyIntake({ client, provider, law: "Delaware" }),
+    });
+    const nums = collectReviewPlainTopLevelSectionNumbers(text);
+    expect(nums).not.toContain(10);
+    expect(nums).not.toContain(11);
+    expect(nums).not.toContain(12);
+    expect(nums).not.toContain(13);
+    expect(nums[0]).toBe(1);
+    expect(reviewPlainHasSkippedSectionNumbers(text)).toBe(false);
+  });
+});
+
+function padToVisibleShellFloor(corpus: string): string {
+  const min = PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN + 1500;
+  if (corpus.length >= min) return corpus;
+  const pad = "Each party shall keep confidential information confidential. ".repeat(80);
+  return corpus.replace(
+    "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.",
+    `${pad.trim()}\n\nIN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.`,
+  );
+}
+
+describe("persist Review paint sequentializes skipped integers", () => {
+  afterEach(() => {
+    clearPaidProSourceOfTruth();
+    clearPaidProReviewSessionAuthorityForTests();
+    clearDisplayReviewSnapshotAuthority();
+    clearAcceptedReviewSnapshotRef();
+    resetPaidProVisibleDocumentShellLogsForTests();
+    clearPaintedSequentialPersistReviewForTests();
+    vi.restoreAllMocks();
+  });
+
+  it("Screen 1 persist Review paint FAILs 12-then-14 until repaired, then PASSES sequential + supplied law", () => {
+    const client = "Cedar Ridge LLC";
+    const provider = "Maple Grove Inc";
+    const law = "Oklahoma";
+    const intake = twoPartyIntake({ client, provider, law });
+    const raw = padToVisibleShellFloor(twelveThenFourteen(client, provider));
+    expect(reviewPlainHasSkippedSectionNumbers(raw)).toBe(true);
+
+    replacePaidProSourceOfTruth({
+      text: raw,
+      hash: hashPaidProCorpus(raw),
+      accepted_at: Date.now(),
+      source: "server_full_draft",
+      reviewSessionId: "review_plain_skip_paint",
+    });
+    establishPaidProReviewSessionAuthority({
+      corpusPlain: raw,
+      source: "persist_get",
+      integrityOk: true,
+      reviewSessionId: "review_plain_skip_paint",
+      agreementId: "agr_review_plain_skip",
+    });
+
+    const draft: ParsedDraftShape = {
+      title: "Services Agreement",
+      jurisdiction: law,
+      agreement_family: "services_agreement",
+      parties: [
+        { name: client, role: "Client" },
+        { name: provider, role: "Service Provider" },
+      ],
+      purpose: "logo and brand kit",
+      payment_terms: "$2,400",
+      duration: "30 days",
+      due_date: null,
+      effective_date: null,
+      payment: { amount: 2400, cadence: "one_time", valid: true },
+    };
+
+    const painted = resolveCanonicalPlainForVisibleShell({
+      draft,
+      intakeText: intake,
+      agreementId: "agr_review_plain_skip",
+      paidProActive: true,
+      premiumCheckoutCompleted: true,
+      premiumPaidDocumentSurface: true,
+      acceptedCanonicalPlain: raw,
+    });
+
+    expect(reviewPlainHasSkippedSectionNumbers(painted.plain)).toBe(false);
+    assertSequentialIntegers(painted.plain);
+    expect(reviewPlainHasOperativeGoverningLaw(painted.plain, law)).toBe(true);
+    expect(painted.plain).toMatch(/Oklahoma/i);
+    expect(painted.plain).not.toMatch(/Texas/);
+    expect(painted.plain).not.toMatch(/Northline|Harbor Marks|Priya|Diego/);
+  });
+
+  it("Continue-to-signature-links persist POSTs painted sequential 1..N when authority would skip", async () => {
+    const client = "Cedar Ridge LLC";
+    const provider = "Maple Grove Inc";
+    const law = "Oklahoma";
+    const intake = twoPartyIntake({ client, provider, law });
+    const raw = padToVisibleShellFloor(twelveThenFourteen(client, provider));
+    expect(reviewPlainHasLateSkippedSectionNumbers(raw)).toBe(true);
+
+    const draft: ParsedDraftShape = {
+      title: "Services Agreement",
+      jurisdiction: law,
+      agreement_family: "services_agreement",
+      parties: [
+        { name: client, role: "Client" },
+        { name: provider, role: "Service Provider" },
+      ],
+      purpose: "logo and brand kit",
+      payment_terms: "$2,400",
+      duration: "30 days",
+      due_date: null,
+      effective_date: null,
+      payment: { amount: 2400, cadence: "one_time", valid: true },
+    };
+    const painted = resolveCanonicalPlainForVisibleShell({
+      draft,
+      intakeText: intake,
+      agreementId: "agr_continue_paint_persist",
+      paidProActive: true,
+      premiumCheckoutCompleted: true,
+      premiumPaidDocumentSurface: true,
+      acceptedCanonicalPlain: raw,
+    });
+    expect(reviewPlainHasLateSkippedSectionNumbers(painted.plain)).toBe(false);
+    assertSequentialIntegers(painted.plain);
+
+    latchPaintedSequentialPersistReview({
+      paintedPlain: painted.plain,
+      authorityPlain: raw,
+    });
+    const digest = await sha256CorpusDigest(painted.plain);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        snapshot: {
+          snapshot_id: "crs_continue_paint",
+          agreement_id: "agr_continue_paint_persist",
+          corpus_plain: painted.plain,
+          corpus_sha256: digest,
+          corpus_length: painted.plain.length,
+          status: "pending",
+        },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const refusedIfAuthority = await persistCanonicalReviewSnapshot({
+      agreementId: "agr_continue_paint_persist",
+      corpusPlain: raw,
+      paintedPersistPlain: raw,
+    });
+    expect(refusedIfAuthority.ok).toBe(false);
+    if (!refusedIfAuthority.ok) {
+      expect(refusedIfAuthority.code).toBe("skipped_top_level_section_integers");
+    }
+
+    const res = await persistCanonicalReviewSnapshot({
+      agreementId: "agr_continue_paint_persist",
+      corpusPlain: raw,
+    });
+    expect(res.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0] as unknown as [string, RequestInit?];
+    const body = JSON.parse(String(firstCall[1]?.body ?? "{}"));
+    expect(body.corpus_plain).toBe(painted.plain);
+    expect(collectReviewPlainTopLevelSectionNumbers(body.corpus_plain)[0]).toBe(1);
+    expect(reviewPlainHasLateSkippedSectionNumbers(body.corpus_plain)).toBe(false);
+  });
+});

@@ -211,12 +211,16 @@ describe("test355 VS01 canonical pagination + navigation", () => {
     expect(css).toMatch(/\.vs01-canonical-initials-band[\s\S]*z-index:\s*2/);
   });
 
-  it("routes paid Pro bridge prepare finish to modern dashboard landing", () => {
+  it("stays on private signing-links after paid Pro bridge prepare finish", () => {
     const wizard = readFileSync(join(__dirname, "Vs01Wizard.tsx"), "utf8");
-    expect(wizard).toContain("paidProPacketReadyDashboardPath");
-    expect(wizard).toContain('destination: paidProPacketReadyDashboardPath()');
-    expect(wizard).toContain("navigate(paidProPacketReadyDashboardPath())");
-    expect(wizard).not.toContain("goToStep(3);\n  }, [\n    vs01LinkedAgreementId,\n    documentId,\n    agreementTitle");
+    const start = wizard.indexOf("const completeBridgePreparePacket = useCallback");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const block = wizard.slice(start, wizard.indexOf("}, [", start));
+    expect(block).toContain("resolvePostPrepareBuyerSurface");
+    expect(block).toContain("goToStep(3)");
+    expect(block).toContain("[vs01-private-signing-links-stay]");
+    expect(block).not.toContain("paidProPacketReadyDashboardPath");
+    expect(block).not.toContain("navigate(paidProPacketReadyDashboardPath())");
     expect(paidProPacketReadyDashboardPath()).toBe("/app?vs01_packet_ready=1");
   });
 });

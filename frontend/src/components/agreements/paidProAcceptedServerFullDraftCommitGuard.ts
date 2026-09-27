@@ -5,6 +5,7 @@
 
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { isCommerciallyUsableCreateReviewCorpus } from "./multiPartyCreateReviewSettle";
 import {
   getLatchedAcceptedServerFullDraftAuthority,
   LONG_PREMIUM_AUTHORITATIVE_MIN_LEN,
@@ -96,6 +97,50 @@ export function shouldAutoEstablishPaidProSourceOfTruthFromRenderPath(args: {
   return hasPaidProPipelineSessionAcceptance({ text: body, source });
 }
 
+let premiumAuthorityShorterThanAcceptedChurnCount = 0;
+let lastCommerciallyUsableAuthorityCandidate = "";
+const premiumAuthorityShorterThanAcceptedListeners = new Set<() => void>();
+
+/** Live too_much / Northline: shorter-than-accepted loops after generate. Not a second SoT. */
+export function notePremiumAuthorityShorterThanAcceptedChurn(): void {
+  premiumAuthorityShorterThanAcceptedChurnCount += 1;
+  for (const listener of premiumAuthorityShorterThanAcceptedListeners) {
+    try {
+      listener();
+    } catch {
+      /* ignore subscriber errors */
+    }
+  }
+}
+
+export function hasPremiumAuthorityShorterThanAcceptedChurn(): boolean {
+  return premiumAuthorityShorterThanAcceptedChurnCount > 0;
+}
+
+/** Rejected-but-usable pfd body from shorter-than-accepted churn (entitled dump settle). */
+export function getLastCommerciallyUsableAuthorityCandidate(): string {
+  return lastCommerciallyUsableAuthorityCandidate;
+}
+
+export function subscribePremiumAuthorityShorterThanAcceptedChurn(
+  listener: () => void,
+): () => void {
+  premiumAuthorityShorterThanAcceptedListeners.add(listener);
+  return () => {
+    premiumAuthorityShorterThanAcceptedListeners.delete(listener);
+  };
+}
+
+export function resetPremiumAuthorityShorterThanAcceptedChurn(): void {
+  premiumAuthorityShorterThanAcceptedChurnCount = 0;
+  lastCommerciallyUsableAuthorityCandidate = "";
+}
+
+/** @deprecated Use resetPremiumAuthorityShorterThanAcceptedChurn */
+export function resetPremiumAuthorityShorterThanAcceptedChurnForTests(): void {
+  resetPremiumAuthorityShorterThanAcceptedChurn();
+}
+
 export function logPremiumAuthorityCandidateRejectedShorterThanAccepted(payload: {
   acceptedLen: number;
   candidateLen: number;
@@ -105,6 +150,7 @@ export function logPremiumAuthorityCandidateRejectedShorterThanAccepted(payload:
   acceptedHash: string;
   candidateHash: string;
 }): void {
+  notePremiumAuthorityShorterThanAcceptedChurn();
   if (!paidProVerboseQaLogsEnabled()) return;
   // eslint-disable-next-line no-console
   console.info("[premium-authority-candidate-rejected-shorter-than-accepted]", payload);
@@ -118,6 +164,9 @@ export function guardPaidProAcceptedServerFullDraftCommit(
   args: GuardPaidProAcceptedServerFullDraftCommitArgs,
 ): GuardPaidProAcceptedServerFullDraftCommitResult {
   const candidate = trim(args.candidateText);
+  if (isCommerciallyUsableCreateReviewCorpus(candidate)) {
+    lastCommerciallyUsableAuthorityCandidate = candidate;
+  }
   const candidateLen = candidate.length;
   const candidateHash = candidateLen > 0 ? fingerprintAgreementBody(candidate) : "";
   const candidateSource = trim(args.candidateSource);

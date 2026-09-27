@@ -64,6 +64,14 @@ from backend.agreements.premium_agreement_validation import (
     AgreementValidationResult,
     validatePremiumAgreementDraft,
 )
+from backend.agreements.premium_full_draft_section_emit import (
+    SKIPPED_TOP_LEVEL_SECTION_INTEGERS,
+    emit_sequential_premium_full_draft_sections,
+    refuse_skipped_top_level_section_integers,
+)
+from backend.agreements.review_plain_section_continuity import (
+    repair_review_plain_section_continuity,
+)
 from backend.agreements.premium_agreement_finalization import (
     PremiumFinalizationResult,
     finalize_premium_agreement_if_needed,
@@ -104,7 +112,10 @@ from backend.agreements.premium_full_draft_quality_gate import (
     build_premium_full_draft_repair_user_payload,
     evaluate_premium_full_draft_quality,
     premium_full_draft_body_meets_substance_floor,
+    premium_full_draft_is_complex_or_multiparty,
+    premium_full_draft_max_tokens_for_context,
     premium_full_draft_repair_system_prompt,
+    salvage_premium_full_draft_document_text,
 )
 from backend.agreements.premium_simple_consulting_size_guard import enrich_user_payload_for_simple_consulting
 from backend.agreements.paid_pro_server_timing import (
@@ -118,6 +129,7 @@ from backend.agreements.premium_refine_narrow import (
     classify_narrow_amendment_prompt,
     try_apply_narrow_amendment,
 )
+from backend.agreements.premium_refine_party_restore import restore_refine_party_placeholders
 from backend.agreements.revision_surgical import (
     MINIMAL_REVISION_RETRY_SUFFIX,
     instruction_requests_material_rewrite,
@@ -1276,6 +1288,10 @@ def _degraded_user_message_for_code(code: str) -> str:
             "LawDog blocked freezing text that introduced material terms without authority. "
             "Your last valid draft was preserved. Please use **Retry Pro draft**."
         ),
+        "skipped_top_level_section_integers": (
+            "The full Pro draft numbered sections with a gap (for example 12 then 14). "
+            "That draft was not saved. Please use **Retry Pro draft**."
+        ),
         "dev_context_leak": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** for a fresh pass.",
         "payload_limits": "Your agreement is ready. Try shortening the intake and using **Retry Pro draft**, or keep editing the text below.",
     }
@@ -1876,6 +1892,9 @@ def _premium_full_draft_system_prompt() -> str:
         "should render as a main heading followed by body paragraph text—not a lone N.1 label (e.g. use "
         "\"7. Governing Law\\n\\nThis Agreement shall be governed by…\" rather than \"7. Governing Law\\n\\n7.1 This Agreement…\"). "
         "Use subsection numbering only when multiple sibling subsections are present (e.g. 7.1, 7.2, 7.3). "
+        "Top-level section numbers MUST be sequential 1, 2, 3, … N with no skipped integers. "
+        "If you omit a planned section, renumber every later heading to the next integer — never emit 12 then 14 or 10 then 12. "
+        "A missing term is a missing section at the next integer, never a hole. "
         "This instruction applies to document structure only; do not change substantive legal content.\n"
         "- Use clear numbering (1., 1.1, (a)…) and professional headings consistent with the house style above.\n"
         "- **Contextual standard commercial terms:** Use the intake and any structured `agreement_family` / deal labels in the JSON `context` "
@@ -2087,6 +2106,10 @@ def _normalize_premium_refine_result(
     new_doc = str(raw.get("updated_document_text") or "").strip()
     if not new_doc:
         new_doc = current_doc or ""
+    if action == "update" and (current_doc or "").strip():
+        restored, did = restore_refine_party_placeholders(original=current_doc, candidate=new_doc)
+        if did:
+            new_doc = restored
     return PremiumRefineResponse(
         updated_document_text=new_doc,
         summary_changes=changes,
@@ -2207,6 +2230,8 @@ def _premium_refine_update_system_prompt(
         "Task: **apply** `user_refinement_prompt` to `current_document_text` — change, clarify, add protections, "
         "or tighten language they asked for. Keep party names, key numbers, and business intent aligned with the intake.\n"
         "Rules: Do not invent new economics or parties. Do not strip entire sections unless the user asked. "
+        "When the current document already uses real party names, copy those names through unchanged — "
+        "never replace them with internal slots like [ORG_1], [ORG_2], ORG_1, or PARTY_1. "
         "When in doubt, make a minimal, targeted edit. Plain text only (no HTML).\n"
         + surgical_block
         + retry_block
@@ -3971,6 +3996,31 @@ def _document_lifecycle_banner(draft: AgreementDraft) -> str:
     return "Draft Agreement (non-binding template)"
 
 
+def _render_persist_review_seed_html(persist_plain: str, *, watermark: bool = False) -> str:
+    """In-memory persist Review Pro seed — no leftover Story chrome, no leftover 8-section."""
+    body_src = (persist_plain or "").strip()
+    if watermark:
+        body_src = _strip_watermark_label_from_body(
+            _collapse_duplicate_watermark_labels(body_src, WATERMARK_LABEL),
+            WATERMARK_LABEL,
+        )
+    body = html.escape(body_src)
+    # Persist Review Pro as US-letter commercial legal — no leftover Story
+    # chrome (max-width:720px;margin:0 auto). Page margins come from the
+    # persist_review Story profile, not leftover _render_html banner wrap.
+    article = (
+        "<article class='ldg-persist-review-pro'>"
+        "<pre style='white-space:pre-wrap;font-family:Georgia,Times New Roman,Times,serif;"
+        "font-size:15px;line-height:1.58;color:#0f172a;margin:0;padding:0;border:0;"
+        "background:transparent'>"
+        f"{body}</pre>"
+        "</article>"
+    )
+    if not watermark:
+        return article
+    return f"{article}{_html_watermark_footer(html.escape(WATERMARK_LABEL))}"
+
+
 def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
     review_first_corpus, review_first_source = _review_first_final_corpus_from_draft(draft)
     if review_first_corpus:
@@ -5376,6 +5426,13 @@ def build_premium_full_draft_user_payload_for_airlock(
             "Delaware or swap states without intake support), notices, counterparts, e-sign, and full signature blocks."
         )
     user_payload = enrich_user_payload_for_simple_consulting(user_payload, intake_s, ctx_dict)
+    if premium_full_draft_is_complex_or_multiparty(intake_s, ctx_dict):
+        user_payload["multiparty_generation_directive"] = (
+            "N>=3 / complex draft: finish a complete signable `authoritative_draft` (every named "
+            "party in the opening recital and the signature block) BEFORE `agreement_intelligence`. "
+            "Do not stop mid-document or truncate the body to emit metadata. Prefer a complete "
+            "commercial corpus over unfinished intelligence."
+        )
     return user_payload, ctx_dict
 
 
@@ -5449,10 +5506,9 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
     if not ok_txt:
         raise HTTPException(status_code=400, detail=msg_txt)
     request_ip = request.client.host if request.client else "unknown"
-    max_out = max(2000, int(os.environ.get("CLAW_PREMIUM_FULL_DRAFT_MAX_TOKENS", "8000")))
+    env_max = max(2000, int(os.environ.get("CLAW_PREMIUM_FULL_DRAFT_MAX_TOKENS", "8000")))
     _ablation_max = ablation_max_tokens_override()
-    if _ablation_max is not None:
-        max_out = _ablation_max
+    max_out = env_max
     sim_regen = bool(getattr(body, "similarity_regeneration", False))
     llm_model = resolve_llm_model_for_access_class("premium_regen" if sim_regen else "premium")
     if sim_regen:
@@ -5480,6 +5536,10 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
         )
     prompt_assembly_started = time.perf_counter()
     intake_s = (body.intake_text or "").strip()
+    if _ablation_max is not None:
+        max_out = _ablation_max
+    else:
+        max_out = premium_full_draft_max_tokens_for_context(intake_s, ctx_dict, env_max=env_max)
     intent_key = resolve_premium_intent_key(intake_s, ctx_dict)
     intent_skeleton = build_premium_intent_skeleton(intent_key, intake_s)
     uga = (body.user_gap_answers or "").strip()
@@ -5609,33 +5669,75 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
         )
         _primary_finish = str((dq_usage_primary[-1] if dq_usage_primary else {}).get("finish_reason") or "")
         if _primary_finish.strip().lower() == "length":
-            truncated_text = (llm_text or "").strip()
+            salvaged_doc = salvage_premium_full_draft_document_text(llm_text or "")
+            salvage_ok, salvage_reasons = premium_full_draft_body_meets_substance_floor(
+                salvaged_doc, intake=intake_s, context=ctx_dict
+            )
             log.error(
                 "[premium-full-draft] event=truncated_output finish_reason=length "
-                "session_hint=%s completion_tokens=%s truncated_text_len=%s",
+                "session_hint=%s completion_tokens=%s raw_len=%s salvaged_len=%s salvage_ok=%s",
                 session_hint,
                 (dq_usage_primary[-1] if dq_usage_primary else {}).get("completion_tokens"),
-                len(truncated_text),
+                len((llm_text or "").strip()),
+                len(salvaged_doc),
+                int(bool(salvage_ok and salvaged_doc)),
             )
-            dm = _premium_full_draft_degraded_response(
-                intake_s=intake_s,
-                ctx_dict=ctx_dict,
-                failure_code="output_truncated",
-                failure_message=(
-                    "The draft was truncated before completion. No partial agreement was frozen. "
-                    "Tap Retry Pro draft."
-                ),
-                preserved_substantive_body=truncated_text,
-                use_truncated_keep_floor=True,
-            )
-            return _premium_full_draft_finalize_http_response(
-                dm,
-                intake_len=len(intake_s),
-                session_hint=session_hint,
-                server_timing=server_timing,
-                request=request,
-                dq_trace=dq_trace,
-            )
+            if salvaged_doc and salvage_ok:
+                log.warning(
+                    "[premium-full-draft] event=truncated_output_salvaged session_hint=%s "
+                    "salvaged_len=%s",
+                    session_hint,
+                    len(salvaged_doc),
+                )
+                # Downstream authority still blocks finish_reason=length. After a floor-clearing
+                # salvage the persisted corpus is no longer an emptied partial — mark recovered.
+                if dq_usage_primary:
+                    dq_usage_primary[-1]["finish_reason"] = "stop"
+                    dq_usage_primary[-1]["truncated_output_salvaged"] = 1
+                try:
+                    parsed_trunc = _extract_json_object(llm_text)
+                    if not str(
+                        parsed_trunc.get("authoritative_draft") or parsed_trunc.get("document_text") or ""
+                    ).strip():
+                        parsed_trunc["authoritative_draft"] = salvaged_doc
+                        parsed_trunc["document_text"] = salvaged_doc
+                    llm_text = json.dumps(parsed_trunc, ensure_ascii=False)
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    llm_text = json.dumps(
+                        {
+                            "title": str((ctx_dict or {}).get("title") or "").strip() or "Agreement",
+                            "agreement_family": str((ctx_dict or {}).get("agreement_family") or ""),
+                            "document_text": salvaged_doc,
+                            "authoritative_draft": salvaged_doc,
+                            "key_terms_found": [],
+                            "missing_material_info": [],
+                        },
+                        ensure_ascii=False,
+                    )
+            else:
+                log.warning(
+                    "[premium-full-draft] event=truncated_output_empty_or_hollow "
+                    "session_hint=%s salvaged_len=%s reasons=%s",
+                    session_hint,
+                    len(salvaged_doc),
+                    ",".join(salvage_reasons),
+                )
+                dm = _premium_full_draft_degraded_response(
+                    intake_s=intake_s,
+                    ctx_dict=ctx_dict,
+                    failure_code="output_truncated",
+                    failure_message=(
+                        "The draft was truncated before completion. No partial agreement was frozen. "
+                        "Tap Retry Pro draft."
+                    ),
+                )
+                return _premium_full_draft_finalize_http_response(
+                    dm,
+                    intake_len=len(intake_s),
+                    session_hint=session_hint,
+                    server_timing=server_timing,
+                    request=request,
+                )
         if dq_trace.enabled:
             u0 = dq_usage_primary[-1] if dq_usage_primary else {}
             if u0.get("model"):
@@ -6250,6 +6352,46 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 type(jsum_e).__name__,
             )
         primary_full = (out_primary.document_text or "").strip()
+        # Authoritative producer of top-level integers (not leftover esign): remint 1..N
+        # and emit a missing supplied governing-law SECTION at the next integer.
+        emitted = emit_sequential_premium_full_draft_sections(
+            doc,
+            original_intake=intake_s,
+            jurisdiction=str((ctx_dict or {}).get("jurisdiction") or ""),
+        )
+        if (emitted.get("text") or "").strip():
+            doc = emitted["text"]
+        # Hard gate on producer output BEFORE continuity repair. Repair-then-accept is not proof.
+        skip_code = refuse_skipped_top_level_section_integers(doc)
+        if skip_code:
+            log.error(
+                "[premium-full-draft] event=skipped_top_level_section_integers status=503 "
+                "session_hint=%s doc_len=%s",
+                session_hint,
+                len(doc),
+            )
+            dm = _premium_full_draft_degraded_response(
+                intake_s=intake_s,
+                ctx_dict=ctx_dict,
+                failure_code=SKIPPED_TOP_LEVEL_SECTION_INTEGERS,
+                failure_message=_degraded_user_message_for_code(SKIPPED_TOP_LEVEL_SECTION_INTEGERS),
+            )
+            return _premium_full_draft_finalize_http_response(
+                dm,
+                intake_len=len(intake_s),
+                session_hint=session_hint,
+                server_timing=server_timing,
+                request=request,
+            )
+        # Defense in depth only — producer must already be sequential.
+        continuity = repair_review_plain_section_continuity(
+            doc,
+            original_intake=intake_s,
+            jurisdiction=str((ctx_dict or {}).get("jurisdiction") or ""),
+            remint_all_top_level=True,
+        )
+        if (continuity.get("text") or "").strip():
+            doc = continuity["text"]
         agreement_validation = _validate_and_log_premium_agreement_draft(
             authoritative_draft=doc,
             agreement_intelligence=out.agreement_intelligence,
@@ -8140,6 +8282,7 @@ def post_canonical_review_snapshot(
             "customer_confirmed_answers": snap.get("customerConfirmedAnswers"),
         },
         "registry_version": reg.get("registryVersion"),
+        "accepted_snapshot_id": str(reg.get("acceptedSnapshotId") or "").strip() or None,
         "accepted": public_accepted_snapshot_fragment(accepted),
         "draft": next_draft.model_dump(),
     }
@@ -8330,6 +8473,7 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
     assert_agreement_full_draft_read_allowed(request, agreement_id)
     from backend.services.accepted_review_snapshot import (
         get_accepted_snapshot_record,
+        get_review_hydration_snapshot,
         get_registry,
         public_accepted_snapshot_fragment,
         verify_snapshot_integrity,
@@ -8373,16 +8517,27 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
     pending.sort(key=lambda s: str(s.get("createdAt") or ""), reverse=True)
     latest = pending[0] if pending else None
     if not latest:
+        latest = get_review_hydration_snapshot(draft)
+    if not isinstance(latest, dict):
         raise HTTPException(status_code=404, detail="canonical_review_snapshot_not_found")
+    status = str(latest.get("status") or "").strip() or "pending"
     ok, err = verify_snapshot_integrity(latest)
     if not ok:
         raise HTTPException(
             status_code=409,
-            detail={"code": err or "snapshot_corrupt", "message": "Pending snapshot failed integrity."},
+            detail={
+                "code": err or ("accepted_snapshot_corrupt" if status == "accepted" else "snapshot_corrupt"),
+                "message": (
+                    "Accepted snapshot failed integrity."
+                    if status == "accepted"
+                    else "Pending snapshot failed integrity."
+                ),
+            },
         )
+    accepted_id = str(reg.get("acceptedSnapshotId") or "").strip() or None
     return {
         "ok": True,
-        "status": "pending",
+        "status": status,
         "snapshot": {
             "snapshot_id": latest.get("snapshotId"),
             "agreement_id": latest.get("agreementId"),
@@ -8391,12 +8546,14 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
             "corpus_length": latest.get("corpusLength"),
             "generation_session_id": latest.get("generationSessionId"),
             "created_at": latest.get("createdAt"),
+            "accepted_at": latest.get("acceptedAt"),
             "schema_version": latest.get("schemaVersion"),
             "status": latest.get("status"),
             "customer_confirmed_answers": latest.get("customerConfirmedAnswers"),
         },
         "registry_version": reg.get("registryVersion"),
-        "public": None,
+        "accepted_snapshot_id": accepted_id,
+        "public": public_accepted_snapshot_fragment(latest) if status == "accepted" else None,
     }
 
 
@@ -11101,6 +11258,11 @@ class Vs01SigningSeedBody(BaseModel):
         default=None,
         description="Painted-deal packet so /app/esign/doc_* reloads after session death.",
     )
+    document_id: Optional[str] = Field(
+        default=None,
+        max_length=80,
+        description="Overwrite this vs01 document in place (same persist / same document id).",
+    )
 
 
 _VS01_SIGNING_CORPUS_OVERRIDE_MIN_LEN = 1500
@@ -11286,10 +11448,24 @@ def post_agreement_vs01_signing_seed(
         ) from exc
 
     signing_plain = (body.signing_corpus_plain or "").strip()
-    if len(signing_plain) >= _VS01_SIGNING_CORPUS_OVERRIDE_MIN_LEN:
+    persist_review_seed_plain = ""
+    from backend.services.vs01_leftover_fused_content import persist_review_plain_for_agreement
+
+    persist_plain = persist_review_plain_for_agreement(aid)
+    if persist_plain:
+        # Persist Review GET is the in-memory seed body. Leftover purpose
+        # (8-section designer, length-only full-client-agreement path) and
+        # leftover Story chrome must not win. Do not persist a new Review-paint SoT.
+        persist_review_seed_plain = persist_plain
+        log.info(
+            "[vs01-signing-seed-persist-review-render] agreement_id=%s len=%s",
+            aid,
+            len(persist_review_seed_plain),
+        )
+    elif len(signing_plain) >= _VS01_SIGNING_CORPUS_OVERRIDE_MIN_LEN:
         field_key_override, corpus_before = primary_agreement_plain_field_and_value(draft)
         if len(signing_plain) > len(corpus_before or ""):
-            merge_fields: Dict[str, str] = {field_key_override: signing_plain}
+            merge_fields: Dict[str, Any] = {field_key_override: signing_plain}
             for alt_key in (
                 "premium_full_document_text",
                 "server_full_document_text",
@@ -11299,16 +11475,20 @@ def post_agreement_vs01_signing_seed(
                     merge_fields[alt_key] = signing_plain
             draft = _merge_agreement_draft(draft, **merge_fields)
             log.info(
-                "[vs01-signing-seed-corpus-override] agreement_id=%s len=%s field=%s prev_len=%s",
+                "[vs01-signing-seed-corpus-override] agreement_id=%s len=%s field=%s prev_len=%s persist_review=%s",
                 aid,
                 len(signing_plain),
                 field_key_override,
                 len(corpus_before or ""),
+                False,
             )
 
     # --- placeholder_template_safety (pre-render) ---
     party_names_vs = [str(p.name or "").strip() for p in (draft.parties or []) if str(p.name or "").strip()]
-    field_key_vs, corpus_vs = primary_agreement_plain_field_and_value(draft)
+    if persist_review_seed_plain:
+        field_key_vs, corpus_vs = "", persist_review_seed_plain
+    else:
+        field_key_vs, corpus_vs = primary_agreement_plain_field_and_value(draft)
     intake_corpus_vs = _draft_placeholder_intake_corpus(draft)
     ok_ph_vs, fixed_corpus_vs, ph_diag_vs = validate_user_visible_agreement_text(
         corpus_vs,
@@ -11333,7 +11513,10 @@ def post_agreement_vs01_signing_seed(
             ),
         )
     if (corpus_vs or "").strip() and fixed_corpus_vs.strip() != corpus_vs.strip():
-        draft = _merge_agreement_draft(draft, **{field_key_vs: fixed_corpus_vs})
+        if persist_review_seed_plain:
+            persist_review_seed_plain = fixed_corpus_vs.strip()
+        else:
+            draft = _merge_agreement_draft(draft, **{field_key_vs: fixed_corpus_vs})
 
     # --- economics_watermark (fail-open: seed must not depend on usage-economics DB uptime) ---
     try:
@@ -11351,7 +11534,11 @@ def post_agreement_vs01_signing_seed(
 
     # --- render_html ---
     try:
-        html = _render_html(draft, watermark=wm)
+        html = (
+            _render_persist_review_seed_html(persist_review_seed_plain, watermark=wm)
+            if persist_review_seed_plain
+            else _render_html(draft, watermark=wm)
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -11381,7 +11568,11 @@ def post_agreement_vs01_signing_seed(
     # --- html_to_pdf ---
     title = (draft.title or "").strip() or "Agreement"
     try:
-        built = agreement_rendered_html_to_pdf_bytes(html, title=title)
+        built = agreement_rendered_html_to_pdf_bytes(
+            html,
+            title=title,
+            story_css_profile="persist_review" if persist_review_seed_plain else "vs01",
+        )
     except Exception as exc:
         log.exception(
             "[agreement-vs01-seed] event=failure agreement_id=%s stage=html_to_pdf status=503 "
@@ -11408,6 +11599,45 @@ def post_agreement_vs01_signing_seed(
         owner_org_id = require_claw_org_id_header(request).strip()
     except HTTPException:
         owner_org_id = ""
+    replace_doc_id = (body.document_id or "").strip()
+    if replace_doc_id:
+        try:
+            replace_doc_id = document_service.stable_vs01_document_id(replace_doc_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=_vs01_signing_seed_error_detail(
+                    agreement_id=aid,
+                    stage="finalize_document",
+                    code="vs01_invalid_replace_document_id",
+                    message="document_id is not a replaceable vs01 document id",
+                ),
+            ) from None
+        existing_meta = document_service.get_document_meta(replace_doc_id) or {}
+        bound_aid = str(existing_meta.get("agreement_id") or "").strip()
+        if bound_aid and bound_aid != aid:
+            raise HTTPException(
+                status_code=409,
+                detail=_vs01_signing_seed_error_detail(
+                    agreement_id=aid,
+                    stage="finalize_document",
+                    code="vs01_replace_document_agreement_mismatch",
+                    message="Cannot replace a vs01 document bound to another agreement",
+                    extra={"document_id": replace_doc_id},
+                ),
+            )
+        bound_org = str(existing_meta.get("owner_org_id") or "").strip()
+        if bound_org and owner_org_id and bound_org != owner_org_id:
+            raise HTTPException(
+                status_code=403,
+                detail=_vs01_signing_seed_error_detail(
+                    agreement_id=aid,
+                    stage="finalize_document",
+                    code="vs01_replace_document_org_mismatch",
+                    message="Cannot replace a vs01 document owned by another org",
+                    extra={"document_id": replace_doc_id},
+                ),
+            )
     # --- finalize_document ---
     try:
         meta = document_service.finalize_document(
@@ -11415,6 +11645,7 @@ def post_agreement_vs01_signing_seed(
             content_type="application/pdf",
             agreement_id=aid,
             owner_org_id=owner_org_id or None,
+            document_id=replace_doc_id or None,
         )
     except Exception as exc:
         _seed_store_ctx = document_service.document_storage_seed_error_context()

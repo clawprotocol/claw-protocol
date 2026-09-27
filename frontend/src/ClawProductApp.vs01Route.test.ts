@@ -13,4 +13,16 @@ describe("ClawProductApp VS01 e-sign route", () => {
     expect(s).toContain("resolveVs01EsignShellCopy");
     expect(s).toContain("AppEsignDocumentShell");
   });
+
+  it("rewrites /app?vs01_packet_ready=1 off the owner dashboard list", () => {
+    const p = join(__dirname, "ClawProductApp.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("RedirectPacketReadyDashboardAwayFromList");
+    expect(s).toContain("resolvePacketReadyRemountLanding");
+    expect(s).toContain("isPaidProPacketReadyDashboardPath(`/app${search || \"\"}`)");
+    expect(s).toContain("bindPacketReadyRemountResume");
+    const dash = s.slice(s.indexOf('case "dashboard"'), s.indexOf('case "dashboard"') + 500);
+    expect(dash).toContain("RedirectPacketReadyDashboardAwayFromList");
+    expect(dash).toContain("AppDashboard");
+  });
 });

@@ -248,6 +248,46 @@ describe("vs01SigningCorpus", () => {
     expect(/IN WITNESS WHEREOF/i.test(resolution.corpus)).toBe(true);
   });
 
+  it("remount Review-paint without execution keeps rebuilt By lines (does not integrity-strip)", () => {
+    const reviewPaint = [
+      "SERVICES AGREEMENT",
+      "",
+      "This Agreement is between Northline Studio (Client) and Harbor Marks LLC (Service Provider).",
+      "",
+      ...Array.from(
+        { length: 36 },
+        (_, i) => `${i + 1}. Operative commercial clause with consideration and duties.`,
+      ),
+      "",
+      "12. NOTICES",
+      "If to Northline Studio:",
+      "Attn: Priya Shah",
+      "",
+      "If to Harbor Marks LLC:",
+      "Attn: Diego Alvarez",
+      "",
+      ...Array.from({ length: 8 }, () => "The parties agree to perform the stated obligations in good faith."),
+    ].join("\n");
+    expect(reviewPaint.length).toBeGreaterThanOrEqual(1500);
+    expect(reviewPaint).not.toMatch(/IN WITNESS WHEREOF/i);
+    const resolution = resolveFinalVs01CorpusOrBlock({
+      agreementCorpusText: reviewPaint,
+      acceptedReviewPlain: reviewPaint,
+      guidedPro: true,
+      bridge,
+      manifestPartyCount: 2,
+      prepareSignatureLinksRequested: true,
+      signaturePreparationRequested: true,
+      premiumComplete: true,
+    });
+    expect(resolution.allowed).toBe(true);
+    expect(resolution.source).toBe("rebuilt_witness_block");
+    expect(resolution.hasByOrSignatureLines).toBe(true);
+    expect(resolution.len).toBeGreaterThanOrEqual(1500);
+    expect(/IN WITNESS WHEREOF/i.test(resolution.corpus)).toBe(true);
+    expect(/By:/i.test(resolution.corpus)).toBe(true);
+  });
+
   it("does not use decorative fallback signature card for guided Pro signer corpus", () => {
     const corpus = fullGuidedCorpus();
     const preview = resolvePremiumSignaturePreviewMode(corpus, 2);

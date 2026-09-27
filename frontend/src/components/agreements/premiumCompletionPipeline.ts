@@ -14,6 +14,7 @@ import { normalizeParsedDraftLegalConcepts } from "./intakeDraftLegalNormalize";
 import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { buildLiveDraftPreview } from "./liveDraftHeuristics";
 import { partyNameLooksLikeRawPrompt, tryExtractPartyPairFromPromptBlob } from "./agreementPreviewPartyLine";
+import { resolvePartiesForPremiumGenerateRequest } from "./multiPartyCreateReviewSettle";
 import { coercePartyNameForRecipientAutoFill } from "./partyNameConfidence";
 import type { IntakePartyRoleLabels } from "./partyRoleIntake";
 import {
@@ -223,6 +224,7 @@ import {
   remainingFatalsAreNoticeSignerSetupScaffoldingOnly,
   repairContextualDraftingStubPhrases,
   resolvePlaceholderPartyNamesWithMeta,
+  shouldAcceptPaidProCommercialFieldStubsAfterPfd200,
 } from "./agreementTemplatePlaceholderSafety";
 import {
   finalizeSubstantiveWireAfterWitnessCleanup,
@@ -302,6 +304,13 @@ import {
 } from "./premiumAcceptancePolicy";
 import type { PremiumCompletionOutcome, RecommendedClarifications } from "./agreementOutputQuality/types";
 
+export type PremiumFullDraftHttpCompleteInfo = {
+  ok: boolean;
+  documentText?: string;
+  serverFullDocumentText?: string;
+  errorCode?: string;
+};
+
 export type PremiumCompletionInput = {
   intakeText: string;
   structuredDraft: ParsedDraftShape;
@@ -330,6 +339,13 @@ export type PremiumCompletionInput = {
   premiumGenerationCallReason?: PremiumGenerationCallReason;
   /** When true, waterfall finishes after review surface visible (checkout path). */
   deferWaterfallFinish?: boolean;
+  /**
+   * Fired when premium-full-draft HTTP completes (200 or empty/reject body),
+   * before VS01 / placeholder / shorter-than-accepted post-processing.
+   * Entitled dump overlay must settle-or-fail-close here — not when the
+   * rest of ensurePremiumCompletion returns.
+   */
+  onPremiumFullDraftHttpComplete?: (info: PremiumFullDraftHttpCompleteInfo) => void;
 };
 
 export type PremiumRecipientCandidate = { name: string; email: string; role: string };
@@ -517,8 +533,9 @@ function alignTitleWithCanonical(parsed: ParsedDraftShape, rawIntake: string): P
 function resolvePremiumCompletionCanonicalPartyNames(
   draft: ParsedDraftShape,
   intakeText: string,
+  corpusPlain?: string | null,
 ): string[] {
-  return resolvePartiesForReviewRender({ draft, intakeText })
+  return resolvePartiesForReviewRender({ draft, intakeText, corpusPlain })
     .map((p) => p.partyLegalName.trim())
     .filter((name) => name.length >= 2);
 }
@@ -1070,6 +1087,16 @@ export function extractCleanPremiumParties(intakeText: string, draft: ParsedDraf
         role: nz(p.role) || "party",
       }));
     }
+  }
+  const declared = resolvePartiesForPremiumGenerateRequest({
+    intakeText: rawIntake,
+    draftPartyNames: (draft.parties || []).map((p) => nz(p.name)),
+  });
+  if (declared.length >= 3) {
+    return declared.map((name, idx) => ({
+      name: coercePartyNameForRecipientAutoFill(name, idx <= 1 ? (idx as 0 | 1) : 1, fam),
+      role: nz(draft.parties?.[idx]?.role) || "party",
+    }));
   }
   if ((draft.parties?.length ?? 0) >= 2 && !draftHasPlaceholderParties(draft)) {
     return (draft.parties || []).map((p, idx) => ({
@@ -1851,13 +1878,35 @@ async function runPremiumCompletionInner(
   let lastWireGenerationOutcome = "";
   let premiumBodyHardRejectedForDevContextLeak = false;
   const intakeLowerGlobal = (rawForSoT || rawIntake).toLowerCase();
-  const premiumRejectCtx = {
+  const premiumRejectCtx: {
+    intakeLower: string;
+    intakeText: string;
+    partyNames: string[] | null;
+  } = {
     intakeLower: intakeLowerGlobal,
     intakeText: rawForSoT || rawIntake,
-    partyNames:
-      (merged.parties || []).map((p) => String(p.name || "").trim()).filter(Boolean).length >= 2
-        ? merged.parties?.map((p) => p.name) ?? null
-        : null,
+    // Intake / labeled-party authority — leftover 2-party merged.parties must not
+    // starve N≥3 reject/finalize of the names the 200 corpus already carries.
+    // Refreshed after pfd 200 so leftover overlay can recover Party 3/4 from the corpus.
+    partyNames: (() => {
+      const fromAuthority = resolvePremiumCompletionCanonicalPartyNames(
+        merged,
+        rawForSoT || rawIntake,
+      );
+      if (fromAuthority.length >= 2) return fromAuthority;
+      const leftover = (merged.parties || [])
+        .map((p) => String(p.name || "").trim())
+        .filter(Boolean);
+      return leftover.length >= 2 ? leftover : null;
+    })(),
+  };
+  const refreshPremiumRejectPartyNamesFromCorpus = (corpusPlain: string | null | undefined) => {
+    const fromAuthority = resolvePremiumCompletionCanonicalPartyNames(
+      merged,
+      rawForSoT || rawIntake,
+      corpusPlain,
+    );
+    if (fromAuthority.length >= 2) premiumRejectCtx.partyNames = fromAuthority;
   };
   let premiumRenderSource: PremiumRenderSource = "fallback_preview";
   // PR #41 truncated-keep unconditional SoT win: tracks whether a 200-keep response was accepted
@@ -1903,6 +1952,17 @@ async function runPremiumCompletionInner(
   let premiumJsonParseDegradedAttemptCount = 0;
   let lastSubstantiveWireFreezeRejectReason: string | null = null;
   let lastSubstantiveWireFreezeBodyLen = 0;
+  let pfdHttpCompleteNotified = false;
+  const notifyPremiumFullDraftHttpComplete = (info: PremiumFullDraftHttpCompleteInfo) => {
+    if (pfdHttpCompleteNotified) return;
+    pfdHttpCompleteNotified = true;
+    if (!input.onPremiumFullDraftHttpComplete) return;
+    try {
+      input.onPremiumFullDraftHttpComplete(info);
+    } catch {
+      /* rewrite callback must not break the pipeline */
+    }
+  };
 
   try {
     const mergedForApi = stripClientPremiumArtifactBlocksFromDraft(merged);
@@ -1964,6 +2024,24 @@ async function runPremiumCompletionInner(
         agreementGenerationId: input.agreementGenerationId ?? null,
         networkCallReason: callReason as PremiumNetworkCallReason,
       });
+    }
+    // Duplicate suppress never POSTed — do not latch generate-done / pfdHttpCompleted
+    // from an empty body (live #229: first dump then died on 60s no-pfd failsafe).
+    if (!genCall.duplicateBlocked) {
+      notifyPremiumFullDraftHttpComplete(
+        fullResp.ok
+          ? {
+              ok: true,
+              documentText: String(fullResp.result.document_text || "").trim(),
+              serverFullDocumentText: String(fullResp.result.server_full_document_text || "").trim(),
+            }
+          : {
+              ok: false,
+              documentText: String(fullResp.document_text || "").trim(),
+              serverFullDocumentText: "",
+              errorCode: fullResp.error_code,
+            },
+      );
     }
     const premiumServerModelMs = Math.round(
       (typeof performance !== "undefined" ? performance.now() : Date.now()) - premiumRequestStartedAt,
@@ -2396,6 +2474,7 @@ async function runPremiumCompletionInner(
           const canonicalPartyNamesForRepair = resolvePremiumCompletionCanonicalPartyNames(
             merged,
             preGateIntake,
+            doc,
           );
           const structuredPartyCount = (merged.parties || []).length;
           const canonicalIdentityCount = resolveCanonicalPartyIdentitiesFromSources({
@@ -2424,6 +2503,7 @@ async function runPremiumCompletionInner(
               ),
             },
           );
+          refreshPremiumRejectPartyNamesFromCorpus(doc);
           if (repair.repaired) {
             doc = repair.text;
             partyPlaceholderRepairApplied = true;
@@ -3104,6 +3184,7 @@ async function runPremiumCompletionInner(
           tierADiag.serverTextClearReason = "dev_context_leak_before_client_gates";
         }
       }
+      refreshPremiumRejectPartyNamesFromCorpus(doc);
       let acc = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
       const intakeS = (rawForSoT || rawIntake).trim();
       const founderIntent = isFounderEquityVestingIntent(intakeS);
@@ -3316,7 +3397,7 @@ async function runPremiumCompletionInner(
           typeof performance !== "undefined" ? performance.now() : Date.now();
         const ph = finalizeUserVisibleAgreementPlainText(doc, {
           intakeRaw: (rawForSoT || rawIntake || "").trim(),
-          partyNames: resolvePremiumCompletionCanonicalPartyNames(merged, rawForSoT || rawIntake),
+          partyNames: resolvePremiumCompletionCanonicalPartyNames(merged, rawForSoT || rawIntake, doc),
           agreementFamily: merged.agreement_family ?? null,
           surface: "premium_completion_pipeline",
         });
@@ -3331,7 +3412,14 @@ async function runPremiumCompletionInner(
           !ph.ok &&
           remainingFatalsAreNoticeSignerSetupScaffoldingOnly(ph.remainingDetail) &&
           substantiveLenBeforePlaceholder >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
-        if (!ph.ok && !noticeScaffoldingOnlyBlock) {
+        const commercialFieldStubOnlyBlock =
+          !ph.ok &&
+          shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+            text: doc,
+            intakeRaw: rawForSoT || rawIntake,
+            remainingDetail: ph.remainingDetail,
+          });
+        if (!ph.ok && !noticeScaffoldingOnlyBlock && !commercialFieldStubOnlyBlock) {
           placeholderClientOk = false;
           if (!proIntentGateMessage) {
             proIntentGateMessage =
@@ -3366,11 +3454,13 @@ async function runPremiumCompletionInner(
           } else {
             doc = ph.text;
           }
-          if (noticeScaffoldingOnlyBlock) {
+          if (noticeScaffoldingOnlyBlock || commercialFieldStubOnlyBlock) {
             placeholderClientOk = true;
             fatalPlaceholderCount = 0;
             logPremiumCompletionDebug({
-              stage: "pipeline_placeholder_notice_scaffolding_warn_only",
+              stage: noticeScaffoldingOnlyBlock
+                ? "pipeline_placeholder_notice_scaffolding_warn_only"
+                : "pipeline_placeholder_commercial_field_stubs_warn_only",
               remaining_nonfatal: ph.remainingDetail.filter((d) => !d.fatal).map((d) => d.token),
               substantiveLen: substantiveLenBeforePlaceholder,
             });
@@ -4674,7 +4764,11 @@ async function runPremiumCompletionInner(
           (doc || "").trim();
         const preservedPlaceholder = finalizeUserVisibleAgreementPlainText(preservedCandidate, {
           intakeRaw: (rawForSoT || rawIntake || "").trim(),
-          partyNames: resolvePremiumCompletionCanonicalPartyNames(merged, rawForSoT || rawIntake),
+          partyNames: resolvePremiumCompletionCanonicalPartyNames(
+            merged,
+            rawForSoT || rawIntake,
+            preservedCandidate,
+          ),
           agreementFamily: merged.agreement_family ?? null,
           surface: "premium_completion_pipeline:preserved_recovery",
         });
@@ -4922,6 +5016,12 @@ async function runPremiumCompletionInner(
       }
     }
   } catch (e) {
+    notifyPremiumFullDraftHttpComplete({
+      ok: false,
+      documentText: "",
+      serverFullDocumentText: "",
+      errorCode: "exception",
+    });
     const msg = e instanceof Error ? e.message : String(e);
     logPremiumCompletionDebug({
       stage: "premium_full_draft_try_catch",

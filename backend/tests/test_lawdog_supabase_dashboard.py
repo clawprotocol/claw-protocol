@@ -12,7 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.lawdog_dashboard.supabase_config import is_supabase_dashboard_configured
-from backend.lawdog_dashboard.supabase_service import sync_agreement_draft_to_supabase
+from backend.lawdog_dashboard.supabase_service import (
+    reset_organization_sync_circuit_for_tests,
+    sync_agreement_draft_to_supabase,
+)
 from backend.lawdog_dashboard.workspace_index import (
     fallback_summary_from_supabase_row,
     merge_workspace_index_agreement_ids,
@@ -50,7 +53,9 @@ def _entitle_owner_org_after_env(tmp_path, monkeypatch):
 def _clear_supabase_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    reset_organization_sync_circuit_for_tests()
     yield
+    reset_organization_sync_circuit_for_tests()
 
 
 @pytest.fixture(autouse=True)
