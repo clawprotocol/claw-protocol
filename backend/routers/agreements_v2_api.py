@@ -4278,30 +4278,24 @@ def _coalesce_revision_draft_with_base(
     """
     b_parties = list(base.parties or [])
     r_parties = list(revised.parties or [])
-    n = max(len(b_parties), len(r_parties))
-    merged_parties: List[AgreementParty] = []
-    for i in range(n):
-        bp = b_parties[i] if i < len(b_parties) else None
-        rp = r_parties[i] if i < len(r_parties) else None
-        if bp is None and rp is None:
-            continue
-        if bp is None and rp is not None:
-            merged_parties.append(rp)
-            continue
-        if rp is None and bp is not None:
-            merged_parties.append(bp)
-            continue
-        assert bp is not None and rp is not None
-        name = (rp.name or "").strip() or (bp.name or "").strip() or ("Party A" if i == 0 else "Party B")
-        role = (rp.role or "").strip() or (bp.role or "").strip() or "party"
-        pid = (rp.id or "").strip() or (bp.id or "").strip() or None
-        em_r = (rp.email or "").strip()
-        em_b = (bp.email or "").strip()
-        email = em_r or em_b or None
-        ph_r = (rp.phone or "").strip()
-        ph_b = (bp.phone or "").strip()
-        phone = ph_r or ph_b or None
-        merged_parties.append(AgreementParty(name=name, role=role, id=pid, email=email, phone=phone))
+    from backend.agreements.party_identity_persist import merge_structured_party_identity
+
+    identity_rows = merge_structured_party_identity(
+        current=[p.model_dump() if hasattr(p, "model_dump") else dict(p) for p in b_parties],
+        incoming=[p.model_dump() if hasattr(p, "model_dump") else dict(p) for p in r_parties],
+    )
+    merged_parties: List[AgreementParty] = [
+        AgreementParty(
+            name=str(row.get("name") or "") or ("Party A" if idx == 0 else "Party B"),
+            role=str(row.get("role") or "party"),
+            id=row.get("id"),
+            email=row.get("email"),
+            phone=row.get("phone"),
+            signer_name=row.get("signer_name"),
+            signer_title=row.get("signer_title"),
+        )
+        for idx, row in enumerate(identity_rows)
+    ]
 
     def _pick_text(rev: str, cur: str) -> str:
         r = (rev or "").strip()
@@ -13861,7 +13855,26 @@ def apply_recipient_proposal(
         body_create = AgreementDraftCreate.model_validate(inner)
     except Exception:
         raise HTTPException(status_code=400, detail="invalid_proposal_draft")
-    merged_parties = _ensure_agreement_parties_have_ids(list(body_create.parties or []))
+    from backend.agreements.party_identity_persist import merge_structured_party_identity
+
+    identity_rows = merge_structured_party_identity(
+        current=[p.model_dump() for p in (current.parties or [])],
+        incoming=[p.model_dump() for p in (body_create.parties or [])],
+    )
+    merged_parties = _ensure_agreement_parties_have_ids(
+        [
+            AgreementParty(
+                name=str(row.get("name") or ""),
+                role=str(row.get("role") or "party"),
+                id=row.get("id"),
+                email=row.get("email"),
+                phone=row.get("phone"),
+                signer_name=row.get("signer_name"),
+                signer_title=row.get("signer_title"),
+            )
+            for row in identity_rows
+        ]
+    )
     now = _utc_now_iso()
     other_ids = [str(v.get("proposal_id") or "").strip() for v in open_payloads if str(v.get("proposal_id") or "").strip() != pid_apply]
     tail_events: List[AuditEvent] = [

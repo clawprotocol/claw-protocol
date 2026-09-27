@@ -34,6 +34,7 @@ def isolated_agreement_env(monkeypatch: pytest.MonkeyPatch, tmp_path):
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-owner-proposal")
+    monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
     yield tmp_path
 
 
@@ -131,7 +132,104 @@ def test_owner_apply_updates_corpus_and_preserves_audit(monkeypatch, isolated_ag
     )
 
 
-def test_owner_reject_preserves_corpus_and_marks_rejected(monkeypatch, isolated_agreement_env):
+def test_owner_apply_preserves_confirmed_signer_identity_on_party_ids(monkeypatch, isolated_agreement_env):
+    client = TestClient(app)
+    org = {"X-Claw-Org-Id": "org-owner-apply-signers", "X-Claw-Test-Auth-User-Id": "test-owner"}
+    ensure_headers_entitled(org)
+    harbor_id = "61321f75-dd4a-4100-9629-e6cfeaff379f"
+    ironvale_id = "e535096f-bbc9-4b18-8cef-07d70be0ea88"
+    created = client.post(
+        "/api/agreements/draft",
+        headers=org,
+        json={
+            "title": "Consulting Services Agreement",
+            "jurisdiction": "Delaware",
+            "parties": [
+                {
+                    "id": harbor_id,
+                    "name": "Harbor Peak Analytics LLC",
+                    "role": "Consultant",
+                    "signerName": "Maya Chen",
+                    "email": "maya.chen@harborpeak.test",
+                    "signerTitle": "Principal",
+                },
+                {
+                    "id": ironvale_id,
+                    "name": "Ironvale Manufacturing Inc.",
+                    "role": "Client",
+                    "signerName": "Jordan Hale",
+                    "email": "jordan.hale@ironvale.test",
+                    "signerTitle": "Operations Lead",
+                },
+            ],
+            "purpose": "AI workflow implementation. Payment within thirty (30) days after receipt.",
+            "payment_terms": "$48,000",
+            "duration": "twelve months",
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert created.status_code == 200, created.text
+    aid = created.json()["id"]
+    draft = created.json()["draft"]
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=org,
+        json={"mode": "review", "role": "reviewer", "recipient_party_id": ironvale_id, "inviter_display_name": "Maya Chen"},
+    )
+    assert mint.status_code == 200, mint.text
+    tok = mint.json()["token"]
+    rh = {"X-Claw-Recipient-Access-Token": tok}
+    stage = client.post(
+        f"/api/agreements/{aid}/recipient-proposal/stage",
+        headers=rh,
+        json={
+            "instruction": "Weekly steering cadence.",
+            "proposer_id": ironvale_id,
+            "draft": {
+                "title": draft["title"],
+                "jurisdiction": draft["jurisdiction"],
+                "parties": [
+                    {"id": harbor_id, "name": "Harbor Peak Analytics LLC", "role": "Consultant"},
+                    {"id": ironvale_id, "name": "Ironvale Manufacturing Inc.", "role": "Client", "email": "jordan.hale@ironvale.test"},
+                ],
+                "purpose": (draft["purpose"] or "") + "\n\nPROPOSED-IRONVALE-STEERING-CADENCE-WEEKLY",
+                "payment_terms": draft["payment_terms"],
+                "duration": draft.get("duration"),
+                "due_date": draft.get("due_date"),
+                "effective_date": draft.get("effective_date"),
+            },
+            "rendered_html": "<p>proposed</p>",
+        },
+    )
+    assert stage.status_code == 200, stage.text
+    proposal_id = stage.json()["proposal_id"]
+    submit = client.post(
+        f"/api/agreements/{aid}/recipient-proposal",
+        headers=rh,
+        json={"proposal_id": proposal_id},
+    )
+    assert submit.status_code == 200, submit.text
+    applied = client.post(
+        f"/api/agreements/{aid}/recipient-proposal/{proposal_id}/apply",
+        headers=org,
+        json={},
+    )
+    assert applied.status_code == 200, applied.text
+    parties = applied.json()["draft"]["parties"]
+    by_id = {row["id"]: row for row in parties}
+    assert by_id[harbor_id]["signer_name"] == "Maya Chen"
+    assert by_id[harbor_id]["email"] == "maya.chen@harborpeak.test"
+    assert by_id[ironvale_id]["signer_name"] == "Jordan Hale"
+    assert by_id[ironvale_id]["email"] == "jordan.hale@ironvale.test"
+    fetched = client.get(f"/api/agreements/{aid}", headers=org)
+    assert fetched.status_code == 200, fetched.text
+    restored = {row["id"]: row for row in fetched.json()["draft"]["parties"]}
+    assert restored[harbor_id]["signer_name"] == "Maya Chen"
+    assert restored[ironvale_id]["signer_name"] == "Jordan Hale"
+
+
+def test_owner_reject_leaves_corpus_unchanged(monkeypatch, isolated_agreement_env):
     client = TestClient(app)
     org = {"X-Claw-Org-Id": "org-owner-reject", "X-Claw-Test-Auth-User-Id": "test-owner"}
     aid, proposal_id, original_purpose = _seed_pending_proposal(client, org)
