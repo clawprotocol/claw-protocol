@@ -26,7 +26,7 @@ export type PaidCreateResumeHydrateResult =
     }
   | { ok: false; code: string };
 
-export type PaidCreateResumeCorpusSource = "verified_snapshot" | "draft_pipeline" | "none";
+export type PaidCreateResumeCorpusSource = "verified_snapshot" | "draft_pipeline" | "hydrated_ref" | "none";
 
 export type PaidCreateResumeCorpusResolution = {
   corpus: string;
@@ -178,6 +178,28 @@ export function selectPaidCreateResumeCorpus(args: {
   const draft = String(args.draftPipelineCorpus || "").trim();
   if (verified.length >= minLen) return { corpus: verified, source: "verified_snapshot" };
   if (draft.length >= minLen) return { corpus: draft, source: "draft_pipeline" };
+  return { corpus: "", source: "none" };
+}
+
+/**
+ * Paint-only: reuse already-committed accepted/server bytes instead of rebuilding
+ * premium deliverable preview on every review tick. Does not grant entitlement.
+ */
+export function selectExistingPaidReviewPlainForPreview(args: {
+  verifiedSnapshotCorpus?: string | null;
+  draftPipelineCorpus?: string | null;
+  hydratedCorpus?: string | null;
+  minLen?: number;
+}): { corpus: string; source: PaidCreateResumeCorpusSource } {
+  const selected = selectPaidCreateResumeCorpus({
+    verifiedSnapshotCorpus: args.verifiedSnapshotCorpus || "",
+    draftPipelineCorpus: args.draftPipelineCorpus || "",
+    minLen: args.minLen,
+  });
+  if (selected.corpus) return selected;
+  const hydrated = String(args.hydratedCorpus || "").trim();
+  const minLen = args.minLen ?? PAID_PRO_AUTHORITY_MIN_LEN;
+  if (hydrated.length >= minLen) return { corpus: hydrated, source: "hydrated_ref" };
   return { corpus: "", source: "none" };
 }
 

@@ -4,6 +4,22 @@ import {
   normalizeOwnerDeliveryTrack,
   rememberOwnerDeliveryTrack,
 } from "../../components/agreements/paidProOwnerDeliveryTrack";
+import { mergeStructuredPartyIdentity } from "../../agreement/partyIdentityPersist";
+
+function mergeAuthoritativeApiPartySet(
+  current: readonly AgreementParty[],
+  apiParties: readonly AgreementParty[],
+): AgreementParty[] {
+  const namedApiParties = apiParties.filter((party) => String(party.name || "").trim());
+  if (namedApiParties.length === 0) return [...current];
+  // GET /api/agreements/:id is the durable membership/order authority on resume.
+  // The identity merge emits incoming rows first; discard unmatched local/default rows
+  // so stale or synthetic IDs cannot duplicate persisted legal parties.
+  return mergeStructuredPartyIdentity({
+    current,
+    incoming: namedApiParties,
+  }).slice(0, namedApiParties.length) as AgreementParty[];
+}
 
 /**
  * Production resume from GET /api/agreements/:id uses {@link coerceDraftFromApiPayload}, which only maps a
@@ -44,35 +60,7 @@ export function mergePaidProAuthoritativeDraftFieldsFromApi(
 
   const apiParties = Array.isArray(apiDraft.parties) ? (apiDraft.parties as AgreementParty[]) : [];
   const base = Array.isArray(coerced.parties) ? [...coerced.parties] : [];
-  const outParties = base.map((p, i) => {
-    const ap =
-      apiParties.find((row) => {
-        const id = String(row.id || "").trim();
-        const name = String(row.name || "").trim();
-        return (
-          (id && id === String((p as AgreementParty).id || "").trim()) ||
-          (name && name.toLowerCase() === String(p.name || "").trim().toLowerCase())
-        );
-      }) || apiParties[i];
-    if (!ap) return p;
-    const row = { ...p } as AgreementParty;
-    if (ap.id) row.id = ap.id;
-    const em = String(ap.email ?? "").trim();
-    if (em) row.email = em;
-    const signerName = String(
-      ap.signerName ?? (ap as { signer_name?: string }).signer_name ?? "",
-    ).trim();
-    if (signerName) row.signerName = signerName;
-    const signerTitle = String(ap.signerTitle ?? "").trim();
-    if (signerTitle) row.signerTitle = signerTitle;
-    const ph = String(ap.phone ?? "").trim();
-    if (ph) row.phone = ph;
-    const nm = String(ap.name ?? "").trim();
-    if (nm && !String(row.name ?? "").trim()) row.name = nm;
-    const rl = String(ap.role ?? "").trim();
-    if (rl && !String(row.role ?? "").trim()) row.role = rl;
-    return row;
-  });
+  const outParties = mergeAuthoritativeApiPartySet(base as AgreementParty[], apiParties);
   return { ...coerced, ...extras, parties: outParties as ParsedDraftShape["parties"] } as ParsedDraftShape;
 }
 
@@ -89,39 +77,18 @@ export function retainAuthorizedApiPartiesAfterIntakeDefaults(
   const apiParties = Array.isArray(apiDraft.parties) ? (apiDraft.parties as AgreementParty[]) : [];
   if (apiParties.length === 0) return next;
   const local = Array.isArray(next.parties) ? [...next.parties] : [];
-  const byId = new Map<string, AgreementParty>();
-  const byName = new Map<string, AgreementParty>();
-  for (const raw of local) {
-    const p = raw as AgreementParty;
-    const id = String(p.id || "").trim();
-    const name = String(p.name || "").trim().toLowerCase();
-    if (id) byId.set(id, p);
-    if (name && !byName.has(name)) byName.set(name, p);
-  }
-  const parties = apiParties.map((ap) => {
-    const id = String(ap.id || "").trim();
-    const name = String(ap.name || "").trim().toLowerCase();
-    const prev = (id && byId.get(id)) || (name && byName.get(name)) || ({} as AgreementParty);
-    const email = String(ap.email || prev.email || "").trim();
-    const signerName = String(
-      ap.signerName ||
-        (ap as { signer_name?: string }).signer_name ||
-        prev.signerName ||
-        "",
-    ).trim();
-    const signerTitle = String(ap.signerTitle || prev.signerTitle || "").trim();
-    return {
-      ...prev,
-      ...ap,
-      ...(id ? { id } : {}),
-      name: String(ap.name || prev.name || "").trim(),
-      role: ap.role || prev.role || "party",
-      ...(email ? { email } : {}),
-      ...(signerName ? { signerName } : {}),
-      ...(signerTitle ? { signerTitle } : {}),
-    };
-  });
+  const parties = mergeAuthoritativeApiPartySet(local as AgreementParty[], apiParties);
   return { ...next, parties: parties as ParsedDraftShape["parties"] };
+}
+
+/** Saved agreement rows with durable ids. Null when membership is not yet persisted. */
+export function durablePersistedLegalParties<T extends { id?: string | null; name?: string | null }>(
+  parties: readonly T[] | null | undefined,
+): T[] | null {
+  const named = (parties ?? []).filter((party) => String(party?.name ?? "").trim().length >= 2);
+  if (named.length < 2 || named.length > 4) return null;
+  if (!named.every((party) => String(party.id ?? "").trim())) return null;
+  return named;
 }
 
 export function namedLegalPartyCountFromParties(

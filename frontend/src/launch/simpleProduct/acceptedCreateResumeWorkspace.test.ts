@@ -6,10 +6,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { sha256CorpusDigest } from "../../agreement/canonicalReviewSnapshotApi";
 import { evaluateCreateResumeSnapshotAuthority } from "../../components/agreements/paidCreateResumeHydration";
 import { getOrgId, setOrgId, subscribeToOrgContextChanges } from "../orgContext";
+import { setCachedAccessToken, clearCachedAccessToken } from "../../auth/authAccessTokenCache";
+import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import {
   applyAuthenticatedWorkspaceBind,
+  authorizedAcceptedResumeGetHeaders,
   resolveAcceptedCreateResumeUiState,
   resolveCreateResumeIntakeMount,
+  shouldAuthorizeAcceptedResumeGet,
   shouldClearResumeIdForIntakeSeed,
   shouldPreserveAcceptedCreateResume,
   shouldRedirectCreateForStaleOrg,
@@ -49,6 +53,7 @@ async function acceptedGet(overrides?: Partial<AcceptedCreateResumeGet>): Promis
 
 describe("accepted create resume workspace", () => {
   afterEach(() => {
+    clearCachedAccessToken();
     try {
       localStorage.removeItem("claw_org_id");
     } catch {
@@ -215,6 +220,41 @@ describe("accepted create resume workspace", () => {
     ).toBe("digest_mismatch");
   });
 
+  it("authorizes accepted GET only after a user workspace and access token", () => {
+    setOrgId(ANON_ORG);
+    setCachedAccessToken("owner-token");
+    expect(
+      shouldAuthorizeAcceptedResumeGet({
+        workspaceOrgId: ANON_ORG,
+        accessToken: "owner-token",
+      }),
+    ).toBe(false);
+    expect(
+      authorizedAcceptedResumeGetHeaders({
+        workspaceOrgId: ANON_ORG,
+        accessToken: "owner-token",
+      }),
+    ).toBeNull();
+    expect(
+      shouldAuthorizeAcceptedResumeGet({
+        workspaceOrgId: USER_ORG,
+        accessToken: "",
+      }),
+    ).toBe(false);
+    setOrgId(USER_ORG);
+    const headers = authorizedAcceptedResumeGetHeaders({
+      workspaceOrgId: USER_ORG,
+      accessToken: "owner-token",
+    });
+    expect(headers).toEqual({
+      "X-Claw-Org-Id": USER_ORG,
+      Authorization: "Bearer owner-token",
+    });
+    const live = clawAgreementHeaders() as Record<string, string>;
+    expect(live["X-Claw-Org-Id"]).toBe(USER_ORG);
+    expect(live.Authorization).toBe("Bearer owner-token");
+  });
+
   it("opens a genuine new create route on the INPUT composer", () => {
     const probe = resolveCreateWorkspaceProbeReadiness({
       authLoading: false,
@@ -277,12 +317,17 @@ describe("accepted create resume workspace", () => {
     expect(createPage).toContain("subscribeToOrgContextChanges");
     expect(createPage).toContain("shouldRedirectCreateForStaleOrg");
     expect(createPage).toContain("resumeAgreementIdFromQuery");
+    expect(createPage).toContain("bindAuthenticatedUserToWorkspace");
+    const bindApi = readFileSync(join(__dirname, "../../auth/workspaceBindingApi.ts"), "utf8");
+    expect(bindApi).toContain("inflightBind");
+    expect(bindApi).toContain("signal");
     const intake = readFileSync(
       join(__dirname, "../../components/agreements/AgreementBuilderIntake.tsx"),
       "utf8",
     );
     expect(intake).toContain("shouldPreserveAcceptedCreateResume");
     expect(intake).toContain("shouldClearResumeIdForIntakeSeed");
+    expect(intake).toContain("shouldAuthorizeAcceptedResumeGet");
     expect(intake).toContain("parseCreateAgreementIdFromSearch()");
   });
 });

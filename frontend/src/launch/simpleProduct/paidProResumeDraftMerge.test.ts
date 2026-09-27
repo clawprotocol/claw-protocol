@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import type { ParsedDraftShape } from "../../components/agreements/intakeSmartDefaults";
+import { resolveAcceptanceManifestRecordsForExecution } from "../../components/agreements/paidProAcceptanceExecutionBlockInvariant";
+import { resolvePaidProHydrateStructuralContext } from "../../components/agreements/paidProHydrateAuthority";
+import { resolveAuthoritativeSignerCount } from "../../components/agreements/signerCountAuthority";
 import {
+  durablePersistedLegalParties,
   liveSignerUiFieldsFromDraftParties,
   mergePaidProAuthoritativeDraftFieldsFromApi,
   retainAuthorizedApiPartiesAfterIntakeDefaults,
@@ -225,6 +229,80 @@ describe("mergePaidProAuthoritativeDraftFieldsFromApi", () => {
     });
   });
 
+  it("does not append stale-ID default rows beside the authoritative persisted parties", () => {
+    const apiDraft = {
+      parties: [
+        {
+          id: "durable-harbor",
+          name: "Harbor Peak Analytics LLC",
+          role: "Consultant",
+          signerName: "Maya Chen",
+        },
+        {
+          id: "durable-ironvale",
+          name: "Ironvale Manufacturing Inc.",
+          role: "Client",
+          signerName: "Jordan Hale",
+        },
+      ],
+    } as AgreementDraft;
+    const afterDefaults: ParsedDraftShape = {
+      title: "Consulting Services Agreement",
+      jurisdiction: "DE",
+      parties: [
+        { id: "synthetic-harbor", name: "Harbor Peak Analytics LLC", role: "Consultant" },
+        { id: "synthetic-ironvale", name: "Ironvale Manufacturing Inc", role: "Client" },
+      ],
+      purpose: "AI workflow implementation.",
+      payment_terms: "$48,000",
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      payment: { amount: 48000, cadence: null, valid: true },
+    };
+    const retained = retainAuthorizedApiPartiesAfterIntakeDefaults(afterDefaults, apiDraft);
+    expect(retained.parties).toHaveLength(2);
+    expect(retained.parties.map((party) => party.id)).toEqual([
+      "durable-harbor",
+      "durable-ironvale",
+    ]);
+    expect(retained.parties.map((party) => party.signerName)).toEqual([
+      "Maya Chen",
+      "Jordan Hale",
+    ]);
+  });
+
+  it.each([2, 3, 4])("keeps exactly the %i persisted legal parties on resume", (partyCount) => {
+    const apiParties = Array.from({ length: partyCount }, (_, index) => ({
+      id: `durable-${index + 1}`,
+      name: `Release Party ${index + 1} LLC`,
+      role: `Role ${index + 1}`,
+      signerName: `Signer ${index + 1}`,
+    }));
+    const afterDefaults: ParsedDraftShape = {
+      title: "Release-scope agreement",
+      jurisdiction: "DE",
+      parties: apiParties.map((party, index) => ({
+        ...party,
+        id: `synthetic-${index + 1}`,
+      })),
+      purpose: "Release-scope fixture.",
+      payment_terms: "Net 30",
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      payment: { amount: null, cadence: null, valid: false },
+    };
+    const retained = retainAuthorizedApiPartiesAfterIntakeDefaults(
+      afterDefaults,
+      { parties: apiParties } as AgreementDraft,
+    );
+    expect(retained.parties).toHaveLength(partyCount);
+    expect(retained.parties.map((party) => party.id)).toEqual(
+      apiParties.map((party) => party.id),
+    );
+  });
+
   it("is a no-op when api draft is null", () => {
     const coerced: ParsedDraftShape = {
       title: "T",
@@ -291,5 +369,88 @@ describe("phase4b51 GET draft normalize", () => {
     expect(unknown?.owner_delivery_track).toBeNull();
     const missing = normalizeAgreementDraftFromApi({ id: "ag-track-missing" });
     expect(missing?.owner_delivery_track).toBeNull();
+  });
+});
+
+const FOUR_PARTY_INTAKE = [
+  "Party 1 — Harbor Peak Analytics LLC, Consultant.",
+  "Party 2 — Ironvale Manufacturing Inc., Client.",
+  "Party 3 — Cedar Ridge Logistics LLC, Advisor.",
+  "Party 4 — Northwind Retail Inc, Customer.",
+].join("\n");
+
+describe("accepted reload keeps persisted party membership", () => {
+  it.each([
+    {
+      count: 2,
+      parties: [
+        { id: "p-harbor", name: "Harbor Peak Analytics LLC", signerName: "Maya Chen", email: "maya.chen@harborpeak.test" },
+        { id: "p-ironvale", name: "Ironvale Manufacturing Inc.", signerName: "Jordan Hale", email: "jordan.hale@ironvale.test" },
+      ],
+    },
+    {
+      count: 3,
+      parties: [
+        { id: "p1", name: "Harbor Peak Analytics LLC", signerName: "Maya Chen", email: "maya.chen@harborpeak.test" },
+        { id: "p2", name: "Ironvale Manufacturing Inc.", signerName: "Jordan Hale", email: "jordan.hale@ironvale.test" },
+        { id: "p3", name: "Cedar Ridge Logistics LLC", signerName: "Casey Orth", email: "casey.orth@cedarridge.test" },
+      ],
+    },
+    {
+      count: 4,
+      parties: [
+        { id: "p1", name: "Harbor Peak Analytics LLC" },
+        { id: "p2", name: "Ironvale Manufacturing Inc." },
+        { id: "p3", name: "Cedar Ridge Logistics LLC" },
+        { id: "p4", name: "Northwind Retail Inc" },
+      ],
+    },
+  ])("keeps $count durable parties when intake describes four", ({ count, parties }) => {
+    expect(durablePersistedLegalParties(parties)).toHaveLength(count);
+    expect(
+      resolveAuthoritativeSignerCount({
+        intakeText: FOUR_PARTY_INTAKE,
+        draftParties: parties,
+        manifestPartyCount: 4,
+        userExpandedPartyCount: count,
+      }).count,
+    ).toBe(count);
+    const hydrated = resolvePaidProHydrateStructuralContext({
+      text: "x".repeat(600),
+      intakeText: FOUR_PARTY_INTAKE,
+      draft: { parties } as ParsedDraftShape,
+    });
+    expect(hydrated.structuralParties.map((party) => party.partyLegalName)).toEqual(
+      parties.map((party) => party.name),
+    );
+    expect(hydrated.canonicalAuthorityPartyCount).toBe(count);
+    const manifest = resolveAcceptanceManifestRecordsForExecution({
+      intakeText: FOUR_PARTY_INTAKE,
+      draft: { parties } as ParsedDraftShape,
+    });
+    expect(manifest.map((row) => row.fullLegalName)).toEqual(parties.map((party) => party.name));
+  });
+
+  it("still allows an explicit signer-setup expansion above the saved membership", () => {
+    expect(
+      resolveAuthoritativeSignerCount({
+        intakeText: FOUR_PARTY_INTAKE,
+        draftParties: [
+          { id: "p1", name: "Harbor Peak Analytics LLC" },
+          { id: "p2", name: "Ironvale Manufacturing Inc." },
+        ],
+        manifestPartyCount: 4,
+        userExpandedPartyCount: 3,
+      }).count,
+    ).toBeGreaterThan(2);
+  });
+
+  it("does not treat id-less draft rows as persisted membership", () => {
+    expect(
+      durablePersistedLegalParties([
+        { name: "Harbor Peak Analytics LLC" },
+        { name: "Ironvale Manufacturing Inc." },
+      ]),
+    ).toBeNull();
   });
 });

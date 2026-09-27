@@ -44,6 +44,25 @@ export type AcceptedCreateResumeUiState = {
   terminal: string | null;
 };
 
+/** Accepted resume GET must wait for a user-* workspace and an access token. Never headerless. */
+export function shouldAuthorizeAcceptedResumeGet(args: {
+  workspaceOrgId: string;
+  accessToken?: string | null;
+}): boolean {
+  return isUserWorkspaceOrgId(args.workspaceOrgId) && Boolean(String(args.accessToken || "").trim());
+}
+
+export function authorizedAcceptedResumeGetHeaders(args: {
+  workspaceOrgId: string;
+  accessToken?: string | null;
+}): { "X-Claw-Org-Id": string; Authorization: string } | null {
+  if (!shouldAuthorizeAcceptedResumeGet(args)) return null;
+  return {
+    "X-Claw-Org-Id": String(args.workspaceOrgId).trim(),
+    Authorization: `Bearer ${String(args.accessToken || "").trim()}`,
+  };
+}
+
 export function resolveCreateResumeIntakeMount(probe: CreateWorkspaceProbeReadiness): {
   settling: boolean;
   intakeMayMount: boolean;

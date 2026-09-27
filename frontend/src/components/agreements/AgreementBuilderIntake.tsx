@@ -488,9 +488,11 @@ import {
   writeCreateReviewDraftSnapshot,
 } from "./agreementIntakeStorage";
 import {
+  shouldAuthorizeAcceptedResumeGet,
   shouldClearResumeIdForIntakeSeed,
   shouldPreserveAcceptedCreateResume,
 } from "../../launch/simpleProduct/acceptedCreateResumeWorkspace";
+import { getCachedAccessToken, setCachedAccessToken } from "../../auth/authAccessTokenCache";
 import {
   agreementIdShort,
   logReviewRefreshRegenerationSkipped,
@@ -560,6 +562,7 @@ import {
   readPaidProEditReturnHandoff,
 } from "../../launch/simpleProduct/paidProEditReturnHandoff";
 import {
+  durablePersistedLegalParties,
   liveSignerUiFieldsFromDraftParties,
   mergePaidProAuthoritativeDraftFieldsFromApi,
   retainAuthorizedApiPartiesAfterIntakeDefaults,
@@ -730,6 +733,7 @@ import {
   longestDraftPipelineCorpus,
   resolvePaidCreateResumeCorpus,
   resolvePaidCreateResumeDisplayPhase,
+  selectExistingPaidReviewPlainForPreview,
   shouldReuseCreateResumeHydration,
 } from "./paidCreateResumeHydration";
 import {
@@ -3958,7 +3962,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** User chose simplified path on an advanced-family gate — show a subtle review label. */
   const [reviewShowsSimplifiedAdvancedDraft, setReviewShowsSimplifiedAdvancedDraft] = useState(false);
   const { tier, refreshUsage } = useAccess();
-  const { loading: authLoading, user: authUser } = useAuth();
+  const { loading: authLoading, user: authUser, session: authSession } = useAuth();
   const { navigate } = useLaunchNav();
   const [workspaceProEntitled, setWorkspaceProEntitled] = useState(() =>
     resolveCreateFlowWorkspaceProEntitled() || resolveProvisionalWorkspaceProEntitledForCreate(),
@@ -4387,6 +4391,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (pipelinePlain.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
           return pipelinePlain;
         }
+      }
+      const existingPaidReviewPlain = selectExistingPaidReviewPlainForPreview({
+        verifiedSnapshotCorpus: selectVerifiedPaidReviewPaper({
+          agreementId: reviewAgreementIdRef.current || readCreateReviewAgreementResumeId(),
+        })?.plain,
+        draftPipelineCorpus: longestDraftPipelineCorpus([
+          (d as { premium_full_document_text?: string }).premium_full_document_text,
+          (d as { premium_server_full_document_text?: string }).premium_server_full_document_text,
+          (d as { server_full_document_text?: string }).server_full_document_text,
+        ]),
+        hydratedCorpus:
+          lastPremiumWinningCorpusRef.current ||
+          hydratedPremiumBodyRef.current ||
+          premiumPipelineOutputBodyRef.current,
+      }).corpus;
+      if (existingPaidReviewPlain) {
+        return existingPaidReviewPlain;
       }
       const starterPreview =
         !hasPaidCreateFlowPipelineAcceptance() &&
@@ -17541,9 +17562,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (agreementDocumentDirtyRef.current) return;
     const current = agreementDocumentTextRef.current.trim();
     if (!starterPlainLooksStaleVersusPaidAuthority(current, authoritativePaidProReviewPlain)) return;
+    if (current === authoritativePaidProReviewPlain) return;
+    agreementDocumentTextRef.current = authoritativePaidProReviewPlain;
     setAgreementDocumentText(authoritativePaidProReviewPlain);
     scheduleAgreementDocSync(authoritativePaidProReviewPlain);
-    bumpPremiumSurfaceGateTick();
   }, [
     isAuthoritativePaidProReviewActive,
     authoritativePaidProReviewPlain,
@@ -19666,6 +19688,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ) {
       return;
     }
+    const resumeAccessToken = String(authSession?.access_token || getCachedAccessToken() || "").trim();
+    if (
+      !shouldAuthorizeAcceptedResumeGet({
+        workspaceOrgId: getOrgId(),
+        accessToken: resumeAccessToken,
+      })
+    ) {
+      return;
+    }
+    setCachedAccessToken(resumeAccessToken);
     const signerSetupResume =
       openSignerSetupOnResume ||
       isCreatorDashboardSignerSetupResumeActive() ||
@@ -20097,6 +20129,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     openSignerSetupOnResume,
     resumeSignerSetupAgreementId,
     bumpPremiumSurfaceGateTick,
+    authSession?.access_token,
   ]);
 
   /** Best-effort: create persisted row early so Send can reuse the same id (deduped inside ensure). */
@@ -20611,11 +20644,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ) {
       return;
     }
+    const durableMembership = durablePersistedLegalParties(draft?.parties);
     setConsumedPaidProSignerMetadataAuthority(
-      buildLivePaidProSignerMetadataAuthority(liveSignerMetadataUiState, "live_ui", {
-        intakeText: intakeCombined,
-        draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "")),
-      }),
+      buildLivePaidProSignerMetadataAuthority(
+        durableMembership
+          ? { ...liveSignerMetadataUiState, partyCount: durableMembership.length }
+          : liveSignerMetadataUiState,
+        "live_ui",
+        {
+          intakeText: intakeCombined,
+          draftPartyNames: (durableMembership ?? draft?.parties ?? []).map((p) =>
+            String((p as { name?: string }).name ?? ""),
+          ),
+          persistedMembershipAuthoritative: Boolean(durableMembership),
+        },
+      ),
     );
   }, [
     liveSignerMetadataUiState,

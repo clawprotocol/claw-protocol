@@ -7,6 +7,7 @@ import {
   longestDraftPipelineCorpus,
   resolvePaidCreateResumeCorpus,
   resolvePaidCreateResumeDisplayPhase,
+  selectExistingPaidReviewPlainForPreview,
   selectPaidCreateResumeCorpus,
   shouldAttemptCanonicalSnapshotOnCreateResume,
   shouldPromoteCreateResumeToReviewChrome,
@@ -216,6 +217,35 @@ describe("paid create resume hydration", () => {
         expectedDigest: OTHER_DIGEST,
       }).ok,
     ).toBe(false);
+  });
+
+  it("reuses committed accepted bytes for preview instead of an empty rebuild", () => {
+    expect(
+      selectExistingPaidReviewPlainForPreview({
+        verifiedSnapshotCorpus: LATEST,
+        draftPipelineCorpus: STALE_MONTHLY,
+      }),
+    ).toEqual({ corpus: LATEST, source: "verified_snapshot" });
+    expect(
+      selectExistingPaidReviewPlainForPreview({
+        verifiedSnapshotCorpus: "",
+        draftPipelineCorpus: LATEST,
+      }),
+    ).toEqual({ corpus: LATEST, source: "draft_pipeline" });
+    expect(
+      selectExistingPaidReviewPlainForPreview({
+        verifiedSnapshotCorpus: "",
+        draftPipelineCorpus: "short",
+        hydratedCorpus: LATEST,
+      }),
+    ).toEqual({ corpus: LATEST, source: "hydrated_ref" });
+    expect(
+      selectExistingPaidReviewPlainForPreview({
+        verifiedSnapshotCorpus: "",
+        draftPipelineCorpus: "",
+        hydratedCorpus: "",
+      }).source,
+    ).toBe("none");
   });
 
   it("reuses in-mount hydration only for the same agreement id", () => {
