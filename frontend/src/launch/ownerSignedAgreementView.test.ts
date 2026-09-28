@@ -78,6 +78,42 @@ describe("loadOwnerSignedAgreementPreview (Test362)", () => {
     expect(loaded!.html).toContain("Hue Lorrey");
   });
 
+  it("does not call ensure again when a completed snapshot is already stored", async () => {
+    const corpusPlain = signedCorpus();
+    const digest = await sha256Hex(corpusPlain);
+    const draft = {
+      id: AG,
+      title: "Services Agreement",
+      audit_log: [{ event_type: "signed", value: { fully_executed: true } }],
+      parties: [{ name: "Red Mesa Logistics LLC" }, { name: "Harbor Peak Automation LLC" }],
+      vs01_signing_packet_v1: {
+        v: 1,
+        fully_executed_snapshot: {
+          v: 1,
+          corpus_plain: corpusPlain,
+          corpus_hash: fingerprintAgreementBody(corpusPlain),
+          saved_at: "2026-06-16T00:00:00Z",
+        },
+      },
+    } as unknown as AgreementDraft;
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({ ok: true, draft });
+    const ensure = vi.spyOn(agreementWorkspaceApi, "postVs01EnsureSignedSnapshot").mockResolvedValue({
+      ok: true,
+      snapshot_ready: true,
+      snapshot_source: "existing",
+    });
+
+    const first = await loadOwnerSignedAgreementPreview(AG);
+    const second = await loadOwnerSignedAgreementPreview(AG);
+    expect(ensure).not.toHaveBeenCalled();
+    expect(first!.pdfAvailable).toBe(true);
+    expect(second!.pdfAvailable).toBe(true);
+    expect(first!.corpusSource).toBe("fully_executed_snapshot");
+    expect(second!.corpusSource).toBe("fully_executed_snapshot");
+    expect(second!.corpusText).toBe(first!.corpusText);
+    expect(digest.length).toBe(64);
+  });
+
   it("fails closed when fully executed status has no lock-bound document authority", async () => {
     const agreementPublicVerify = await import("../agreement/agreementPublicVerify");
     const corpus = `${"Consulting services agreement. ".repeat(40)}Maya Chen and Jordan Hale.`;
