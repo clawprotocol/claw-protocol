@@ -234,6 +234,81 @@ describe("loadOwnerSignedAgreementPreview (Test362)", () => {
     expect(await sha256Hex(loaded!.corpusText)).toBe(digest);
   });
 
+  it("ensures a completed snapshot when fully signed display is only the accepted corpus", async () => {
+    const agreementPublicVerify = await import("../agreement/agreementPublicVerify");
+    const accepted = `${"Harbor Peak accepted operative terms. ".repeat(40)}\n1. Services\n2. Payment`;
+    const digest = await sha256Hex(accepted);
+    const draft = {
+      id: AG,
+      title: "Consulting Services Agreement",
+      parties: [
+        { id: "p1", name: "Harbor Peak Analytics LLC" },
+        { id: "p2", name: "Ironvale Manufacturing Inc." },
+        { id: "p3", name: "Alex Rivera" },
+      ],
+      audit_log: [{ event_type: "signed", value: { fully_executed: true } }],
+      accepted_review_snapshot_v1: {
+        status: "accepted",
+        snapshotId: "crs_locked",
+        corpusSha256: digest,
+        corpusLength: accepted.length,
+        corpusPlain: accepted,
+      },
+    } as unknown as AgreementDraft;
+    const completed = `${accepted}\n\nCompleted signature block.`;
+    const withSnapshot = {
+      ...draft,
+      vs01_signing_packet_v1: {
+        v: 1,
+        fully_executed_snapshot: {
+          v: 1,
+          corpus_plain: completed,
+          corpus_hash: fingerprintAgreementBody(completed),
+          saved_at: "2026-09-27T00:00:00Z",
+        },
+      },
+    } as unknown as AgreementDraft;
+
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraftWithSigningLock")
+      .mockResolvedValueOnce({
+        ok: true,
+        draft,
+        lockedVersionId: "lv-1",
+        signingLock: {
+          locked_version_id: "lv-1",
+          accepted_snapshot_id: "crs_locked",
+          accepted_snapshot_digest: digest,
+          accepted_snapshot_length: accepted.length,
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        draft: withSnapshot,
+        lockedVersionId: "lv-1",
+        signingLock: {
+          locked_version_id: "lv-1",
+          accepted_snapshot_id: "crs_locked",
+          accepted_snapshot_digest: digest,
+        },
+      });
+    vi.spyOn(agreementPublicVerify, "fetchPublicAgreementVerify").mockResolvedValue({
+      signature_status: { fully_executed: true, signer_party_count: 3, signatures_recorded: 3 },
+    } as never);
+    vi.spyOn(agreementWorkspaceApi, "postVs01EnsureSignedSnapshot").mockResolvedValue({
+      ok: true,
+      snapshot_ready: true,
+      snapshot_source: "reconstructed",
+    });
+
+    const loaded = await loadOwnerSignedAgreementPreview(AG);
+    expect(agreementWorkspaceApi.postVs01EnsureSignedSnapshot).toHaveBeenCalledWith(AG);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.pdfAvailable).toBe(true);
+    expect(loaded!.pdfPending).toBe(false);
+    expect(loaded!.corpusSource).toBe("fully_executed_snapshot");
+    expect(loaded!.corpusText).toContain("Completed signature block.");
+  });
+
   it("renders fully executed signed snapshot instead of unsigned canonical corpus", async () => {
     const corpusPlain = signedCorpus();
     const draft = {

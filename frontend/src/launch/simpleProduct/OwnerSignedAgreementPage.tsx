@@ -61,6 +61,7 @@ export function OwnerSignedAgreementPage(props: Props) {
     | null
   >(null);
   const [pdfAvailable, setPdfAvailable] = useState(false);
+  const [pdfPending, setPdfPending] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
@@ -90,6 +91,7 @@ export function OwnerSignedAgreementPage(props: Props) {
       setDraft(null);
       setCorpusSource(null);
       setPdfAvailable(false);
+      setPdfPending(false);
       setVerify(publicVerify);
       setLoading(false);
       return;
@@ -105,6 +107,7 @@ export function OwnerSignedAgreementPage(props: Props) {
     setUsesPremiumDocument(loaded.usesPremiumDocument);
     setCorpusSource(loaded.corpusSource);
     setPdfAvailable(loaded.pdfAvailable);
+    setPdfPending(loaded.pdfPending);
     setVerify(publicVerify);
     setLoading(false);
   }, [agreementId]);
@@ -239,6 +242,18 @@ export function OwnerSignedAgreementPage(props: Props) {
               }}
             >
               {pdfBusy ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
+            </button>
+          ) : pdfPending ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+              data-testid="owner-signed-agreement-pdf-pending"
+              disabled={loading}
+              onClick={() => {
+                void load();
+              }}
+            >
+              Completed PDF is still being prepared. Try again.
             </button>
           ) : null}
           {showBackToDashboard ? (

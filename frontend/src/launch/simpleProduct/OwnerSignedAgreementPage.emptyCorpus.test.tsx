@@ -85,4 +85,40 @@ describe("OwnerSignedAgreementPage — fully_executed empty-corpus path", () => 
       "accepted_review",
     );
   });
+
+  it("shows the completed PDF download once a signed snapshot is available", async () => {
+    vi.spyOn(ownerSignedAgreementView, "loadOwnerSignedAgreementPreview").mockResolvedValue({
+      draft: { id: AG, title: "Consulting Services Agreement" } as AgreementDraft,
+      html: "<div>Harbor Peak signed agreement</div>",
+      corpusText: "Harbor Peak signed agreement",
+      usesPremiumDocument: false,
+      corpusSource: "fully_executed_snapshot",
+      pdfAvailable: true,
+      pdfPending: false,
+    });
+    renderViewSignedPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("owner-signed-agreement-download-pdf")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("owner-signed-agreement-pdf-pending")).toBeNull();
+  });
+
+  it("shows a retry when the fully signed page has no completed snapshot yet", async () => {
+    vi.spyOn(ownerSignedAgreementView, "loadOwnerSignedAgreementPreview").mockResolvedValue({
+      draft: { id: AG, title: "Consulting Services Agreement" } as AgreementDraft,
+      html: "<div>Harbor Peak accepted agreement</div>",
+      corpusText: "Harbor Peak accepted agreement",
+      usesPremiumDocument: false,
+      corpusSource: "accepted_snapshot",
+      pdfAvailable: false,
+      pdfPending: true,
+    });
+    renderViewSignedPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("owner-signed-agreement-pdf-pending").textContent).toContain(
+        "Completed PDF is still being prepared",
+      );
+    });
+    expect(screen.queryByTestId("owner-signed-agreement-download-pdf")).toBeNull();
+  });
 });

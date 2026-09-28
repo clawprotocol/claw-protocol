@@ -236,6 +236,8 @@ export async function loadOwnerSignedAgreementPreview(
   usesPremiumDocument: boolean;
   corpusSource: Exclude<OwnerSignedAgreementCorpusSource, "missing">;
   pdfAvailable: boolean;
+  /** Fully signed, but the completed snapshot is not stored yet. */
+  pdfPending: boolean;
 } | null> {
   const id = String(agreementId || "").trim();
   if (!id) return null;
@@ -257,7 +259,7 @@ export async function loadOwnerSignedAgreementPreview(
     signed = await resolveLockBoundCorpus({ draft, agreementId: id, lock });
   }
 
-  if (!signed?.text) {
+  if (!signed?.text || (!isSignedSnapshotSource(signed.source) && draftLooksFullyExecuted(draft))) {
     const verify = await fetchPublicAgreementVerify(id);
     const fullyExecuted = Boolean(verify?.signature_status?.fully_executed) || draftLooksFullyExecuted(draft);
     if (fullyExecuted) {
@@ -267,6 +269,7 @@ export async function loadOwnerSignedAgreementPreview(
         const refreshedLocked = await fetchAgreementDraftWithSigningLock(id);
         const refreshed =
           refreshedLocked.ok && refreshedLocked.draft ? refreshedLocked : await fetchAgreementDraft(id);
+        const priorSigned = signed;
         if (refreshed.ok && refreshed.draft) {
           renderBaseDraft = refreshed.draft as AgreementDraft;
           signed = resolveSignedCorpusFromDraft(renderBaseDraft);
@@ -278,6 +281,7 @@ export async function loadOwnerSignedAgreementPreview(
             });
           }
         }
+        if (!signed?.text) signed = priorSigned;
       }
       if (!signed?.text) {
         const reviewPlain = readCertifiedReviewPlainForProofView(renderBaseDraft);
@@ -304,6 +308,7 @@ export async function loadOwnerSignedAgreementPreview(
   }
 
   const pdfAvailable = isSignedSnapshotSource(signed.source) || snapshotReadyFromEnsure;
+  const pdfPending = !pdfAvailable && draftLooksFullyExecuted(renderBaseDraft);
 
   logOwnerSignedAgreementViewSource({
     agreementId: id,
@@ -340,5 +345,6 @@ export async function loadOwnerSignedAgreementPreview(
     usesPremiumDocument: ownerAgreementReadOnlyUsesPremiumDocument(signed.text),
     corpusSource: signed.source,
     pdfAvailable,
+    pdfPending,
   };
 }
