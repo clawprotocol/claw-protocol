@@ -479,11 +479,12 @@ def test_ensure_keeps_existing_snapshot_when_by_name_differs_and_rebuild_fails()
         "audit_log": _completed_audit(),
     }
     result = ensure_fully_executed_snapshot_on_draft(draft, agreement_id="ag_keep_existing")
-    assert result.snapshot_ready is True
-    assert result.source == "existing_kept"
+    assert result.snapshot_ready is False
+    assert result.mutated is False
+    assert result.source == "by_name_invalid"
     snap = result.draft_dict["vs01_signing_packet_v1"]["fully_executed_snapshot"]
-    assert "By: Priya Shah" in snap["corpus_plain"]
-    assert "By: Diego Alvarez" in snap["corpus_plain"]
+    assert snap["corpus_plain"] == corpus
+    assert snap["saved_at"] == "2026-06-16T00:00:00Z"
 
 
 def test_ensure_reads_camelcase_snapshot_keys() -> None:
@@ -517,6 +518,167 @@ def test_ensure_reads_camelcase_snapshot_keys() -> None:
     result = ensure_fully_executed_snapshot_on_draft(draft, agreement_id="ag_camel")
     assert result.snapshot_ready is True
     assert result.source == "existing"
+
+
+def _named_witness(blocks: list[tuple[str, str, str]]) -> str:
+    body = "COMMERCIAL SERVICES AGREEMENT\n\n" + ("Immutable commercial terms. " * 40)
+    lines = [body, "IN WITNESS WHEREOF, the Parties execute this Agreement.", ""]
+    for entity, by_value, name in blocks:
+        lines.extend([entity, f"By: {by_value}", f"Name: {name}", ""])
+    return "\n".join(lines)
+
+
+def test_by_name_violations_identify_each_party_without_trailing_colons() -> None:
+    two = _named_witness(
+        [
+            ("Harbor Peak Analytics LLC", "WRONG", "Pat Harbor"),
+            ("Ironvale Manufacturing Inc.", "Sam Ironvale", "Sam Ironvale"),
+        ]
+    )
+    three = _named_witness(
+        [
+            ("Stonebridge Wellness LLC", "Sandra Wells", "Sandra Wells"),
+            ("NovaPath Learning Inc", "Caleb Price", "WRONG"),
+            ("ClearSpring Distribution LLC", "Maya Coleman", "Maya Coleman"),
+        ]
+    )
+    four = _named_witness(
+        [
+            ("Evergreen Outdoor Brands LLC", "Maya Chen", "Maya Chen"),
+            ("Atlas Consumer Products Inc.", "Jordan Hale", "Jordan Hale"),
+            ("ClearSpring Distribution LLC", "WRONG", "Maya Coleman"),
+            ("BrightPeak Retail Solutions LLC", "Luis Ortega", "Luis Ortega"),
+        ]
+    )
+    two_violations = completed_execution_by_name_violations(two)
+    three_violations = completed_execution_by_name_violations(three)
+    four_violations = completed_execution_by_name_violations(four)
+    assert any(item.startswith("party 0:") for item in two_violations)
+    assert not any(item.startswith("party -1:") for item in two_violations)
+    assert any("party 1:" in item and "Caleb Price" in item for item in three_violations)
+    assert any(item.startswith("party 2:") for item in four_violations)
+    assert not any("Luis Ortega" in item and "!=" in item for item in four_violations)
+
+
+def test_ensure_fail_closes_when_stored_and_portable_by_name_cannot_be_repaired() -> None:
+    corpus = _named_witness(
+        [
+            ("Harbor Peak Analytics LLC", "TEST-SIGNATURE Pat Harbor", "Pat Harbor"),
+            ("Ironvale Manufacturing Inc.", "TEST-SIGNATURE Sam Ironvale", "Sam Ironvale"),
+        ]
+    )
+    draft = {
+        "id": "ag_both_invalid",
+        "audit_log": _completed_audit(),
+        "vs01_signing_packet_v1": {
+            "v": 1,
+            "fully_executed_snapshot": {
+                "v": 1,
+                "corpus_plain": corpus,
+                "corpus_hash": "h",
+                "saved_at": "2026-06-16T00:00:00Z",
+            },
+            "portable": {
+                "seed": {"corpusPlain": corpus},
+                "roles": [
+                    {"roleId": "role_owner", "partyIndex": 0, "entityName": "Harbor Peak Analytics LLC"},
+                    {"roleId": "role_cp", "partyIndex": 1, "entityName": "Ironvale Manufacturing Inc."},
+                ],
+            },
+        },
+    }
+    result = ensure_fully_executed_snapshot_on_draft(draft, agreement_id="ag_both_invalid")
+    assert result.snapshot_ready is False
+    assert result.mutated is False
+    assert result.source == "by_name_invalid"
+    retained = result.draft_dict["vs01_signing_packet_v1"]["fully_executed_snapshot"]
+    assert retained["corpus_plain"] == corpus
+    assert retained["saved_at"] == "2026-06-16T00:00:00Z"
+
+
+def test_ensure_replaces_repairable_snapshot_once_and_then_keeps_it() -> None:
+    accepted = _named_witness(
+        [
+            ("Harbor Peak Analytics LLC", "______________________", "Pat Harbor"),
+            ("Ironvale Manufacturing Inc.", "______________________", "Sam Ironvale"),
+        ]
+    )
+    invalid = accepted.replace("______________________", "TEST-SIGNATURE Pat Harbor", 1).replace(
+        "______________________", "TEST-SIGNATURE Sam Ironvale", 1
+    )
+    draft = {
+        "id": "ag_repair_once",
+        "audit_log": [
+            {
+                "event_type": "signature_completed",
+                "at": "2026-06-15T00:00:00Z",
+                "value": {
+                    "participant_id": "p0",
+                    "signer_role_id": "role_pat",
+                    "typed_name": "",
+                    "participant_display_name": "Harbor Peak Analytics LLC",
+                },
+            },
+            {
+                "event_type": "signature_completed",
+                "at": "2026-06-16T00:00:00Z",
+                "value": {
+                    "participant_id": "p1",
+                    "signer_role_id": "role_sam",
+                    "typed_name": "Not Sam",
+                    "participant_display_name": "Ironvale Manufacturing Inc.",
+                },
+            },
+            build_fully_executed_signed_event(signed_at="2026-06-16T00:00:00Z", agreement_version_hash="h"),
+        ],
+        "vs01_signing_packet_v1": {
+            "fully_executed_snapshot": {
+                "v": 1,
+                "corpus_plain": invalid,
+                "corpus_hash": "bad",
+                "saved_at": "2026-06-16T00:00:00Z",
+            },
+            "portable": {
+                "seed": {"corpusPlain": accepted},
+                "roles": [
+                    {
+                        "roleId": "role_pat",
+                        "partyIndex": 0,
+                        "partyId": "p0",
+                        "entityName": "Harbor Peak Analytics LLC",
+                        "signerName": "Pat Harbor",
+                    },
+                    {
+                        "roleId": "role_sam",
+                        "partyIndex": 1,
+                        "partyId": "p1",
+                        "entityName": "Ironvale Manufacturing Inc.",
+                        "signerName": "Sam Ironvale",
+                    },
+                ],
+            },
+        },
+    }
+    first = ensure_fully_executed_snapshot_on_draft(draft, agreement_id="ag_repair_once")
+    assert first.snapshot_ready is True
+    assert first.mutated is True
+    repaired = first.draft_dict["vs01_signing_packet_v1"]["fully_executed_snapshot"]["corpus_plain"]
+    assert "By: Pat Harbor" in repaired
+    assert "By: Sam Ironvale" in repaired
+    assert "TEST-SIGNATURE" not in repaired
+    assert "Not Sam" not in repaired
+    assert completed_execution_by_name_violations(repaired) == []
+    assert draft["audit_log"][1]["value"]["typed_name"] == "Not Sam"
+    second = ensure_fully_executed_snapshot_on_draft(first.draft_dict, agreement_id="ag_repair_once")
+    assert second.snapshot_ready is True
+    assert second.mutated is False
+    assert second.source == "existing"
+    assert (
+        second.draft_dict["vs01_signing_packet_v1"]["fully_executed_snapshot"]["saved_at"]
+        == first.draft_dict["vs01_signing_packet_v1"]["fully_executed_snapshot"]["saved_at"]
+    )
+    assert len([event for event in second.draft_dict["audit_log"] if event["event_type"] == "signature_completed"]) == 2
+    assert len([event for event in second.draft_dict["audit_log"] if event["event_type"] == "signed"]) == 1
 
 
 def test_ensure_stays_missing_when_fully_executed_has_no_corpus() -> None:

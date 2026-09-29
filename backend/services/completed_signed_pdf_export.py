@@ -512,15 +512,19 @@ def build_completed_signed_pdf_bytes(
     Ignores any client/dashboard HTML so signature blocks stay identical across surfaces.
     Lazily rebuilds missing snapshot from audit/portable when fully executed.
     """
-    draft_dict = draft.model_dump() if hasattr(draft, "model_dump") else dict(draft)
-    corpus_plain = read_completed_signed_corpus_plain(draft_dict)
-    if len(corpus_plain) < 80:
-        from backend.services.vs01_fully_executed_snapshot import ensure_fully_executed_snapshot_on_draft
+    from backend.services.vs01_fully_executed_snapshot import (
+        completed_execution_by_name_violations,
+        ensure_fully_executed_snapshot_on_draft,
+    )
 
-        ensured = ensure_fully_executed_snapshot_on_draft(draft_dict, agreement_id=agreement_id)
-        if ensured.snapshot_ready:
-            corpus_plain = read_completed_signed_corpus_plain(ensured.draft_dict)
-    if len(corpus_plain) < 80:
+    draft_dict = draft.model_dump() if hasattr(draft, "model_dump") else dict(draft)
+    ensured = ensure_fully_executed_snapshot_on_draft(draft_dict, agreement_id=agreement_id)
+    corpus_plain = read_completed_signed_corpus_plain(ensured.draft_dict) if ensured.snapshot_ready else ""
+    if (
+        not ensured.snapshot_ready
+        or len(corpus_plain) < 80
+        or completed_execution_by_name_violations(corpus_plain)
+    ):
         raise HTTPException(status_code=409, detail="signed_snapshot_unavailable")
 
     html_for_export = completed_signed_corpus_to_export_html(corpus_plain)

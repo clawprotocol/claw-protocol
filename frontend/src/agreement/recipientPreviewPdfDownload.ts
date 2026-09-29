@@ -69,6 +69,9 @@ function humanizePdfDownloadFailureMessage(message: string): string {
   const m = (message || "").trim();
   if (!m) return RECIPIENT_PDF_EXPORT_UNAVAILABLE_MESSAGE;
   const low = m.toLowerCase();
+  if (low.includes("signed_snapshot_unavailable")) {
+    return "Completed PDF is still being prepared. Try again.";
+  }
   if (
     low.includes("failed to fetch") ||
     low.includes("networkerror") ||

@@ -10,8 +10,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from backend.services.vs01_execution_block_heading import (
+    ENTITY_SUFFIX_RE,
     extract_role_entity_names_from_portable,
     is_entity_legal_name_heading_line,
+    match_canonical_role_block_heading,
     party_index_at_witness_line,
 )
 from backend.services.vs01_signer_completion import (
@@ -443,19 +445,26 @@ def reconstruct_corpus_from_audit_and_portable(draft: Dict[str, Any]) -> Optiona
         party_index = int(role.get("partyIndex") or 0) if isinstance(role, dict) else 0
         signer_email = ""
         role_signer_name = ""
+        entity_name = ""
         if isinstance(role, dict):
             signer_email = str(role.get("signerEmail") or role.get("reviewEmail") or "").strip()
             role_signer_name = str(role.get("signerName") or "").strip()
-        sig = (
-            str(event.get("typed_name") or "").strip()
-            or signature_text_for_signer_role(
+            entity_name = str(role.get("entityName") or role.get("partyName") or "").strip()
+        typed_name = str(event.get("typed_name") or "").strip()
+        if not role_signer_name and not typed_name:
+            typed_name = signature_text_for_signer_role(
                 fields,
                 rid,
                 party_index=party_index,
                 signer_email=signer_email or None,
-                audit_display_name=event.get("display_name"),
-                role_signer_name=role_signer_name or None,
+                audit_display_name=None,
+                role_signer_name=None,
             )
+        sig = _paper_signer_stamp(
+            typed_name=typed_name,
+            role_signer_name=role_signer_name,
+            entity_name=entity_name,
+            display_name=str(event.get("display_name") or ""),
         )
         if sig:
             corpus, _ = stamp_witness_block_party_signature(
@@ -537,6 +546,43 @@ def _normalize_signer_label(value: str) -> str:
     return " ".join((value or "").split()).lower()
 
 
+def _is_completed_signature_block_heading(trimmed: str) -> bool:
+    """Party boundary inside a witness block, with or without a trailing colon."""
+    if not trimmed:
+        return False
+    if re.match(r"^(?:By|Signature|Name|Title|Date|Email|Address)\s*:", trimmed, re.I):
+        return False
+    if match_canonical_role_block_heading(trimmed):
+        return True
+    if re.search(r"\bif\s+to\b", trimmed, re.I):
+        return False
+    entity = re.sub(r":\s*$", "", trimmed).strip()
+    if len(entity) < 4 or len(entity) > 160 or re.match(r"^\d+\.\s+", entity):
+        return False
+    return bool(ENTITY_SUFFIX_RE.search(entity))
+
+
+def _paper_signer_stamp(
+    *,
+    typed_name: str,
+    role_signer_name: str,
+    entity_name: str,
+    display_name: str,
+) -> str:
+    """Completed-paper By identity. Raw typed input stays in the audit."""
+    signer = (role_signer_name or "").strip()
+    if signer:
+        return signer
+    typed = (typed_name or "").strip()
+    entity = (entity_name or "").strip()
+    display = (display_name or "").strip()
+    if typed and (not entity or _normalize_signer_label(typed) != _normalize_signer_label(entity)):
+        return typed
+    if display and (not entity or _normalize_signer_label(display) != _normalize_signer_label(entity)):
+        return display
+    return ""
+
+
 def completed_execution_by_name_violations(corpus_plain: str) -> List[str]:
     """Return invariant violations when any party By: differs from that block's Name:."""
     corpus = (corpus_plain or "").strip()
@@ -568,11 +614,14 @@ def completed_execution_by_name_violations(corpus_plain: str) -> List[str]:
         trimmed = line.strip()
         if not trimmed:
             continue
-        if is_entity_legal_name_heading_line(trimmed):
+        if _is_completed_signature_block_heading(trimmed):
             flush()
             party_idx += 1
             continue
         if re.match(r"^by\s*:", trimmed, re.I):
+            if current_by or current_name:
+                flush()
+                party_idx += 1
             current_by = re.sub(r"^by\s*:\s*", "", trimmed, flags=re.I).strip()
             continue
         if re.match(r"^name\s*:", trimmed, re.I):
@@ -706,9 +755,15 @@ def ensure_fully_executed_snapshot_on_draft(
     agreement_id: str = "",
 ) -> EnsureFullyExecutedSnapshotResult:
     aid = (agreement_id or str(draft.get("id") or "")).strip()
+    original_draft = draft
+    rejected_completed_corpus = False
     audit = draft.get("audit_log") or []
     dropped_existing: Optional[Dict[str, Any]] = None
-    if fully_executed_snapshot_ready(draft) and not all_signers_signed_from_audit(draft, audit):
+    if (
+        fully_executed_snapshot_ready(draft)
+        and not all_signers_signed_from_audit(draft, audit)
+        and not fully_executed_signed_already_recorded(audit)
+    ):
         _log.warning(
             "[vs01-final-signed-snapshot] agreement_id=%s source=existing_before_all_signers — dropping",
             aid,
@@ -730,6 +785,7 @@ def ensure_fully_executed_snapshot_on_draft(
                 aid,
             )
             return EnsureFullyExecutedSnapshotResult(draft, False, "existing", True)
+        rejected_completed_corpus = True
         _log.warning(
             "[vs01-final-signed-snapshot] agreement_id=%s source=existing_invalid violations=%s — rebuilding",
             aid,
@@ -777,6 +833,7 @@ def ensure_fully_executed_snapshot_on_draft(
                 "portable_snapshot",
                 True,
             )
+        rejected_completed_corpus = True
         _log.warning(
             "[vs01-final-signed-snapshot] agreement_id=%s source=portable_snapshot_invalid violations=%s — rebuilding",
             aid,
@@ -819,6 +876,7 @@ def ensure_fully_executed_snapshot_on_draft(
                 True,
             )
         if built_violations:
+            rejected_completed_corpus = True
             _log.warning(
                 "[vs01-final-signed-snapshot] agreement_id=%s source=portable_corpus_invalid violations=%s — rebuilding",
                 aid,
@@ -861,30 +919,34 @@ def ensure_fully_executed_snapshot_on_draft(
                             source,
                         )
                         return EnsureFullyExecutedSnapshotResult(
-                            draft, False, f"accepted_snapshot_{source}", False
+                            original_draft, False, f"accepted_snapshot_{source}", False
                         )
-                next_seed = {
-                    **seed,
-                    "corpusPlain": rebuilt,
-                    "corpusHash": _fingerprint_corpus(rebuilt),
-                }
-                next_portable = {**portable, "seed": next_seed}
-                next_stored = {
-                    **stored,
-                    "portable": next_portable,
-                    "fully_executed_snapshot": built,
-                }
-                _log.info(
-                    "[vs01-final-signed-snapshot] agreement_id=%s source=%s snapshot_ready=true",
-                    aid,
-                    "accepted_snapshot_reconstructed" if accepted_snapshot_fallback else "reconstructed",
-                )
-                return EnsureFullyExecutedSnapshotResult(
-                    {**draft, "vs01_signing_packet_v1": next_stored},
-                    True,
-                    "accepted_snapshot_reconstructed" if accepted_snapshot_fallback else "reconstructed",
-                    True,
-                )
+                rebuilt_violations = completed_execution_by_name_violations(rebuilt)
+                if rebuilt_violations:
+                    rejected_completed_corpus = True
+                else:
+                    next_seed = {
+                        **seed,
+                        "corpusPlain": rebuilt,
+                        "corpusHash": _fingerprint_corpus(rebuilt),
+                    }
+                    next_portable = {**portable, "seed": next_seed}
+                    next_stored = {
+                        **stored,
+                        "portable": next_portable,
+                        "fully_executed_snapshot": built,
+                    }
+                    _log.info(
+                        "[vs01-final-signed-snapshot] agreement_id=%s source=%s snapshot_ready=true",
+                        aid,
+                        "accepted_snapshot_reconstructed" if accepted_snapshot_fallback else "reconstructed",
+                    )
+                    return EnsureFullyExecutedSnapshotResult(
+                        {**draft, "vs01_signing_packet_v1": next_stored},
+                        True,
+                        "accepted_snapshot_reconstructed" if accepted_snapshot_fallback else "reconstructed",
+                        True,
+                    )
 
         if review_plain and len(corpus) < 80:
             review_draft = {
@@ -898,7 +960,7 @@ def ensure_fully_executed_snapshot_on_draft(
                 },
             }
             rebuilt = reconstruct_corpus_from_audit_and_portable(review_draft)
-            if rebuilt:
+            if rebuilt and not completed_execution_by_name_violations(rebuilt):
                 built = build_snapshot_record(rebuilt, portable)
                 if built:
                     _log.info(
@@ -914,15 +976,15 @@ def ensure_fully_executed_snapshot_on_draft(
                         overwrite_seed=True,
                     )
 
-    if completed_deal:
-        if dropped_existing and snapshot_record_corpus_plain(dropped_existing):
-            _log.info(
-                "[vs01-final-signed-snapshot] agreement_id=%s source=existing_kept snapshot_ready=true",
-                aid,
-            )
-            return _attach_fully_executed_snapshot(draft, stored, dropped_existing, "existing_kept")
+    if rejected_completed_corpus:
+        _log.warning(
+            "[vs01-final-signed-snapshot] agreement_id=%s source=by_name_invalid snapshot_ready=false",
+            aid,
+        )
+        return EnsureFullyExecutedSnapshotResult(original_draft, False, "by_name_invalid", False)
 
-        if review_plain:
+    if completed_deal:
+        if review_plain and not completed_execution_by_name_violations(review_plain):
             record = _snapshot_record_from_corpus(review_plain, portable)
             if record:
                 _log.info(
@@ -931,7 +993,7 @@ def ensure_fully_executed_snapshot_on_draft(
                 )
                 return _attach_fully_executed_snapshot(draft, stored, record, "accepted_review")
 
-        if corpus:
+        if corpus and not completed_execution_by_name_violations(corpus):
             record = _snapshot_record_from_corpus(corpus, portable)
             if record:
                 _log.info(

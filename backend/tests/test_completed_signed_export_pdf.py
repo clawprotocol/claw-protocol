@@ -388,6 +388,51 @@ def test_build_completed_signed_pdf_bytes_repairs_from_accepted_review(
     assert filename.endswith("-signed.pdf")
 
 
+def test_build_completed_signed_pdf_bytes_refuses_rejected_by_name_snapshot() -> None:
+    from fastapi import HTTPException
+    from backend.routers.agreements_v2_api import AgreementDraft
+
+    corpus = (
+        "COMMERCIAL SERVICES AGREEMENT\n\n"
+        + ("Immutable commercial terms. " * 40)
+        + "\nIN WITNESS WHEREOF, the Parties execute this Agreement.\n"
+        "Harbor Peak Analytics LLC\n"
+        "By: TEST-SIGNATURE Pat Harbor\n"
+        "Name: Pat Harbor\n"
+        "Ironvale Manufacturing Inc.\n"
+        "By: TEST-SIGNATURE Sam Ironvale\n"
+        "Name: Sam Ironvale\n"
+    )
+    draft = AgreementDraft.model_validate(
+        {
+            "id": "ag-by-name-invalid",
+            "title": "Services Agreement",
+            "created_at": "2026-06-01T00:00:00Z",
+            "updated_at": "2026-06-01T00:00:00Z",
+            "parties": [
+                {"name": "Harbor Peak Analytics LLC", "role": "client"},
+                {"name": "Ironvale Manufacturing Inc.", "role": "service_provider"},
+            ],
+            "audit_log": [
+                {"event_type": "signed", "at": "2026-06-01T00:00:00Z", "value": {"fully_executed": True}},
+            ],
+            "vs01_signing_packet_v1": {
+                "fully_executed_snapshot": {
+                    "v": 1,
+                    "corpus_plain": corpus,
+                    "corpus_hash": "bad",
+                    "saved_at": "2026-06-16T00:00:00Z",
+                },
+                "portable": {"seed": {"corpusPlain": corpus}, "roles": []},
+            },
+        }
+    )
+    with pytest.raises(HTTPException) as exc:
+        build_completed_signed_pdf_bytes(agreement_id="ag-by-name-invalid", draft=draft)
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "signed_snapshot_unavailable"
+
+
 def test_public_completed_signed_export_pdf_403_when_not_fully_executed(
     completed_pdf_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -471,10 +516,16 @@ def test_reconstruct_signed_snapshot_from_participant_bound_ceremony() -> None:
     }
     rebuilt = reconstruct_corpus_from_audit_and_portable(draft)
     assert rebuilt is not None
-    assert "TEST-SIGNATURE Ethan Cole" in rebuilt
-    assert "TEST-SIGNATURE Olivia Hart" in rebuilt
-    from backend.services.vs01_fully_executed_snapshot import build_snapshot_record
+    assert "By: Ethan Cole" in rebuilt
+    assert "By: Olivia Hart" in rebuilt
+    assert "TEST-SIGNATURE" not in rebuilt
+    assert draft["audit_log"][0]["value"]["typed_name"] == "TEST-SIGNATURE Ethan Cole"
+    from backend.services.vs01_fully_executed_snapshot import (
+        build_snapshot_record,
+        completed_execution_by_name_violations,
+    )
 
     snap = build_snapshot_record(rebuilt, draft["vs01_signing_packet_v1"]["portable"])
     assert snap is not None
-    assert "TEST-SIGNATURE Olivia Hart" in str(snap.get("corpus_plain") or "")
+    assert "By: Olivia Hart" in str(snap.get("corpus_plain") or "")
+    assert completed_execution_by_name_violations(str(snap.get("corpus_plain") or "")) == []

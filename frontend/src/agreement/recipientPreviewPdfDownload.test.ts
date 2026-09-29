@@ -10,6 +10,12 @@ describe("humanizeRecipientPdfExportErrorMessage", () => {
   it("maps Failed to fetch to the friendly unavailable copy", () => {
     expect(humanizeRecipientPdfExportErrorMessage("Failed to fetch")).toBe(RECIPIENT_PDF_EXPORT_UNAVAILABLE_MESSAGE);
   });
+
+  it("maps an unexportable completed snapshot to a retry", () => {
+    expect(humanizeRecipientPdfExportErrorMessage("signed_snapshot_unavailable")).toBe(
+      "Completed PDF is still being prepared. Try again.",
+    );
+  });
 });
 
 describe("downloadRecipientPreviewPdf", () => {
