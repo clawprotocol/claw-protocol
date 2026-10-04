@@ -488,6 +488,19 @@ def _accepted_snapshot_portable_for_reconstruction(
         get_accepted_snapshot_record,
         verify_snapshot_integrity,
     )
+    from backend.services.legacy_signing_identity import (
+        SigningIdentityAuthorityError,
+        frozen_has_generated_party_id,
+        portable_from_prepared_authority,
+        prepare_durable_execution_authority,
+    )
+
+    if frozen_has_generated_party_id(draft.get("frozen_signing_authority_v1")):
+        try:
+            prepared = prepare_durable_execution_authority(draft)
+        except SigningIdentityAuthorityError:
+            return None
+        return portable_from_prepared_authority(draft, prepared)
 
     accepted = get_accepted_snapshot_record(draft)
     if not isinstance(accepted, dict):

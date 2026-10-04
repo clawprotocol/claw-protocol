@@ -101,7 +101,10 @@ export function buildAuthoritativeSigningSnapshotFromFrozenPersist(args: {
     partyManifest: buildCanonicalFinalPartyManifestFromAuthority(authority),
     signatureBlockModel: { signFirst: true, entries: [] },
     source: "paid_pro_signer_metadata_finalize",
-    hash: args.frozen.frozenCorpusHash || hashPaidProCorpus(corpus),
+    hash:
+      args.frozen.frozenCorpusHash && args.frozen.frozenCorpusHash === hashPaidProCorpus(corpus)
+        ? args.frozen.frozenCorpusHash
+        : hashPaidProCorpus(corpus),
     frozenAt: Date.parse(args.frozen.frozenAt) || Date.now(),
   };
 }

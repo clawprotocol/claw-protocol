@@ -8637,6 +8637,15 @@ def post_agreement_signing_links_sent(
                 expected_agreement_id=agreement_id,
                 expected_corpus_hash=corpus_hash or None,
             )
+            if not ok and err_code == "corpus_hash_mismatch" and isinstance(accepted_snap, dict):
+                from backend.services.legacy_signing_identity import stale_frozen_corpus_may_be_ignored
+
+                if stale_frozen_corpus_may_be_ignored(
+                    validation_code=err_code,
+                    portable_corpus_hash=corpus_hash or "",
+                    accepted_digest=str(accepted_snap.get("corpusSha256") or ""),
+                ):
+                    ok = True
             if not ok:
                 if first_after_pay_packet:
                     # Leftover session frozen (other deal / stale hash) must not
@@ -8706,6 +8715,20 @@ def post_agreement_signing_links_sent(
                 expected_agreement_id=agreement_id,
                 expected_corpus_hash=corpus_hash or None,
             )
+            if not ok and err_code == "corpus_hash_mismatch":
+                from backend.services.accepted_review_snapshot import get_accepted_snapshot_record
+                from backend.services.legacy_signing_identity import stale_frozen_corpus_may_be_ignored
+
+                accepted_for_authority = get_accepted_snapshot_record(draft)
+                accepted_digest = ""
+                if isinstance(accepted_for_authority, dict):
+                    accepted_digest = str(accepted_for_authority.get("corpusSha256") or "")
+                if stale_frozen_corpus_may_be_ignored(
+                    validation_code=err_code,
+                    portable_corpus_hash=corpus_hash or "",
+                    accepted_digest=accepted_digest,
+                ):
+                    ok = True
             if not ok:
                 raise HTTPException(
                     status_code=400,
@@ -8715,6 +8738,22 @@ def post_agreement_signing_links_sent(
                         "detail": err_detail,
                     },
                 )
+
+        try:
+            from backend.services.legacy_signing_identity import (
+                SigningIdentityAuthorityError,
+                rekey_portable_legacy_party_ids,
+            )
+
+            portable = rekey_portable_legacy_party_ids(draft.model_dump(), portable)
+        except SigningIdentityAuthorityError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": exc.code,
+                    "message": "Signing identity authority could not be reconciled.",
+                },
+            ) from exc
 
         try:
             from backend.services.accepted_review_snapshot import get_accepted_snapshot_record
@@ -9206,11 +9245,24 @@ def post_vs01_signer_complete(
                 detail={"code": "signing_token_secret_not_configured", "message": str(e)},
             ) from e
         draft_for_auth = _load_or_404(aid)
-        participant_id = resolve_participant_id_for_signer_role(
-            draft_for_auth.model_dump(),
-            signer_role_id,
-            body.participant_id or "",
-        )
+        try:
+            participant_id = resolve_participant_id_for_signer_role(
+                draft_for_auth.model_dump(),
+                signer_role_id,
+                body.participant_id or "",
+            )
+        except Exception as exc:
+            from backend.services.legacy_signing_identity import SigningIdentityAuthorityError
+
+            if not isinstance(exc, SigningIdentityAuthorityError):
+                raise
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": exc.code,
+                    "message": "Signing identity authority could not be reconciled.",
+                },
+            ) from exc
         token_out = validate_recipient_access_token_for_agreement(
             token=tok,
             path_agreement_id=aid,
@@ -9339,11 +9391,24 @@ def post_vs01_signer_complete(
                 signed_date_display = _format_signing_date_display(signed_date_iso)
             except Exception:
                 signed_date_display = signed_date_iso
-        participant_id = resolve_participant_id_for_signer_role(
-            draft.model_dump(),
-            signer_role_id,
-            body.participant_id or "",
-        )
+        try:
+            participant_id = resolve_participant_id_for_signer_role(
+                draft.model_dump(),
+                signer_role_id,
+                body.participant_id or "",
+            )
+        except Exception as exc:
+            from backend.services.legacy_signing_identity import SigningIdentityAuthorityError
+
+            if not isinstance(exc, SigningIdentityAuthorityError):
+                raise
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": exc.code,
+                    "message": "Signing identity authority could not be reconciled.",
+                },
+            ) from exc
         lock_row = read_signing_lock(aid)
         lv = str((lock_row or {}).get("locked_version_id") or "").strip() or None
         fp = _agreement_version_hash(aid, lv, draft) if lv else None

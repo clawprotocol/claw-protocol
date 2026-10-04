@@ -22,6 +22,10 @@ import {
   type FrozenSigningAuthoritySnapshotV1,
 } from "../components/agreements/frozenSigningAuthoritySnapshot";
 import {
+  legacyReconciliationApplies,
+  prepareDurableExecutionAuthority,
+} from "../components/agreements/legacyDurableSigningIdentity";
+import {
   buildAgreementVs01BridgeSession,
   readAgreementVs01BridgeSession,
   readPaidProAgreementBridgeSkipMarker,
@@ -287,6 +291,24 @@ export function overlayFrozenSigningAuthorityOntoDraft(
   frozen: FrozenSigningAuthoritySnapshotV1,
   agreementId: string,
 ): AgreementDraft {
+  if (draft && legacyReconciliationApplies(draft, frozen)) {
+    const prepared = prepareDurableExecutionAuthority({ draft, frozen });
+    const parties = prepared.parties.map((party) => {
+      const prev = draft.parties.find((row) => row.id === party.partyId);
+      return {
+        ...prev,
+        id: party.partyId,
+        name: prev?.name || party.legalName,
+        role: prev?.role || party.role,
+        email: party.signerEmail || prev?.email || "",
+        signerName: party.signerName,
+        signerTitle: party.signerTitle || prev?.signerTitle,
+        signerEmail: party.signerEmail,
+        requiresSignature: prev?.requiresSignature ?? true,
+      };
+    });
+    return { ...draft, parties };
+  }
   const rows = frozenSnapshotToLegalPartyRows(frozen);
   const parties = rows.map((row, i) => {
     const prev = draft?.parties?.[i];

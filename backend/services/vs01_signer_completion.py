@@ -344,7 +344,19 @@ def resolve_participant_id_for_signer_role(
     signer_role_id: str,
     participant_id_hint: str = "",
 ) -> str:
+    from backend.services.legacy_signing_identity import (
+        is_generated_legacy_party_id,
+        durable_party_id_for_legacy,
+    )
+
     pid = (participant_id_hint or "").strip()
+    if pid and is_generated_legacy_party_id(pid):
+        mapped = durable_party_id_for_legacy(draft, pid)
+        if not mapped:
+            from backend.services.legacy_signing_identity import SigningIdentityAuthorityError
+
+            raise SigningIdentityAuthorityError("unknown_generated_party")
+        return mapped
     if pid:
         return pid
 
