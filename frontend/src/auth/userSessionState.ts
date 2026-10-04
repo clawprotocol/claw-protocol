@@ -9,12 +9,14 @@ import { clearAllGuestCheckoutAuthorities } from "../launch/guestCheckoutAuthori
 import { setOrgId } from "../launch/orgContext";
 import { clearPaidCheckoutOrgId } from "../launch/paidCheckoutOrgContext";
 import { clearCachedAccessToken } from "./authAccessTokenCache";
+import { clearCompletedAuthFinalize } from "./returningFinalizeLatch";
 import { clearImmutableFrozenLegalCorpus } from "../components/agreements/paidProFrozenLegalCorpus";
 import { clearPaymentClarificationClientCache } from "../components/agreements/paymentClarificationSession";
 
 /** Remove account and paid-access authority that must never cross a sign-out boundary. */
 export function clearLawdogUserSessionState(): void {
   clearCachedAccessToken();
+  clearCompletedAuthFinalize();
   clearCachedSubscriptionEntitlement();
   clearPaidCheckoutOrgId();
   clearPaidPremiumCompletionSession();

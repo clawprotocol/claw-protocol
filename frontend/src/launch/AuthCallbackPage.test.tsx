@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AUTH_UNAVAILABLE_COPY } from "../auth/authUserFacingCopy";
 import { AuthCallbackPage } from "./AuthCallbackPage";
 
 const navState = {
@@ -88,6 +89,26 @@ describe("AuthCallbackPage", () => {
     expect(navState.navigate).not.toHaveBeenCalled();
   });
 
+  it("continues to the dashboard when returning finalization is an idempotent no-op", async () => {
+    navState.search = "?continuation_id=cont-return";
+    vi.mocked(waitForAuthSession).mockResolvedValue({
+      access_token: "tok",
+      user: { id: "user-phase4b5-owner", email: "owner@example.com", app_metadata: { provider: "email" } },
+    } as never);
+    vi.mocked(finalizeAuthenticatedSessionFromAuthCallback).mockResolvedValue({
+      destinationPath: "/app",
+      orgId: "user-phase4b5-owner",
+      migratedAgreementCount: 0,
+      migratedAgreementIds: [],
+      usedContinuation: true,
+      usedFallback: false,
+    });
+    const { queryByText } = render(<AuthCallbackPage />);
+    await waitFor(() => expect(navState.navigate).toHaveBeenCalledWith("/app"));
+    expect(queryByText(AUTH_UNAVAILABLE_COPY)).toBeNull();
+    expect(finalizeAuthenticatedSessionFromAuthCallback).toHaveBeenCalledTimes(1);
+  });
+
   it("fails closed on a consumed continuation without following next", async () => {
     navState.search = "?continuation_id=cont-expired&next=/app/billing";
     vi.mocked(waitForAuthSession).mockResolvedValue({
@@ -95,8 +116,9 @@ describe("AuthCallbackPage", () => {
       user: { id: "user-phase4b5-owner", email: "owner@example.com" },
     } as never);
     vi.mocked(finalizeAuthenticatedSessionFromAuthCallback).mockRejectedValue(new Error("continuation_expired"));
-    const { getByTestId } = render(<AuthCallbackPage />);
+    const { getByTestId, getByText } = render(<AuthCallbackPage />);
     await waitFor(() => expect(getByTestId("auth-callback-unavailable")).toBeTruthy());
+    expect(getByText(AUTH_UNAVAILABLE_COPY)).toBeTruthy();
     expect(navState.navigate).not.toHaveBeenCalled();
   });
 });

@@ -32,7 +32,11 @@ def extract_anonymous_session_token(request: Request) -> Optional[str]:
     return cookie or None
 
 
-def verify_anonymous_session_from_request(request: Request) -> Dict[str, Any]:
+def load_presented_anonymous_session(request: Request) -> Dict[str, Any]:
+    """Resolve a presented anonymous credential to its stored row.
+
+    A consumed row is returned so callers can discard it. Consumption is not authorization.
+    """
     token = extract_anonymous_session_token(request)
     if not token:
         raise HTTPException(
@@ -56,27 +60,37 @@ def verify_anonymous_session_from_request(request: Request) -> Dict[str, Any]:
             status_code=401,
             detail={"code": "unknown_anonymous_session", "message": "Session not found."},
         )
+    if str(row.get("session_id") or "") != str(payload.get("sid") or ""):
+        raise HTTPException(status_code=401, detail={"code": "session_mismatch"})
+    if str(row.get("org_id") or "") != str(payload.get("org") or ""):
+        raise HTTPException(status_code=401, detail={"code": "org_mismatch"})
+    return row
+
+
+def reject_expired_anonymous_session(row: Dict[str, Any]) -> None:
+    exp_raw = str(row.get("expires_at") or "")
+    if not exp_raw:
+        return
+    try:
+        if datetime.now(timezone.utc) > _parse_utc_iso(exp_raw):
+            raise HTTPException(
+                status_code=401,
+                detail={"code": "anonymous_session_expired", "message": "Session expired."},
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        return
+
+
+def verify_anonymous_session_from_request(request: Request) -> Dict[str, Any]:
+    row = load_presented_anonymous_session(request)
     if int(row.get("consumed") or 0) == 1:
         raise HTTPException(
             status_code=403,
             detail={"code": "anonymous_session_consumed", "message": "Session already claimed."},
         )
-    exp_raw = str(row.get("expires_at") or "")
-    if exp_raw:
-        try:
-            if datetime.now(timezone.utc) > _parse_utc_iso(exp_raw):
-                raise HTTPException(
-                    status_code=401,
-                    detail={"code": "anonymous_session_expired", "message": "Session expired."},
-                )
-        except HTTPException:
-            raise
-        except Exception:
-            pass
-    if str(row.get("session_id") or "") != str(payload.get("sid") or ""):
-        raise HTTPException(status_code=401, detail={"code": "session_mismatch"})
-    if str(row.get("org_id") or "") != str(payload.get("org") or ""):
-        raise HTTPException(status_code=401, detail={"code": "org_mismatch"})
+    reject_expired_anonymous_session(row)
     return row
 
 

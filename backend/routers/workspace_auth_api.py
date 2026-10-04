@@ -34,7 +34,12 @@ from backend.security.supabase_jwt import (
     require_supabase_user_id,
     verify_supabase_access_token,
 )
-from backend.security.workspace_identity import verify_anonymous_session_from_request, extract_anonymous_session_token
+from backend.security.workspace_identity import (
+    extract_anonymous_session_token,
+    load_presented_anonymous_session,
+    reject_expired_anonymous_session,
+    verify_anonymous_session_from_request,
+)
 from backend.security.safe_redirect import (
     CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
     build_destination_with_agreement,
@@ -286,6 +291,34 @@ def _assert_claimable_previous_org(previous_org_id: str, target_org_id: str) -> 
         )
 
 
+def _workspace_binding_matches_user(user_id: str, org_id: str) -> bool:
+    """True only when this user already owns the stable workspace binding."""
+    expected = _stable_org_id_for_user(user_id)
+    if org_id != expected:
+        return False
+    try:
+        row = get_admin_console_store().get_workspace_user_identity(user_id)
+    except Exception:
+        _log.warning("workspace_binding_read_failed user_id=%s", user_id)
+        return False
+    if not row:
+        return False
+    return str(row.get("user_id") or "").strip() == user_id and str(row.get("org_id") or "").strip() == expected
+
+
+def _expire_anon_session_cookie(*, response: Response, request: Request) -> None:
+    """Drop a stale anonymous cookie with the same scope used when it was set."""
+    samesite = _cookie_samesite_for_request(request)
+    secure = _cookie_secure_for_request(request) or samesite == "none"
+    response.delete_cookie(
+        key=ANON_SESSION_COOKIE,
+        path="/",
+        secure=secure,
+        httponly=True,
+        samesite=samesite,
+    )
+
+
 def _attach_anon_session_cookie(*, response: Response, request: Request, token: str) -> None:
     samesite = _cookie_samesite_for_request(request)
     secure = _cookie_secure_for_request(request) or samesite == "none"
@@ -477,7 +510,7 @@ async def create_auth_continuation(request: Request, body: AuthContinuationIn) -
 
 
 @router.post("/finalize-auth")
-async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any]:
+async def finalize_auth(request: Request, response: Response, body: FinalizeAuthIn) -> Dict[str, Any]:
     """
     Post-auth finalizer: verify Supabase user, continuation, anonymous session; claim drafts;
     return server-authoritative redirect destination.
@@ -532,12 +565,39 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
         except Exception:
             pass
 
+    purpose = str(cont_row.get("auth_purpose") or "").strip().lower()
+    is_returning = purpose in ("returning_sign_in", "dashboard", "quick_pdf_return") or str(cont_row.get("session_id") or "") == "returning"
+
     anon_row: Optional[Dict[str, Any]] = None
     token = extract_anonymous_session_token(request)
     if token:
-        anon_row = verify_anonymous_session_from_request(request)
-    purpose = str(cont_row.get("auth_purpose") or "").strip().lower()
-    is_returning = purpose in ("returning_sign_in", "dashboard", "quick_pdf_return") or str(cont_row.get("session_id") or "") == "returning"
+        presented = load_presented_anonymous_session(request)
+        reject_expired_anonymous_session(presented)
+        if int(presented.get("consumed") or 0) == 1:
+            claimed_user = str(presented.get("claimed_user_id") or "").strip()
+            if claimed_user and claimed_user != user_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail={"code": "anonymous_session_consumed", "message": "Session already claimed."},
+                )
+            if is_returning and _workspace_binding_matches_user(user_id, org_id):
+                _expire_anon_session_cookie(response=response, request=request)
+                dest = build_destination_with_agreement(
+                    destination_path=str(cont_row.get("destination_path") or "/app"),
+                    agreement_id=str(cont_row.get("agreement_id") or "") or None,
+                )
+                return {
+                    "ok": True,
+                    "org_id": org_id,
+                    "destination_path": dest,
+                    "migrated_agreement_count": 0,
+                    "idempotent": True,
+                }
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "anonymous_session_consumed", "message": "Session already claimed."},
+            )
+        anon_row = presented
 
     dest_path = str(cont_row.get("destination_path") or "/app")
     prev_org = _claim_source_org_for_unpaid_converter(

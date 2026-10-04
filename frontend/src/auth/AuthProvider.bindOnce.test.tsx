@@ -44,6 +44,7 @@ vi.mock("./supabaseAuthService", () => ({
   signInWithGoogle: vi.fn(),
   signOutAuth: vi.fn(),
   buildAuthCallbackUrl: vi.fn(),
+  resolveBrowserAuthSession: (session: Session | null) => session,
 }));
 
 vi.mock("./postAuthFinalizer", () => ({
@@ -74,6 +75,7 @@ vi.mock("./e2eAuthSessionBridge", () => ({
 }));
 
 import { AuthProvider, isAlreadyFinalizedWorkspaceUser } from "./AuthProvider";
+import { clearCompletedAuthFinalize } from "./returningFinalizeLatch";
 
 describe("isAlreadyFinalizedWorkspaceUser", () => {
   it("is true only when the current user already finalized", () => {
@@ -96,6 +98,8 @@ describe("isAlreadyFinalizedWorkspaceUser", () => {
 
 describe("AuthProvider bind-once", () => {
   beforeEach(() => {
+    sessionStorage.clear();
+    clearCompletedAuthFinalize();
     authListeners.length = 0;
     getAuthSession.mockClear();
     finalizeAuthenticatedSession.mockClear();

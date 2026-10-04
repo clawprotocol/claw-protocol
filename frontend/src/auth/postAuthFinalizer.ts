@@ -24,6 +24,7 @@ import {
   resolveEntitlementRepairOrgCandidates,
 } from "../launch/paidCheckoutOrgContext";
 import { clearAnonymousSession, logAuthDiagnostic } from "./anonymousSessionApi";
+import { readCompletedAuthFinalize, recordCompletedAuthFinalize } from "./returningFinalizeLatch";
 import { commitPostAuthOwnershipMigration } from "./ownershipMigrationFinalize";
 import { applyClaimedAgreementIdsToPreAuth } from "./preAuthCheckoutAgreement";
 import { readCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
@@ -92,6 +93,17 @@ export async function finalizeAuthenticatedSession(args: {
   if (display) writeCurrentUserDisplayName(display);
 
   const continuationId = (args.continuationId ?? readContinuationId())?.trim() || null;
+  const completed = readCompletedAuthFinalize(args.user.id, continuationId);
+  if (completed) {
+    return {
+      destinationPath: completed.destinationPath,
+      orgId: completed.orgId,
+      migratedAgreementCount: 0,
+      migratedAgreementIds: [],
+      usedContinuation: Boolean(completed.continuationId),
+      usedFallback: !completed.continuationId,
+    };
+  }
   const session = await getAuthSession();
   const accessToken = session?.access_token ?? "";
 
@@ -135,7 +147,7 @@ export async function finalizeAuthenticatedSession(args: {
       } catch {
         /* Secondary restore work must not undo a successful server finalize. */
       }
-      return {
+      const result = {
         destinationPath: resolveServerAuthDestination(server.destination_path, "/app"),
         orgId: String(server.org_id || "").trim(),
         migratedAgreementCount: server.migrated_agreement_count,
@@ -143,6 +155,13 @@ export async function finalizeAuthenticatedSession(args: {
         usedContinuation: true,
         usedFallback: false,
       };
+      recordCompletedAuthFinalize({
+        userId: args.user.id,
+        continuationId: continuationId || "",
+        destinationPath: result.destinationPath,
+        orgId: result.orgId,
+      });
+      return result;
     } catch (e) {
       logAuthDiagnostic("auth_finalize_failed", {
         reason: "finalize_failed",
@@ -195,7 +214,7 @@ export async function finalizeAuthenticatedSession(args: {
     continuationAgreementId: ctx?.agreementId,
   });
 
-  return {
+  const result = {
     destinationPath,
     orgId: String(bind.org_id || getOrgId()).trim(),
     migratedAgreementCount: bind.migrated_agreement_count,
@@ -203,4 +222,11 @@ export async function finalizeAuthenticatedSession(args: {
     usedContinuation,
     usedFallback,
   };
+  recordCompletedAuthFinalize({
+    userId: args.user.id,
+    continuationId: continuationId || "",
+    destinationPath: result.destinationPath,
+    orgId: result.orgId,
+  });
+  return result;
 }

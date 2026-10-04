@@ -10,7 +10,9 @@ import {
   signOutAuth,
   buildAuthCallbackUrl,
 } from "./supabaseAuthService";
+import { readContinuationId } from "./authContinuationApi";
 import { displayNameFromUser, finalizeAuthenticatedSession } from "./postAuthFinalizer";
+import { readCompletedAuthFinalize, recordCompletedAuthFinalize } from "./returningFinalizeLatch";
 import { prepareAuthContinuation } from "./prepareAuthContinuation";
 import { setCachedAccessToken, clearCachedAccessToken } from "./authAccessTokenCache";
 import { bindAuthenticatedUserToWorkspace } from "./workspaceBindingApi";
@@ -78,12 +80,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (isAlreadyFinalizedWorkspaceUser(finalizedUserRef.current, user.id)) {
       return;
     }
+    const pendingContinuation = readContinuationId();
+    if (readCompletedAuthFinalize(user.id, pendingContinuation)) {
+      finalizedUserRef.current = user.id;
+      return;
+    }
     if (finalizeInFlightRef.current === user.id) {
       return;
     }
     finalizeInFlightRef.current = user.id;
     try {
-      await finalizeAuthenticatedSession({ user, claimMethod });
+      const result = await finalizeAuthenticatedSession({ user, claimMethod });
+      recordCompletedAuthFinalize({
+        userId: user.id,
+        continuationId: pendingContinuation || "",
+        destinationPath: result.destinationPath,
+        orgId: result.orgId,
+      });
       finalizedUserRef.current = user.id;
     } catch {
       // Allow a later auth event to retry the first bind / claim finalize.
