@@ -40,6 +40,26 @@ import {
 
 const MIN_CORPUS_FOR_PREMIUM_HTML = 500;
 
+/** Persisted accepted, frozen, or lock-bound corpus. Draft field names stay mutable. */
+const CANONICAL_OWNER_DISPLAY_CORPUS_SOURCES = new Set([
+  "verified_server_canonical_review_snapshot",
+  "authoritative_signing_snapshot",
+  "authoritative_agreement_document",
+  "accepted_review",
+]);
+
+function ownerReadOnlyDisplayHasCanonicalCorpusAuthority(args: {
+  selectedCorpusSource?: string;
+  draft?: AgreementDraft | null;
+}): boolean {
+  const source = (args.selectedCorpusSource ?? "").trim();
+  if (CANONICAL_OWNER_DISPLAY_CORPUS_SOURCES.has(source)) return true;
+  const status = String(args.draft?.accepted_review_snapshot_v1?.status ?? "")
+    .trim()
+    .toLowerCase();
+  return status === "accepted";
+}
+
 /**
  * Display-only HTML for review surfaces — does not mutate authoritative corpus.
  */
@@ -159,7 +179,11 @@ export function buildReviewFirstDocumentDisplayHtml(args: {
     // Review track: render the same backfilled corpus as copy/export. Display polish can drop
     // integration clauses (§9 miscellaneous) that mention "between the parties".
     let displayCorpus = reviewTrack ? corpusBeforePolish : polished;
-    if (surface === "owner_done" && passedCorpus.length >= 80) {
+    if (
+      surface === "owner_done" &&
+      passedCorpus.length >= 80 &&
+      !ownerReadOnlyDisplayHasCanonicalCorpusAuthority(args)
+    ) {
       const names = (args.partyNames || [])
         .map((n) => String(n ?? "").trim())
         .filter((n) => n.length >= 2);
