@@ -21,6 +21,7 @@ class SendResult:
     provider_id: str | None = None
     status_code: int | None = None
     error: str | None = None
+    status: str = ""
 
 
 def send_email(
@@ -31,6 +32,24 @@ def send_email(
     text: str | None = None,
     tags: Optional[List[Dict[str, str]]] = None,
 ) -> SendResult:
+    from backend.services.agreement_delivery_policy import (
+        AgreementDeliveryConfigError,
+        resolve_agreement_delivery,
+    )
+
+    try:
+        decision = resolve_agreement_delivery("email")
+    except AgreementDeliveryConfigError:
+        return SendResult(ok=False, error="agreement_delivery_mode_invalid", status="failed")
+    if not decision.provider_allowed:
+        _log.info(
+            "[agreement-delivery] status=%s channel=%s reason=%s",
+            decision.status,
+            decision.channel,
+            decision.reason,
+        )
+        return SendResult(ok=False, error="suppressed_manual", status="suppressed_manual")
+
     api_key = resend_api_key()
     from_addr = email_from()
     if not api_key or not from_addr:

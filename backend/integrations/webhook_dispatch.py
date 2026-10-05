@@ -41,6 +41,16 @@ def deliver_webhook(
     delivery_id: Optional[str] = None,
 ) -> None:
     """Synchronous delivery + store updates (invoke from worker thread)."""
+    from backend.services.agreement_delivery_policy import (
+        is_agreement_webhook_event,
+        log_suppressed,
+        suppressed_manual,
+    )
+
+    if is_agreement_webhook_event(event_type) and suppressed_manual("webhook"):
+        log_suppressed("webhook")
+        return
+
     hid = str(hook.get("hook_id") or "")
     secret = str(hook.get("secret") or "")
     url = str(hook.get("url") or "").strip()
@@ -157,6 +167,15 @@ def dispatch_webhook_event_async(
 ) -> None:
     if not org_id.strip():
         return
+    from backend.services.agreement_delivery_policy import (
+        is_agreement_webhook_event,
+        log_suppressed,
+        suppressed_manual,
+    )
+
+    if is_agreement_webhook_event(event_type) and suppressed_manual("webhook"):
+        log_suppressed("webhook")
+        return
     hooks = webhook_store.iter_hooks_for_event(org_id.strip(), event_type)
     if not hooks:
         return
@@ -189,6 +208,15 @@ def retry_delivery(org_id: str, delivery_id: str) -> bool:
     if not hook:
         return False
     et = str(rec.get("event_type") or "")
+    from backend.services.agreement_delivery_policy import (
+        is_agreement_webhook_event,
+        log_suppressed,
+        suppressed_manual,
+    )
+
+    if is_agreement_webhook_event(et) and suppressed_manual("webhook_retry"):
+        log_suppressed("webhook_retry")
+        return "suppressed_manual"
     eid = str(rec.get("event_id") or "")
     ot = str(rec.get("object_type") or "")
     oid = str(rec.get("object_id") or "")

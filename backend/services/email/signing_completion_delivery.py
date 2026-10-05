@@ -42,6 +42,15 @@ def maybe_send_signing_completion_emails(
     if not aid:
         return None
 
+    from backend.services.agreement_delivery_policy import log_suppressed, suppressed_delivery_event, suppressed_manual
+
+    audit_log = draft.get("audit_log") or []
+    if _signing_completion_emails_already_sent(audit_log):
+        return None
+    if suppressed_manual("completion_email"):
+        log_suppressed("completion_email")
+        return suppressed_delivery_event(SIGNING_COMPLETION_EMAILS_SENT_EVENT, "completion_email")
+
     _log.info(
         "[signing-completion-email] start agreement_id=%s org_id=%s",
         aid,

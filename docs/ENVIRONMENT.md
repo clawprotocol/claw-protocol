@@ -107,8 +107,21 @@ Server-side review invites send only when `CLAW_REVIEW_DELIVERY_MODE` is `email`
 | `EMAIL_FROM` | Backend | Verified sender address in Resend (e.g. `LawDog <noreply@yourdomain.com>`) |
 | `CLAW_APP_PUBLIC_ORIGIN` | Backend | SPA origin for absolute review links (scheme + host, no trailing slash) |
 | `CLAW_REVIEW_DELIVERY_MODE` | Backend | `manual` (default), `email`, or `manual_and_email` |
+| `CLAW_AGREEMENT_DELIVERY_MODE` | Backend | Unset (default), `provider`, or `manual` |
 
-`GET /admin/runtime-summary` exposes `email_configured: true/false` (never the API key). Sends are non-fatal: `POST …/review-sent` succeeds even when Resend fails or email is not configured.
+`GET /admin/runtime-summary` exposes `email_configured: true/false` and `agreement_delivery_mode` (never the API key). Sends are non-fatal: `POST …/review-sent` succeeds even when Resend fails or email is not configured.
+
+### Agreement delivery mode
+
+`CLAW_AGREEMENT_DELIVERY_MODE` is the server-wide switch for every agreement communication. It is read only from the backend environment. Request bodies cannot change it.
+
+| Value | Behavior |
+|-------|----------|
+| Unset or blank | Current per-channel behavior. Reviewer mail still follows `CLAW_REVIEW_DELIVERY_MODE`. Signing, completion, and agreement webhooks send when their existing rules and credentials allow it. |
+| `provider` | Same as unset. It does not force a send. |
+| `manual` | No agreement email, completed-document message, or `agreement.*` webhook is queued, retried, or handed to a provider. Approval, signing links, signatures, receipts, snapshots, and PDFs continue. Provider credentials may stay configured. |
+
+`manual` overrides `CLAW_REVIEW_DELIVERY_MODE`, including `manual_and_email`. Channels covered: reviewer invitation and resend, owner review notification, reviews-complete notification, signing invitation and resend, completion and completed-document email, and agreement webhook delivery plus replay. A suppressed action is a successful manual result and is not eligible for later retry. An explicit value other than `manual` or `provider` is invalid: startup records a warning, and delivery refuses to send until the value is corrected. Production behavior stays unchanged until this variable is set.
 
 ## What must never be in frontend
 

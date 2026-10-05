@@ -8043,6 +8043,8 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
                 draft=email_draft,
                 org_id=resolve_subject_from_request(request),
             )
+            if isinstance(delivery_marker, dict) and delivery_marker.get("status") == "suppressed_manual":
+                delivery_marker = str(delivery_marker.get("at") or "").strip() or None
             if delivery_marker:
                 marked = next_draft.model_dump()
                 marked["review_invite_emails_sent_at"] = delivery_marker
@@ -9671,13 +9673,18 @@ def post_vs01_signer_complete(
                     completion_evidence_created = True
 
         if outcome.fully_executed:
-            from backend.services.vs01_signer_completion import vs01_completion_email_lock
+            from backend.services.vs01_signer_completion import (
+                completion_delivery_closed,
+                vs01_completion_email_lock,
+            )
 
             with vs01_completion_email_lock(aid):
                 reloaded = _load_or_404(aid)
                 reloaded_audit = list(reloaded.model_dump().get("audit_log") or [])
                 if completion_emails_already_sent(reloaded_audit):
                     completion_emails_sent = True
+                elif completion_delivery_closed(reloaded_audit):
+                    completion_emails_sent = False
                 else:
                     try:
                         from backend.services.email.signing_completion_delivery import (
@@ -9692,7 +9699,8 @@ def post_vs01_signer_complete(
                         if notify_audit:
                             fresh_for_email = _load_or_404(aid)
                             fresh_audit = list(fresh_for_email.model_dump().get("audit_log") or [])
-                            if not completion_emails_already_sent(fresh_audit):
+                            suppressed = str(notify_audit.get("status") or "") == "suppressed_manual"
+                            if not completion_delivery_closed(fresh_audit):
                                 email_audit = list(fresh_audit)
                                 email_audit.append(AuditEvent.model_validate(notify_audit).model_dump())
                                 next_email = _merge_agreement_draft(
@@ -9701,9 +9709,7 @@ def post_vs01_signer_complete(
                                     audit_log=email_audit,
                                 )
                                 _save_draft_sync(next_email.model_dump(), request)
-                                completion_emails_sent = True
-                            else:
-                                completion_emails_sent = True
+                            completion_emails_sent = not suppressed
                     except Exception:
                         logging.getLogger(__name__).exception(
                             "vs01_signing_completion_email_failed agreement_id=%s",
@@ -9799,6 +9805,7 @@ def post_vs01_ensure_signed_snapshot(agreement_id: str, request: Request) -> Dic
     from backend.services.vs01_fully_executed_snapshot import ensure_fully_executed_snapshot_on_draft
     from backend.services.vs01_signer_completion import (
         all_signers_signed_from_audit,
+        completion_delivery_closed,
         completion_emails_already_sent,
         vs01_completion_email_lock,
     )
@@ -9820,11 +9827,11 @@ def post_vs01_ensure_signed_snapshot(agreement_id: str, request: Request) -> Dic
         draft = next_draft
 
     completion_emails_sent = completion_emails_already_sent(draft.model_dump().get("audit_log") or [])
-    if ensured.snapshot_ready and not completion_emails_sent:
+    if ensured.snapshot_ready and not completion_delivery_closed(draft.model_dump().get("audit_log") or []):
         with vs01_completion_email_lock(aid):
             reloaded = _load_or_404(aid)
             reloaded_audit = list(reloaded.model_dump().get("audit_log") or [])
-            if not completion_emails_already_sent(reloaded_audit):
+            if not completion_delivery_closed(reloaded_audit):
                 try:
                     from backend.services.email.signing_completion_delivery import (
                         maybe_send_signing_completion_emails,
@@ -9838,7 +9845,8 @@ def post_vs01_ensure_signed_snapshot(agreement_id: str, request: Request) -> Dic
                     if notify_audit:
                         fresh_for_email = _load_or_404(aid)
                         fresh_audit = list(fresh_for_email.model_dump().get("audit_log") or [])
-                        if not completion_emails_already_sent(fresh_audit):
+                        suppressed = str(notify_audit.get("status") or "") == "suppressed_manual"
+                        if not completion_delivery_closed(fresh_audit):
                             email_audit = list(fresh_audit)
                             email_audit.append(AuditEvent.model_validate(notify_audit).model_dump())
                             next_email = _merge_agreement_draft(
@@ -9847,7 +9855,7 @@ def post_vs01_ensure_signed_snapshot(agreement_id: str, request: Request) -> Dic
                                 audit_log=email_audit,
                             )
                             _save_draft_sync(next_email.model_dump(), request)
-                            completion_emails_sent = True
+                        completion_emails_sent = not suppressed
                 except Exception:
                     logging.getLogger(__name__).exception(
                         "vs01_ensure_signed_snapshot_email_failed agreement_id=%s",

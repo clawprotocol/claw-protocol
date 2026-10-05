@@ -159,7 +159,7 @@ def signer_role_already_completed(audit: Any, signer_role_id: str) -> bool:
     return rid in completed_vs01_signer_role_ids(audit)
 
 
-def completion_emails_already_sent(audit: Any) -> bool:
+def _completion_email_events(audit: Any):
     from backend.services.email.signing_completion_delivery import (
         SIGNING_COMPLETION_EMAILS_SENT_EVENT,
     )
@@ -168,8 +168,17 @@ def completion_emails_already_sent(audit: Any) -> bool:
         if not isinstance(event, dict):
             continue
         if str(event.get("event_type") or "") == SIGNING_COMPLETION_EMAILS_SENT_EVENT:
-            return True
-    return False
+            yield event
+
+
+def completion_emails_already_sent(audit: Any) -> bool:
+    from backend.services.agreement_delivery_policy import delivery_event_is_suppressed
+
+    return any(not delivery_event_is_suppressed(event) for event in _completion_email_events(audit))
+
+
+def completion_delivery_closed(audit: Any) -> bool:
+    return any(True for _event in _completion_email_events(audit))
 
 
 def count_signature_completed_events(audit: Any) -> int:

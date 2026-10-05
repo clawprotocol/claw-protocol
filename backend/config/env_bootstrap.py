@@ -74,6 +74,14 @@ def collect_env_warnings() -> List[str]:
     if env not in ("local", "dev", "test", "staging", "production", "prod"):
         warnings.append(f"CLAW_ENVIRONMENT={env!r} is non-standard — prefer local|dev|test|staging|production.")
 
+    from backend.services.agreement_delivery_policy import agreement_delivery_mode_label
+
+    if agreement_delivery_mode_label() == "invalid":
+        warnings.append(
+            "CLAW_AGREEMENT_DELIVERY_MODE is invalid — agreement delivery refuses provider sends "
+            "until the value is unset, manual, or provider."
+        )
+
     return warnings
 
 

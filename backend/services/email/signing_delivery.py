@@ -51,6 +51,18 @@ def maybe_send_signing_invites_after_packet_prepared(
     aid = (agreement_id or "").strip()
     oid = (org_id or "").strip() or None
     revision = (packet_revision or "").strip() or None
+    from backend.services.agreement_delivery_policy import log_suppressed, suppressed_delivery_event, suppressed_manual
+
+    audit_log = draft.get("audit_log") or []
+    if aid and _signing_invites_already_sent(audit_log, revision):
+        return None
+    if aid and suppressed_manual("signing_invite"):
+        log_suppressed("signing_invite")
+        return suppressed_delivery_event(
+            SIGNING_INVITE_EMAILS_SENT_EVENT,
+            "signing_invite",
+            packet_revision=revision,
+        )
     commercial = commercial_mode_enforced()
 
     _log.info(
@@ -64,7 +76,6 @@ def maybe_send_signing_invites_after_packet_prepared(
     if not aid:
         return None
 
-    audit_log = draft.get("audit_log") or []
     if _signing_invites_already_sent(audit_log, revision):
         _log.info(
             "[signing-email-delivery] skipped agreement_id=%s org_id=%s skip_reason=already_sent "
@@ -288,6 +299,11 @@ def send_signing_invite_to_target(
     Never raises. Returns True when Resend accepted the send.
     """
     aid = (agreement_id or "").strip()
+    from backend.services.agreement_delivery_policy import log_suppressed, suppressed_manual
+
+    if aid and suppressed_manual("signing_resend"):
+        log_suppressed("signing_resend")
+        return True
     if not aid or not email_configured():
         return False
 

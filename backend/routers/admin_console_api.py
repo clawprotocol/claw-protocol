@@ -1338,15 +1338,23 @@ def admin_resend_delivery(org_id: str, delivery_id: str, body: ResendDeliveryBod
     ok = retry_delivery(org_id, delivery_id)
     if not ok:
         raise HTTPException(status_code=404, detail="delivery_not_found")
+    queued = ok != "suppressed_manual"
     audit_id = _audit(
         principal,
         action_type="resend_delivery",
         target_type="delivery",
         target_id=f"{org_id}:{delivery_id}",
         reason=(body.reason or "").strip(),
-        after={"queued": True},
+        after={"queued": queued, "delivery_status": "suppressed_manual" if not queued else "queued"},
     )
-    return {"ok": True, "queued": True, "audit_id": audit_id, "actor": principal.user_id}
+    return {
+        "ok": True,
+        "queued": queued,
+        "delivery_status": "suppressed_manual" if not queued else "queued",
+        "retry_eligible": queued,
+        "audit_id": audit_id,
+        "actor": principal.user_id,
+    }
 
 
 @router.get("/affiliates")

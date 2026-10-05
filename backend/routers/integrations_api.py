@@ -112,6 +112,13 @@ def retry_webhook_delivery(org_id: str, delivery_id: str, request: Request) -> D
     ok = retry_delivery(org_id, delivery_id)
     if not ok:
         raise HTTPException(status_code=404, detail="delivery_not_found")
+    if ok == "suppressed_manual":
+        return {
+            "ok": True,
+            "queued": False,
+            "delivery_status": "suppressed_manual",
+            "retry_eligible": False,
+        }
     return {"ok": True, "queued": True}
 
 

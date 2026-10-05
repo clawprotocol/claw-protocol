@@ -183,6 +183,24 @@ def resend_recipient_invite(
     if not email:
         raise HTTPException(status_code=400, detail="recipient_email_missing")
 
+    from backend.services.agreement_delivery_policy import log_suppressed, suppressed_manual
+
+    resend_channel = "review_resend" if ph == "review" else "signing_resend"
+    if suppressed_manual(resend_channel):
+        log_suppressed(resend_channel)
+        return draft, {
+            "sent_invite": False,
+            "delivery_status": "suppressed_manual",
+            "status": "suppressed_manual",
+            "retry_eligible": False,
+            "retryable": False,
+            "code": "suppressed_manual",
+            "preserved_active": True,
+            "replacement_activated": False,
+            "persisted": False,
+            "needs_final_cas": False,
+        }
+
     now = _utc_now_iso()
     next_draft = copy.deepcopy(draft)
     audit_log = list(next_draft.get("audit_log") or [])

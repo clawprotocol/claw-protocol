@@ -50,7 +50,7 @@ def maybe_send_review_invites_after_review_sent(
     agreement_id: str,
     draft: Dict[str, Any],
     org_id: str | None = None,
-) -> str | None:
+) -> str | Dict[str, Any] | None:
     """
     Send review invites when delivery mode allows and Resend is configured.
 
@@ -61,6 +61,11 @@ def maybe_send_review_invites_after_review_sent(
     """
     aid = (agreement_id or "").strip()
     oid = (org_id or "").strip() or None
+    from backend.services.agreement_delivery_policy import log_suppressed, suppressed_delivery_event, suppressed_manual
+
+    if suppressed_manual("review_invite"):
+        log_suppressed("review_invite")
+        return suppressed_delivery_event("review_invite_emails_suppressed", "review_invite")
     mode = review_delivery_mode()
     resend_key_present = bool(resend_api_key())
     email_from_present = bool(email_from())
@@ -305,6 +310,16 @@ def maybe_notify_owner_after_reviewer_approval(
         )
         return None
 
+    from backend.services.agreement_delivery_policy import log_suppressed, suppressed_delivery_event, suppressed_manual
+
+    if suppressed_manual("owner_review_notification"):
+        log_suppressed("owner_review_notification")
+        return suppressed_delivery_event(
+            OWNER_REVIEW_APPROVAL_NOTIFIED_EVENT,
+            "owner_review_notification",
+            participant_id=participant_id,
+        )
+
     audit_log = draft.get("audit_log") or []
     if _owner_notification_already_sent(audit_log, participant_id):
         _log.info(
@@ -442,6 +457,14 @@ def maybe_notify_counterparties_all_reviews_complete(
     """
     aid = (agreement_id or "").strip()
     oid = (org_id or "").strip() or None
+    from backend.services.agreement_delivery_policy import log_suppressed, suppressed_delivery_event, suppressed_manual
+
+    if aid and suppressed_manual("counterparty_review_notification"):
+        log_suppressed("counterparty_review_notification")
+        return suppressed_delivery_event(
+            COUNTERPARTY_REVIEWS_COMPLETE_NOTIFIED_EVENT,
+            "counterparty_review_notification",
+        )
     if not aid or not _all_required_review_parties_approved(draft):
         return None
 
@@ -897,6 +920,12 @@ def send_review_invite_to_participant(
     pid = (participant_id or "").strip()
     if not aid or not pid:
         return False, None
+
+    from backend.services.agreement_delivery_policy import log_suppressed, suppressed_manual
+
+    if suppressed_manual("review_resend"):
+        log_suppressed("review_resend")
+        return True, None
 
     mode = review_delivery_mode()
     if mode not in ("email", "manual_and_email") or not email_configured():
